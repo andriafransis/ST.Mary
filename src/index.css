@@ -1,0 +1,28 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap');
+@import "tailwindcss";
+
+html, body {
+  font-family: 'Cairo', system-ui, sans-serif;
+  background-color: #f6f4ef;
+  color: #1f2429;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* إخفاء السكرول بار في شريط التابات على الموبايل مع بقاء السحب شغال */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* منع تكبير الشاشة التلقائي على الآيفون عند الضغط على الحقول */
+@media (max-width: 640px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
