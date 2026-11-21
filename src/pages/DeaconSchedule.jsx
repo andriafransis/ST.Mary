@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLogger';
 import { toCopticDate, getCopticMonthAndDay, COPTIC_MONTHS } from '../utils/copticDate';
 import AgpeyaPanel from '../components/AgpeyaPanel';
-import { Calendar, Plus, Trash2, Edit3, BookOpen, HeartHandshake, Save, ArrowRight, Church, ScrollText, Upload } from 'lucide-react';
+import { Calendar, Plus, Trash2, Edit3, BookOpen, HeartHandshake, Save, ArrowRight, Church, ScrollText, Upload, BookMarked } from 'lucide-react';
 
 const PRAYER_HOURS = [
   'صلاة عشية', 'صلاة باكر', 'الساعة الثالثة', 'الساعة السادسة', 'القداس الإلهي',
@@ -21,6 +21,10 @@ const DEFAULT_LITURGY_BOOKS = [
   { key: 'mass_basil', title: '⛪ القداس الباسيلي', category: 'القداس الإلهي' },
   { key: 'mass_gregory', title: '⛪ القداس الغريغوري', category: 'القداس الإلهي' },
   { key: 'mass_cyril', title: '⛪ القداس الكيرلسي', category: 'القداس الإلهي' },
+  { key: 'euchologion_main', title: '📘 صلوات الخولاجي العامة', category: 'كتاب الخولاجي' },
+  { key: 'euchologion_litanies', title: '🙏 الأواشي والطلبات', category: 'كتاب الخولاجي' },
+  { key: 'euchologion_absolutions', title: '✝ التحاليل وصلوات الكهنوت', category: 'كتاب الخولاجي' },
+  { key: 'euchologion_incense', title: '🕯️ رفع بخور باكر وعشية', category: 'كتاب الخولاجي' },
   { key: 'ritual_funeral', title: '🕯️ الطقس الحزايني (التجنيز)', category: 'الطقوس الكنسية' },
   { key: 'ritual_third_day', title: '🕊️ طقس صلاة الثالث', category: 'الطقوس الكنسية' },
   { key: 'ritual_laqqan', title: '💧 طقس صلوات اللقان', category: 'الطقوس الكنسية' },
@@ -28,7 +32,7 @@ const DEFAULT_LITURGY_BOOKS = [
 ];
 
 export default function DeaconSchedule({ deacons = [], currentUser, canEdit = false }) {
-  // 'hub' | 'schedule' | 'katameros' | 'agpeya' | 'liturgy' | 'rituals' | 'visitations'
+  // 'hub' | 'schedule' | 'katameros' | 'agpeya' | 'liturgy' | 'euchologion' | 'rituals' | 'visitations'
   const [activeCard, setActiveCard] = useState('hub');
   const [schedules, setSchedules] = useState([]);
   const [visitations, setVisitations] = useState([]);
@@ -83,6 +87,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
   const openCard = (cardId, label) => {
     setActiveCard(cardId);
     if (cardId === 'liturgy') setSelectedBookKey('mass_basil');
+    if (cardId === 'euchologion') setSelectedBookKey('euchologion_main');
     if (cardId === 'rituals') setSelectedBookKey('ritual_funeral');
     if (currentUser) {
       logActivity({
@@ -264,6 +269,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
       { id: 'agpeya', icon: '🙏', title: 'الأجبية المقدسة', desc: 'صلوات السواعي السبع وصلاة الستار والمقدمة', count: 'قراءة', color: 'border-blue-200 bg-white' },
       { id: 'katameros', icon: '📖', title: 'القطمارس السنوي', desc: 'قراءات الـ 13 شهر قبطي والسنكسار والإنجيل', count: `${toCopticDate(todayISO)}`, color: 'border-amber-300 bg-white' },
       { id: 'liturgy', icon: '⛪', title: 'القداس الإلهي', desc: 'محتوى القداس الباسيلي والغريغوري والكيرلسي والقراءات', count: 'القداس', color: 'border-emerald-200 bg-white' },
+      { id: 'euchologion', icon: '📘', title: 'كتاب الخولاجي', desc: 'صلوات الخولاجي والأواشي والتحاليل ورفع البخور', count: 'الخولاجي', color: 'border-sky-200 bg-white' },
       { id: 'rituals', icon: '🕯️', title: 'الطقوس الكنسية الخاصة', desc: 'الطقس الحزايني، طقس صلوات اللقان، صلاة الثالث، والمعمودية', count: 'الطقوس', color: 'border-purple-200 bg-white' }
     ];
     if (canEdit) {
@@ -317,17 +323,28 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
   }
 
   // ==============================================================
-  // كارت القداس الإلهي أو الطقوس الكنسية (الحزايني، اللقان، الثالث، المعمودية)
+  // كارت القداس الإلهي أو كتاب الخولاجي أو الطقوس الكنسية (الحزايني، اللقان، الثالث، المعمودية)
   // ==============================================================
-  if (activeCard === 'liturgy' || activeCard === 'rituals') {
-    const filteredBooks = DEFAULT_LITURGY_BOOKS.filter(b =>
-      activeCard === 'liturgy' ? b.category === 'القداس الإلهي' : b.category === 'الطقوس الكنسية'
-    );
+  if (activeCard === 'liturgy' || activeCard === 'euchologion' || activeCard === 'rituals') {
+    const targetCategory =
+      activeCard === 'liturgy'
+        ? 'القداس الإلهي'
+        : activeCard === 'euchologion'
+          ? 'كتاب الخولاجي'
+          : 'الطقوس الكنسية';
+    const filteredBooks = DEFAULT_LITURGY_BOOKS.filter(b => b.category === targetCategory);
     const activeBookMeta = DEFAULT_LITURGY_BOOKS.find(b => b.key === selectedBookKey) || filteredBooks[0];
+
+    const topBarTitle =
+      activeCard === 'liturgy'
+        ? '⛪ القداس الإلهي بمحتواه وقراءاته'
+        : activeCard === 'euchologion'
+          ? '📘 كتاب الخولاجي (الصلوات والأواشي والتحاليل)'
+          : '🕯️ الطقوس الكنسية (الحزايني، اللقان، الثالث، المعمودية)';
 
     return (
       <div className="space-y-4 text-xs md:text-sm" dir="rtl">
-        {renderTopBar(activeCard === 'liturgy' ? '⛪ القداس الإلهي بمحتواه وقراءاته' : '🕯️ الطقوس الكنسية (الحزايني، اللقان، الثالث، المعمودية)')}
+        {renderTopBar(topBarTitle)}
 
         <div className="bg-white p-4 rounded-3xl border shadow-sm space-y-3">
           <div className="flex flex-wrap justify-between items-center gap-2">
@@ -377,7 +394,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
           <form onSubmit={handleSaveBook} className="bg-white p-5 rounded-3xl border shadow-sm space-y-3 font-bold">
             <div className="flex justify-between items-center border-b pb-2">
               <strong className="text-base text-[#7a1c24] flex items-center gap-1.5">
-                {activeCard === 'liturgy' ? <Church size={18} /> : <ScrollText size={18} />} {activeBookMeta?.title}
+                {activeCard === 'liturgy' ? <Church size={18} /> : activeCard === 'euchologion' ? <BookMarked size={18} /> : <ScrollText size={18} />} {activeBookMeta?.title}
               </strong>
               <button type="submit" disabled={savingBook} className="px-5 py-2 bg-[#7a1c24] text-white rounded-xl flex items-center gap-1.5 cursor-pointer">
                 <Save size={15} /> {savingBook ? 'جاري الحفظ...' : 'حفظ في الداتابيز'}
