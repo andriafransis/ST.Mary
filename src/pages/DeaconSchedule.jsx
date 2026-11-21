@@ -21,10 +21,14 @@ const DEFAULT_LITURGY_BOOKS = [
   { key: 'mass_basil', title: '⛪ القداس الباسيلي', category: 'القداس الإلهي' },
   { key: 'mass_gregory', title: '⛪ القداس الغريغوري', category: 'القداس الإلهي' },
   { key: 'mass_cyril', title: '⛪ القداس الكيرلسي', category: 'القداس الإلهي' },
-  { key: 'euchologion_main', title: '📘 صلوات الخولاجي العامة', category: 'كتاب الخولاجي' },
-  { key: 'euchologion_litanies', title: '🙏 الأواشي والطلبات', category: 'كتاب الخولاجي' },
-  { key: 'euchologion_absolutions', title: '✝ التحاليل وصلوات الكهنوت', category: 'كتاب الخولاجي' },
-  { key: 'euchologion_incense', title: '🕯️ رفع بخور باكر وعشية', category: 'كتاب الخولاجي' },
+  { key: 'euchologion_vespers_matins', title: '🕯️ رفع بخور عشية وباكر', category: 'كتاب الخولاجي' },
+  { key: 'euchologion_absolutions', title: '✝ التحاليل الثلاثة', category: 'كتاب الخولاجي' },
+  { key: 'euchologion_litanies', title: '🙏 الأواشي الكبار والصغار', category: 'كتاب الخولاجي' },
+  { key: 'euchologion_basil', title: '⛪ القداس الباسيلي', category: 'كتاب الخولاجي' },
+  { key: 'euchologion_gregory', title: '⛪ القداس الغريغوري', category: 'كتاب الخولاجي' },
+  { key: 'euchologion_cyril', title: '⛪ القداس الكيرلسي', category: 'كتاب الخولاجي' },
+  { key: 'euchologion_commemorations', title: '📜 المجمع والطلبات والترحمات', category: 'كتاب الخولاجي' },
+  { key: 'euchologion_blessings', title: '🕊️ البركات والختام', category: 'كتاب الخولاجي' },
   { key: 'ritual_funeral', title: '🕯️ الطقس الحزايني (التجنيز)', category: 'الطقوس الكنسية' },
   { key: 'ritual_third_day', title: '🕊️ طقس صلاة الثالث', category: 'الطقوس الكنسية' },
   { key: 'ritual_laqqan', title: '💧 طقس صلوات اللقان', category: 'الطقوس الكنسية' },
@@ -87,7 +91,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
   const openCard = (cardId, label) => {
     setActiveCard(cardId);
     if (cardId === 'liturgy') setSelectedBookKey('mass_basil');
-    if (cardId === 'euchologion') setSelectedBookKey('euchologion_main');
+    if (cardId === 'euchologion') setSelectedBookKey('euchologion_vespers_matins');
     if (cardId === 'rituals') setSelectedBookKey('ritual_funeral');
     if (currentUser) {
       logActivity({
@@ -269,7 +273,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
       { id: 'agpeya', icon: '🙏', title: 'الأجبية المقدسة', desc: 'صلوات السواعي السبع وصلاة الستار والمقدمة', count: 'قراءة', color: 'border-blue-200 bg-white' },
       { id: 'katameros', icon: '📖', title: 'القطمارس السنوي', desc: 'قراءات الـ 13 شهر قبطي والسنكسار والإنجيل', count: `${toCopticDate(todayISO)}`, color: 'border-amber-300 bg-white' },
       { id: 'liturgy', icon: '⛪', title: 'القداس الإلهي', desc: 'محتوى القداس الباسيلي والغريغوري والكيرلسي والقراءات', count: 'القداس', color: 'border-emerald-200 bg-white' },
-      { id: 'euchologion', icon: '📘', title: 'كتاب الخولاجي', desc: 'صلوات الخولاجي والأواشي والتحاليل ورفع البخور', count: 'الخولاجي', color: 'border-sky-200 bg-white' },
+      { id: 'euchologion', icon: '📘', title: 'كتاب الخولاجي', desc: 'رفع البخور والتحاليل والأواشي والقداسات والطلبات والبركات', count: 'الخولاجي', color: 'border-sky-200 bg-white' },
       { id: 'rituals', icon: '🕯️', title: 'الطقوس الكنسية الخاصة', desc: 'الطقس الحزايني، طقس صلوات اللقان، صلاة الثالث، والمعمودية', count: 'الطقوس', color: 'border-purple-200 bg-white' }
     ];
     if (canEdit) {
@@ -339,7 +343,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
       activeCard === 'liturgy'
         ? '⛪ القداس الإلهي بمحتواه وقراءاته'
         : activeCard === 'euchologion'
-          ? '📘 كتاب الخولاجي (الصلوات والأواشي والتحاليل)'
+          ? '📘 كتاب الخولاجي (ترتيب الصلوات والقداسات والطلبات)'
           : '🕯️ الطقوس الكنسية (الحزايني، اللقان، الثالث، المعمودية)';
 
     return (
