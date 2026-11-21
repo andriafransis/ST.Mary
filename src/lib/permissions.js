@@ -1,6 +1,7 @@
 export const SCREEN_ORDER = [
   'admin_panel', 'priest_panel', 'servant_panel', 'member_panel', 'parent_panel',
-  'trips_office', 'approvals', 'deacons', 'certs', 'public_page', 'permissions'
+  'edu_center', 'joseph_arimathea', 'trips_office', 'approvals', 'deacons', 'certs',
+  'public_page', 'public_editor', 'permissions'
 ];
 
 export const SCREEN_LABELS = {
@@ -9,6 +10,8 @@ export const SCREEN_LABELS = {
   servant_panel: 'شاشة الخادم',
   member_panel: 'شاشة المخدوم',
   parent_panel: 'شاشة ولي الأمر',
+  edu_center: 'المركز التعليمي',
+  joseph_arimathea: 'خدمة يوسف الرامي',
   trips_office: 'مكتب الرحلات العامة',
   approvals: 'طلبات الانضمام',
   deacons: 'جدول الشمامسة',
@@ -18,7 +21,7 @@ export const SCREEN_LABELS = {
   permissions: 'الصلاحيات'
 };
 
-export const ALL_SCREENS = [...SCREEN_ORDER, 'public_editor'];
+export const ALL_SCREENS = [...SCREEN_ORDER];
 
 export const ALL_AVAILABLE_SCREENS = [
   { id: 'public_page', label: '1) 🌐 صفحة الكنيسة العامة' },
@@ -52,7 +55,7 @@ export const ROLES = [
 
 export const DEFAULT_ROLE_SCREENS = {
   admin: { screens: ALL_SCREENS, def: 'admin_panel' },
-  priest: { screens: ['priest_panel', 'trips_office', 'approvals', 'public_page', 'public_editor', 'deacons', 'certs'], def: 'priest_panel' },
+  priest: { screens: ['priest_panel', 'trips_office', 'approvals', 'public_page', 'public_editor', 'deacons', 'certs', 'edu_center', 'joseph_arimathea'], def: 'priest_panel' },
   head_servant: { screens: ['admin_panel', 'trips_office', 'approvals', 'public_page'], def: 'admin_panel' },
   vice_head_servant: { screens: ['admin_panel', 'approvals', 'public_page'], def: 'admin_panel' },
   servant: { screens: ['servant_panel', 'public_page'], def: 'servant_panel' },

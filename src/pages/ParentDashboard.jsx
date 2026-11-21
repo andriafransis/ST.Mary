@@ -4,7 +4,6 @@ import {
   MapPin, School, Search, UserCheck, Sparkles, X, Check, Unlink, RotateCcw
 } from 'lucide-react';
 
-// توحيد الحروف العربية والأسماء المركبة (عبد الملاك = عبدالملاك، أ/إ/آ = ا، ة = ه، ى = ي)
 const normalizeArabic = (str = '') =>
   String(str)
     .trim()
@@ -16,14 +15,12 @@ const normalizeArabic = (str = '') =>
     .replace(/\b(عبد|ابو|ام|بن|بنت)\s+/g, '$1')
     .replace(/\s+/g, ' ');
 
-// توحيد أرقام التليفون
 const normalizePhone = (phone = '') => {
   const digits = String(phone).replace(/\D/g, '');
   if (digits.startsWith('20') && digits.length === 12) return '0' + digits.slice(2);
   return digits;
 };
 
-// استخراج كلمات الاسم الكامل سواء من full_name أو من الأعمدة المقسمة (الأول/الثاني/الثالث/الرابع)
 const getNameTokens = (user) => {
   if (!user) return [];
   const combinedSplit = [user.first_name, user.second_name, user.third_name, user.fourth_name]
@@ -34,27 +31,37 @@ const getNameTokens = (user) => {
   return normalizeArabic(source).split(' ').filter(Boolean);
 };
 
-// فحص التطابق التلقائي بين ولي الأمر والابن
-const getAutoMatchReason = (parent, candidate) => {
+const detectParentIsMother = (parent) => {
+  if (!parent) return false;
+  if (parent.parent_type === 'mother' || parent.permissions?.parent_type === 'mother') return true;
+  if (parent.parent_type === 'father' || parent.permissions?.parent_type === 'father') return false;
+  if (parent.family_role === 'أم' || parent.family_role === 'والدة') return true;
+  const firstToken = normalizeArabic(parent.first_name || getNameTokens(parent)[0] || '');
+  return ['مدام', 'ام', 'مريم', 'ماري', 'ايريني', 'ايزيس', 'هناء', 'سوزان', 'ناهد', 'نجلاء', 'داليا', 'مونيكا', 'كريستين', 'فيفيان', 'نادية'].includes(firstToken);
+};
+
+const getAutoMatchReason = (parent, candidate, isMother) => {
   if (!parent || !candidate || candidate.id === parent.id) return null;
 
-  // 1) مطابقة رقم التليفون
-  const pPhones = [parent.phone, parent.spouse_phone]
-    .map(normalizePhone)
-    .filter(p => p.length >= 8);
-
+  const pOwnPhone = normalizePhone(parent.phone);
+  const pSpousePhone = normalizePhone(parent.spouse_phone);
   const cFatherPhone = normalizePhone(candidate.father_phone);
   const cMotherPhone = normalizePhone(candidate.mother_phone);
   const cOwnPhone = normalizePhone(candidate.phone);
 
-  if (pPhones.some(p => (cFatherPhone && p === cFatherPhone) || (cMotherPhone && p === cMotherPhone))) {
-    return 'تطابق رقم تليفون ولي الأمر';
+  if (isMother) {
+    if (pOwnPhone && cMotherPhone && pOwnPhone === cMotherPhone) return 'تطابق رقم تليفون الأم';
+    if (pSpousePhone && cFatherPhone && pSpousePhone === cFatherPhone) return 'تطابق رقم تليفون الأب';
+  } else {
+    if (pOwnPhone && cFatherPhone && pOwnPhone === cFatherPhone) return 'تطابق رقم تليفون الأب';
+    if (pSpousePhone && cMotherPhone && pSpousePhone === cMotherPhone) return 'تطابق رقم تليفون الأم';
   }
-  if (pPhones.some(p => cOwnPhone && p === cOwnPhone)) {
+
+  const allParentPhones = [pOwnPhone, pSpousePhone].filter(p => p.length >= 8);
+  if (allParentPhones.some(p => cOwnPhone && p === cOwnPhone)) {
     return 'تطابق رقم التليفون المسجل';
   }
 
-  // 2) مطابقة الاسم (الأب = الاسم الثاني والثالث للابن، أو مطابق لـ father_full_name)
   const pTokens = getNameTokens(parent);
   if (pTokens.length === 0) return null;
   const pName = pTokens.join(' ');
@@ -65,35 +72,40 @@ const getAutoMatchReason = (parent, candidate) => {
   const cThird = normalizeArabic(candidate.third_name || cTokens[2] || '');
   const cFourth = normalizeArabic(candidate.fourth_name || cTokens[3] || '');
 
-  // النسب اللي بعد الاسم الأول للابن (يعني من أول اسم الأب)
-  const cLineageTokens = cTokens.length > 1
-    ? cTokens.slice(1)
-    : [cSecond, cThird, cFourth].filter(Boolean);
-  const cLineageStr = cLineageTokens.join(' ');
-
   const cFather = normalizeArabic(candidate.father_full_name);
   const cMother = normalizeArabic(candidate.mother_full_name);
 
-  if (cFather === pName || cMother === pName) {
-    return 'تطابق اسم الأب/الأم بالكامل';
-  }
+  if (isMother) {
+    if (cMother && (cMother === pName || (pTokens.length >= 2 && cMother.startsWith(pTokens.slice(0, 2).join(' '))))) {
+      return 'تطابق اسم الأم المسجل للابن';
+    }
+    const spouseNorm = normalizeArabic(parent.spouse_name);
+    if (spouseNorm && cFather && (cFather === spouseNorm || cFather.startsWith(spouseNorm))) {
+      return 'تطابق اسم الأب/الزوج المسجل';
+    }
+  } else {
+    if (cFather && (cFather === pName || (pTokens.length >= 2 && cFather.startsWith(pTokens.slice(0, 2).join(' '))))) {
+      return 'تطابق اسم الأب بالكامل';
+    }
 
-  if (pTokens.length >= 2) {
-    const pFirstTwo = pTokens.slice(0, 2).join(' ');
-    if ((cFather && cFather.startsWith(pFirstTwo)) || (cMother && cMother.startsWith(pFirstTwo))) {
-      return 'تطابق اسم الأب/الأم';
-    }
-    // الاسم الثاني + الثالث للابن يطابق الاسم الأول + الثاني للأب (مثال: الابن [أندريا فرانسيس جاد] والأب [فرانسيس جاد عبدالملاك])
-    if (cLineageTokens.length >= 2 && cLineageTokens[0] === pTokens[0] && cLineageTokens[1] === pTokens[1]) {
-      return `تطابق نسب الابن (${cFirst} ← ${pTokens[0]} ${pTokens[1]})`;
-    }
-    if (cLineageStr && (cLineageStr === pName || pName.startsWith(cLineageStr) || cLineageStr.startsWith(pFirstTwo))) {
-      return 'تطابق الاسم الرباعي تحت اسم الأب';
-    }
-  } else if (pTokens.length === 1 && pTokens[0].length >= 3) {
-    const single = pTokens[0];
-    if (cSecond === single || cFather.split(' ')[0] === single || cMother.split(' ')[0] === single) {
-      return `تطابق الاسم الثاني للابن مع (${single})`;
+    const cLineageTokens = cTokens.length > 1
+      ? cTokens.slice(1)
+      : [cSecond, cThird, cFourth].filter(Boolean);
+    const cLineageStr = cLineageTokens.join(' ');
+
+    if (pTokens.length >= 2) {
+      const pFirstTwo = pTokens.slice(0, 2).join(' ');
+      if (cLineageTokens.length >= 2 && cLineageTokens[0] === pTokens[0] && cLineageTokens[1] === pTokens[1]) {
+        return `تطابق نسب الابن (${cFirst} ← ${pTokens[0]} ${pTokens[1]})`;
+      }
+      if (cLineageStr && (cLineageStr === pName || pName.startsWith(cLineageStr) || cLineageStr.startsWith(pFirstTwo))) {
+        return 'تطابق الاسم الرباعي تحت اسم الأب';
+      }
+    } else if (pTokens.length === 1 && pTokens[0].length >= 3) {
+      const single = pTokens[0];
+      if (cSecond === single || cFather.split(' ')[0] === single) {
+        return `تطابق الاسم الثاني للابن مع (${single})`;
+      }
     }
   }
 
@@ -105,7 +117,6 @@ const getAutoMatchReason = (parent, candidate) => {
   return null;
 };
 
-// فحص هل قائمة كلمات بتظهر بالترتيب جوه قائمة تانية
 const tokensMatchSubsequence = (targetTokens, queryTokens) => {
   if (queryTokens.length === 0 || targetTokens.length === 0) return false;
   let qi = 0;
@@ -125,9 +136,11 @@ export default function ParentDashboard({
   spiritualNotes = [],
   events = [],
   services = [],
-  onLinkChild
+  onLinkChild,
+  canManageLinks = true
 }) {
   const curYear = new Date().getFullYear();
+  const isMother = useMemo(() => detectParentIsMother(parent), [parent]);
   const dismissedStorageKey = `parent_dismissed_children_${parent.id}`;
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -144,24 +157,21 @@ export default function ParentDashboard({
   const linkedIds = useMemo(() => new Set(childrenList.map(c => c.id)), [childrenList]);
   const existingUserIds = useMemo(() => new Set(allUsers.map(u => u.id)), [allUsers]);
 
-  // مرشحو الربط: كل الأعضاء/الشباب غير الأدمن والكهنة وأولياء الأمور
   const candidatePool = useMemo(
     () => allUsers.filter(u => u.id !== parent.id && !['admin', 'priest', 'parent'].includes(u.role)),
     [allUsers, parent.id]
   );
 
-  // 1) الاقتراحات التلقائية (تطابق أوتوماتيك مع اسم/رقم ولي الأمر)
   const autoSuggestions = useMemo(() => {
     return candidatePool
       .filter(u => {
         const hasValidOtherParent = u.parent_id && u.parent_id !== parent.id && existingUserIds.has(u.parent_id);
         return !linkedIds.has(u.id) && !hasValidOtherParent && !dismissedIds.includes(u.id);
       })
-      .map(u => ({ user: u, reason: getAutoMatchReason(parent, u) }))
+      .map(u => ({ user: u, reason: getAutoMatchReason(parent, u, isMother) }))
       .filter(item => Boolean(item.reason));
-  }, [candidatePool, linkedIds, existingUserIds, dismissedIds, parent]);
+  }, [candidatePool, linkedIds, existingUserIds, dismissedIds, parent, isMother]);
 
-  // 2) نتائج البحث الذكي (يبحث في الاسم المقسم والمركب واسم الأب والأم والتليفون)
   const searchResults = useMemo(() => {
     const raw = searchQuery.trim();
     if (raw.length < 2) return [];
@@ -178,7 +188,6 @@ export default function ParentDashboard({
         const cMotherStr = normalizeArabic(u.mother_full_name);
         const cCombined = `${cFullStr} ${cFatherStr} ${cMotherStr} ${normalizeArabic(u.username)}`;
 
-        // تطابق مباشر أو تطابق كلمات متتالية أو أول كلمتين من اسم الأب (عشان لو الابن اسمه 3 مقاطع والأب كتب 4)
         const directMatch = cCombined.includes(qNorm);
         const allTokensPresent = qTokens.length > 0 && qTokens.every(t => cCombined.includes(t));
         const fatherPrefixMatch =
@@ -199,7 +208,7 @@ export default function ParentDashboard({
   }, [searchQuery, candidatePool, linkedIds]);
 
   const handleConfirmLink = async (child) => {
-    if (!onLinkChild) return;
+    if (!onLinkChild || !canManageLinks) return;
     setBusyChildId(child.id);
     try {
       const ok = await onLinkChild(child.id, true);
@@ -210,7 +219,7 @@ export default function ParentDashboard({
   };
 
   const handleUnlink = async (child) => {
-    if (!onLinkChild) return;
+    if (!onLinkChild || !canManageLinks) return;
     if (!confirm(`هل تريد إلغاء ربط (${child.full_name}) من حسابك؟`)) return;
     setBusyChildId(child.id);
     try {
@@ -259,18 +268,27 @@ export default function ParentDashboard({
     <div className="space-y-4 text-xs" dir="rtl">
       {/* بانر الترحيب */}
       <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md">
-        <h2 className="text-base sm:text-xl font-black text-amber-200">أهلاً بحضرتك، {parent.full_name}</h2>
-        <p className="text-xs text-white/85 mt-1">متابعة الأبناء في الكنيسة: الحضور السنوي، الاعتراف، وملاحظات الأب الكاهن</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-base sm:text-xl font-black text-amber-200">أهلاً بحضرتك، {parent.full_name}</h2>
+          <span className="px-2.5 py-0.5 rounded-full bg-white/15 text-amber-100 text-[11px] font-black">
+            {isMother ? '👩 حساب ولي الأمر: الأم' : '👨 حساب ولي الأمر: الأب'}
+          </span>
+        </div>
+        <p className="text-xs text-white/85 mt-1">
+          متابعة الأبناء في الكنيسة: الحضور السنوي، الاعتراف، وملاحظات الأب الكاهن • الأبناء المربوطون حالياً: <strong>{childrenList.length}</strong>
+        </p>
       </div>
 
-      {/* قسم الاقتراحات التلقائية (يسأل ولي الأمر للتأكيد) */}
-      {autoSuggestions.length > 0 && (
+      {/* قسم الاقتراحات التلقائية */}
+      {canManageLinks && autoSuggestions.length > 0 && (
         <div className="bg-amber-50 border-2 border-amber-300 p-4 sm:p-5 rounded-3xl shadow-sm space-y-3">
           <div className="flex items-center gap-2 text-amber-950">
             <Sparkles size={18} className="text-[#7a1c24] shrink-0" />
             <div>
-              <h3 className="text-sm font-black">تم العثور على أبناء تحت اسمك تلقائياً — هل هم أبناؤك؟</h3>
-              <p className="text-[11px] text-amber-900/80">اضغط «نعم، ده ابني» لسحب بياناته وربطها بحسابك وإظهار تقاريره فوراً.</p>
+              <h3 className="text-sm font-black">تم العثور على أبناء مطابقين لبياناتك تلقائياً — هل هم أبناؤك؟</h3>
+              <p className="text-[11px] text-amber-900/80">
+                اضغط «نعم، ده ابني» لربط الحساب القائم بحسابك مباشرة (الطفل الأول والثاني وكل ابن) دون إنشاء حسابات مكررة.
+              </p>
             </div>
           </div>
 
@@ -288,8 +306,12 @@ export default function ParentDashboard({
                     المرحلة: {child.detailed_stage || child.service_stage || '—'}
                     {child.assigned_class ? ` • فصل: ${child.assigned_class}` : ''}
                   </p>
-                  {child.father_full_name && (
-                    <p className="text-[11px] text-gray-500">الأب المسجل: {child.father_full_name}</p>
+                  {(child.father_full_name || child.mother_full_name) && (
+                    <p className="text-[11px] text-gray-500">
+                      {child.father_full_name ? `الأب: ${child.father_full_name}` : ''}
+                      {child.father_full_name && child.mother_full_name ? ' • ' : ''}
+                      {child.mother_full_name ? `الأم: ${child.mother_full_name}` : ''}
+                    </p>
                   )}
                 </div>
 
@@ -300,7 +322,7 @@ export default function ParentDashboard({
                     onClick={() => handleConfirmLink(child)}
                     className="py-2 px-3 bg-green-700 hover:bg-green-800 text-white rounded-xl font-black flex items-center justify-center gap-1 cursor-pointer transition"
                   >
-                    <Check size={14} /> {busyChildId === child.id ? 'جاري السحب...' : 'نعم، ده ابني'}
+                    <Check size={14} /> {busyChildId === child.id ? 'جاري الربط...' : 'نعم، ده ابني'}
                   </button>
                   <button
                     type="button"
@@ -316,95 +338,101 @@ export default function ParentDashboard({
         </div>
       )}
 
-      {/* البحث الذكي لربط الأبناء يدوياً بالاسم أو التليفون */}
-      <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
-        <div className="flex flex-wrap justify-between items-center gap-2">
-          <div className="flex items-center gap-2">
-            <UserCheck size={17} className="text-[#7a1c24] shrink-0" />
-            <div>
-              <h3 className="font-black text-sm text-[#7a1c24]">البحث عن الأبناء وسحبهم لحسابك</h3>
-              <p className="text-[11px] text-gray-500">
-                ابحث باسم الابن (أندريا) أو باسمك (فرانسيس جاد...) أو برقم التليفون وهيظهرلك كل الحالات المطابقة.
-              </p>
-            </div>
-          </div>
-
-          {dismissedIds.length > 0 && (
-            <button
-              type="button"
-              onClick={handleResetDismissed}
-              className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-[11px] flex items-center gap-1 cursor-pointer"
-            >
-              <RotateCcw size={12} /> إظهار المقترحات المخفية
-            </button>
-          )}
-        </div>
-
-        <div className="relative">
-          <Search size={16} className="absolute right-3.5 top-3 text-gray-400" />
-          <input
-            type="text"
-            placeholder="ابحث بـ: فرانسيس جاد / أندريا / رقم التليفون..."
-            className="w-full pr-10 pl-9 py-2.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl text-xs outline-none focus:border-[#7a1c24] focus:bg-white transition"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery('')}
-              className="absolute left-3 top-2.5 text-gray-400 hover:text-gray-700 cursor-pointer"
-            >
-              <X size={16} />
-            </button>
-          )}
-        </div>
-
-        {searchQuery.trim().length >= 2 && (
-          <div className="space-y-2 pt-1">
-            {searchResults.length === 0 ? (
-              <p className="text-center text-gray-400 py-3 bg-[#fbfaf7] rounded-2xl border border-dashed">
-                لم يتم العثور على أبناء غير مربوطين بهذا الاسم أو الرقم.
-              </p>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                {searchResults.map(child => {
-                  const linkedToOther = Boolean(child.parent_id && child.parent_id !== parent.id && existingUserIds.has(child.parent_id));
-                  return (
-                    <div key={child.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col justify-between gap-2.5">
-                      <div className="space-y-1">
-                        {renderNameBreakdown(child)}
-                        <p className="text-gray-500">
-                          المرحلة: {child.detailed_stage || child.service_stage || '—'}
-                          {child.assigned_class ? ` • ${child.assigned_class}` : ''}
-                        </p>
-                        {child.father_full_name && (
-                          <p className="text-[11px] text-gray-500">الأب: {child.father_full_name}</p>
-                        )}
-                      </div>
-
-                      {linkedToOther ? (
-                        <span className="px-3 py-2 bg-gray-100 text-gray-600 rounded-xl font-bold text-center text-[11px]">
-                          مربوط بحساب ولي أمر آخر (راجع أدمن الكنيسة لو في خطأ)
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={busyChildId === child.id}
-                          onClick={() => handleConfirmLink(child)}
-                          className="w-full py-2 px-3 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center justify-center gap-1.5 cursor-pointer transition"
-                        >
-                          <Check size={14} /> {busyChildId === child.id ? 'جاري السحب...' : 'هل ده ابنك؟ نعم، سحب وربط بحسابي'}
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
+      {/* البحث الذكي لربط الأبناء يدوياً */}
+      {canManageLinks && (
+        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
+          <div className="flex flex-wrap justify-between items-center gap-2">
+            <div className="flex items-center gap-2">
+              <UserCheck size={17} className="text-[#7a1c24] shrink-0" />
+              <div>
+                <h3 className="font-black text-sm text-[#7a1c24]">البحث عن الأبناء وربطهم بحسابك</h3>
+                <p className="text-[11px] text-gray-500">
+                  ابحث باسم الابن أو اسم الأب/الأم أو رقم التليفون لربط أي ابن إضافي على نفس الحساب.
+                </p>
               </div>
+            </div>
+
+            {dismissedIds.length > 0 && (
+              <button
+                type="button"
+                onClick={handleResetDismissed}
+                className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+              >
+                <RotateCcw size={12} /> إظهار المقترحات المخفية
+              </button>
             )}
           </div>
-        )}
-      </div>
+
+          <div className="relative">
+            <Search size={16} className="absolute right-3.5 top-3 text-gray-400" />
+            <input
+              type="text"
+              placeholder="ابحث باسم الابن أو اسم ولي الأمر أو رقم التليفون..."
+              className="w-full pr-10 pl-9 py-2.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl text-xs outline-none focus:border-[#7a1c24] focus:bg-white transition"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute left-3 top-2.5 text-gray-400 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
+
+          {searchQuery.trim().length >= 2 && (
+            <div className="space-y-2 pt-1">
+              {searchResults.length === 0 ? (
+                <p className="text-center text-gray-400 py-3 bg-[#fbfaf7] rounded-2xl border border-dashed">
+                  لم يتم العثور على أبناء غير مربوطين بهذا الاسم أو الرقم.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {searchResults.map(child => {
+                    const linkedToOther = Boolean(child.parent_id && child.parent_id !== parent.id && existingUserIds.has(child.parent_id));
+                    return (
+                      <div key={child.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col justify-between gap-2.5">
+                        <div className="space-y-1">
+                          {renderNameBreakdown(child)}
+                          <p className="text-gray-500">
+                            المرحلة: {child.detailed_stage || child.service_stage || '—'}
+                            {child.assigned_class ? ` • ${child.assigned_class}` : ''}
+                          </p>
+                          {(child.father_full_name || child.mother_full_name) && (
+                            <p className="text-[11px] text-gray-500">
+                              {child.father_full_name ? `الأب: ${child.father_full_name}` : ''}
+                              {child.father_full_name && child.mother_full_name ? ' • ' : ''}
+                              {child.mother_full_name ? `الأم: ${child.mother_full_name}` : ''}
+                            </p>
+                          )}
+                        </div>
+
+                        {linkedToOther ? (
+                          <span className="px-3 py-2 bg-gray-100 text-gray-600 rounded-xl font-bold text-center text-[11px]">
+                            مربوط بحساب ولي أمر آخر (راجع أدمن الكنيسة لو في خطأ)
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={busyChildId === child.id}
+                            onClick={() => handleConfirmLink(child)}
+                            className="w-full py-2 px-3 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center justify-center gap-1.5 cursor-pointer transition"
+                          >
+                            <Check size={14} /> {busyChildId === child.id ? 'جاري الربط...' : 'نعم، ربط هذا الابن بحسابي'}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* قسم الأبناء المربوطين */}
       {childrenList.length === 0 ? (
@@ -415,7 +443,7 @@ export default function ParentDashboard({
           <div>
             <strong className="text-sm text-amber-950 block">لا يوجد أبناء مربوطون بحسابك حتى الآن</strong>
             <p className="text-amber-900/80 mt-0.5">
-              يمكنك سحب وربط أبنائك من الاقتراحات التلقائية بالأعلى أو البحث عنهم بالاسم أو رقم التليفون.
+              يمكنك ربط أبنائك من الاقتراحات التلقائية بالأعلى أو البحث عنهم بالاسم أو رقم التليفون.
             </p>
           </div>
         </div>
@@ -444,7 +472,7 @@ export default function ParentDashboard({
                     <span className="px-3.5 py-1.5 bg-amber-100 text-amber-950 rounded-xl font-black">
                       حضور {curYear}: {rate}%
                     </span>
-                    {onLinkChild && (
+                    {onLinkChild && canManageLinks && (
                       <button
                         type="button"
                         disabled={busyChildId === child.id}

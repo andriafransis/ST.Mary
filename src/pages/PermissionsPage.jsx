@@ -20,6 +20,23 @@ const ROLE_LABELS = {
 
 export const DEFAULT_ROLE_TEMPLATES = [
   {
+    key: 'tpl_parent',
+    label: 'ولي الأمر (أب / أم — عرض فقط View Only)',
+    base_role: 'parent',
+    screens: ['parent_panel', 'public_page'],
+    actions: {
+      can_view: true, can_add: false, can_edit_members: false, can_delete: false,
+      view_parent_panel: true, manage_edu_center: false, manage_trips: false,
+      manage_joseph: false, joseph_role: '', joseph_can_edit: false, can_edit_public: false,
+      edu_view_schedule: false, edu_view_students_attendance: false, edu_view_prices: false,
+      edu_view_teachers_attendance: false, edu_view_revenue: false, edu_edit: false
+    },
+    screen_permissions: {
+      parent_panel: { view: true, add: false, edit: false, delete: false },
+      public_page: { view: true, add: false, edit: false, delete: false }
+    }
+  },
+  {
     key: 'tpl_parish',
     label: 'الشعب (رعية / أولياء أمور)',
     base_role: 'parent',
@@ -206,13 +223,13 @@ export default function PermissionsPage({
   const [roleTemplates, setRoleTemplates] = useState(() =>
     DEFAULT_ROLE_TEMPLATES.map(t => ({
       ...t,
-      screen_permissions: buildScreenPermissionsMap(t.screens, t.actions)
+      screen_permissions: buildScreenPermissionsMap(t.screens, t.actions, t.screen_permissions)
     }))
   );
   const [newTplForm, setNewTplForm] = useState(EMPTY_TPL_FORM);
   const [syncUsersOnTplSave, setSyncUsersOnTplSave] = useState(false);
 
-  const [bulkTemplateKey, setBulkTemplateKey] = useState('tpl_parish');
+  const [bulkTemplateKey, setBulkTemplateKey] = useState('tpl_parent');
   const [bulkSearch, setBulkSearch] = useState('');
   const [bulkRoleFilter, setBulkRoleFilter] = useState('all');
   const [bulkSelectedIds, setBulkSelectedIds] = useState([]);
@@ -236,7 +253,7 @@ export default function PermissionsPage({
     DEFAULT_ROLE_TEMPLATES.forEach(t => {
       mergedMap.set(t.key, {
         ...t,
-        screen_permissions: buildScreenPermissionsMap(t.screens, t.actions)
+        screen_permissions: buildScreenPermissionsMap(t.screens, t.actions, t.screen_permissions)
       });
     });
 
@@ -605,9 +622,9 @@ export default function PermissionsPage({
       <div className="bg-white p-4 rounded-3xl border shadow-sm space-y-3">
         <div>
           <h2 className="text-base md:text-lg font-black text-[#7a1c24] flex items-center gap-2">
-            <Shield size={20} /> المركز الموحد للصلاحيات والأدوار وتعدد الشاشات
+            <Shield size={20} /> المركز الموحد للصلاحيات والأدوار وتعدد الشاشات (Group Policy)
           </h2>
-          <p className="text-xs text-gray-500">تحكم شامل من مكان واحد: الفئات والأدوار، الصلاحيات الجزئية (يشوف إيه وميشوفش إيه)، وتحديد سواقين وفراشين يوسف الرامي</p>
+          <p className="text-xs text-gray-500">تحكم شامل من مكان واحد: قوالب Group Policy (ولي الأمر / الخادم / المخدوم...)، الصلاحيات الجزئية، وتطبيقها على الأفراد أو المجموعات</p>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -623,7 +640,7 @@ export default function PermissionsPage({
             onClick={() => setTab('templates')}
             className={`px-4 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer ${tab === 'templates' ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
           >
-            <ShieldCheck size={15} /> 🧩 قوالب الصلاحيات
+            <ShieldCheck size={15} /> 🧩 قوالب الصلاحيات (Group Policy)
           </button>
           <button
             type="button"
@@ -684,8 +701,6 @@ export default function PermissionsPage({
                       <strong className="text-gray-900 block">{u.full_name}</strong>
                       <span className="text-[11px] text-gray-600">
                         {u.permissions?.custom_role_label || ROLE_LABELS[u.role] || u.role} • @{u.username}
-                        {u.permissions?.joseph_role === 'driver' && ' • 🚐 سواق'}
-                        {u.permissions?.joseph_role === 'worker' && ' • 👤 فراش يوسف الرامي'}
                       </span>
                     </div>
                     <span className="px-2 py-1 bg-white border rounded-lg text-[10px] font-bold">
@@ -724,7 +739,7 @@ export default function PermissionsPage({
                     <label className="block text-[11px] text-gray-600 mb-1 font-bold">مسمى الصلاحية:</label>
                     <input
                       className="w-full p-2 border rounded-xl bg-white text-xs font-bold"
-                      placeholder="مثال: مراقب دروس / سواق..."
+                      placeholder="مثال: ولي أمر / خادم..."
                       value={selectedUser.permissions?.custom_role_label || ''}
                       onChange={e => setSelectedUser({
                         ...selectedUser,
@@ -763,7 +778,7 @@ export default function PermissionsPage({
                 </div>
 
                 <div className="bg-amber-50 p-3.5 rounded-2xl border border-amber-200 space-y-2">
-                  <strong className="text-amber-950 text-xs block">⚡ تطبيق قالب صلاحيات جاهز بضغطة واحدة:</strong>
+                  <strong className="text-amber-950 text-xs block">⚡ تطبيق قالب Group Policy جاهز بضغطة واحدة:</strong>
                   <div className="flex flex-wrap gap-1.5">
                     {roleTemplates.map(tpl => (
                       <button
@@ -782,160 +797,8 @@ export default function PermissionsPage({
                   </div>
                 </div>
 
-                {/* الصلاحية العامة */}
-                <div className="bg-gray-50 p-3.5 rounded-2xl border space-y-2.5">
-                  <strong className="text-gray-900 block">🛠️ الصلاحية العامة للفرد (مشاهدة فقط أم تعديل):</strong>
-                  <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs font-bold">
-                    <label className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer ${selectedUser.permissions?.can_view !== false ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-white'}`}>
-                      <input type="checkbox" checked={selectedUser.permissions?.can_view !== false} onChange={e => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, can_view: e.target.checked } })} />
-                      👀 يقدر يشوف
-                    </label>
-                    <label className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer ${selectedUser.permissions?.can_add ? 'bg-blue-50 border-blue-300 text-blue-950' : 'bg-white'}`}>
-                      <input type="checkbox" checked={Boolean(selectedUser.permissions?.can_add)} onChange={e => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, can_add: e.target.checked } })} />
-                      ➕ يقدر يضيف
-                    </label>
-                    <label className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer ${selectedUser.permissions?.can_edit_members ? 'bg-amber-50 border-amber-300 text-amber-950' : 'bg-white'}`}>
-                      <input type="checkbox" checked={Boolean(selectedUser.permissions?.can_edit_members)} onChange={e => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, can_edit_members: e.target.checked } })} />
-                      ✏️ يقدر يعدل
-                    </label>
-                    <label className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer ${selectedUser.permissions?.can_delete ? 'bg-red-50 border-red-300 text-red-950' : 'bg-white'}`}>
-                      <input type="checkbox" checked={Boolean(selectedUser.permissions?.can_delete)} onChange={e => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, can_delete: e.target.checked } })} />
-                      🗑️ يقدر يحذف
-                    </label>
-                  </div>
-                </div>
-
-                {/* صلاحيات المركز التعليمي التفصيلية */}
-                <div className="bg-indigo-50/70 p-4 rounded-2xl border-2 border-indigo-200 space-y-2.5">
-                  <strong className="text-indigo-950 block">🎓 صلاحيات المركز التعليمي (تحديد كل حتة يشوفها وميشوفش غيرها):</strong>
-                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs font-bold">
-                    <label className="flex items-center gap-2 p-2 bg-white rounded-xl border cursor-pointer">
-                      <input type="checkbox" checked={selectedUser.permissions?.edu_view_schedule !== false} onChange={e => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, edu_view_schedule: e.target.checked } })} />
-                      📅 يشوف جدول الدروس
-                    </label>
-                    <label className="flex items-center gap-2 p-2 bg-white rounded-xl border cursor-pointer">
-                      <input type="checkbox" checked={Boolean(selectedUser.permissions?.edu_view_students_attendance)} onChange={e => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, edu_view_students_attendance: e.target.checked } })} />
-                      ✅ يشوف حضور وانصراف الطلاب
-                    </label>
-                    <label className="flex items-center gap-2 p-2 bg-white rounded-xl border cursor-pointer text-amber-900">
-                      <input type="checkbox" checked={Boolean(selectedUser.permissions?.edu_edit)} onChange={e => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, edu_edit: e.target.checked } })} />
-                      ✏️ يقدر يضيف/يعدل في المركز
-                    </label>
-                    <label className="flex items-center gap-2 p-2 bg-white rounded-xl border cursor-pointer text-red-800">
-                      <input type="checkbox" checked={Boolean(selectedUser.permissions?.edu_view_prices)} onChange={e => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, edu_view_prices: e.target.checked } })} />
-                      💰 يشوف الأسعار والمصروفات
-                    </label>
-                    <label className="flex items-center gap-2 p-2 bg-white rounded-xl border cursor-pointer text-red-800">
-                      <input type="checkbox" checked={Boolean(selectedUser.permissions?.edu_view_teachers_attendance)} onChange={e => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, edu_view_teachers_attendance: e.target.checked } })} />
-                      👨‍🏫 يشوف حضور المدرسين
-                    </label>
-                    <label className="flex items-center gap-2 p-2 bg-white rounded-xl border cursor-pointer text-red-800">
-                      <input type="checkbox" checked={Boolean(selectedUser.permissions?.edu_view_revenue)} onChange={e => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, edu_view_revenue: e.target.checked } })} />
-                      📊 يشوف الإيراد والمحاسبة
-                    </label>
-                  </div>
-                </div>
-
-                {/* صلاحيات يوسف الرامي وتحديد دوره كسائق أو فراش دايركت */}
-                <div className="bg-slate-50 p-4 rounded-2xl border-2 border-slate-300 space-y-2.5">
-                  <strong className="text-slate-950 block">🕊️ خدمة يوسف الرامي (تعيين الفرد في الخدمة ليظهر دايركت في السيستم):</strong>
-                  <div className="grid sm:grid-cols-3 gap-2.5 text-xs font-bold items-center">
-                    <label className="flex items-center gap-2 p-2.5 bg-white rounded-xl border cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(selectedUser.permissions?.manage_joseph)}
-                        onChange={e => setSelectedUser({
-                          ...selectedUser,
-                          permissions: {
-                            ...selectedUser.permissions,
-                            manage_joseph: e.target.checked,
-                            joseph_role: e.target.checked ? (selectedUser.permissions?.joseph_role || 'worker') : ''
-                          }
-                        })}
-                      />
-                      🕊️ منضّم لخدمة يوسف الرامي
-                    </label>
-
-                    <div>
-                      <select
-                        disabled={!selectedUser.permissions?.manage_joseph}
-                        className="w-full p-2.5 border rounded-xl bg-white disabled:opacity-50"
-                        value={selectedUser.permissions?.joseph_role || ''}
-                        onChange={e => setSelectedUser({
-                          ...selectedUser,
-                          permissions: { ...selectedUser.permissions, joseph_role: e.target.value }
-                        })}
-                      >
-                        <option value="">-- صفته في يوسف الرامي --</option>
-                        <option value="worker">👤 فراش / مرافق يوسف الرامي</option>
-                        <option value="driver">🚐 سائق سيارة يوسف الرامي</option>
-                        <option value="committee">📋 مسؤول لجنة يوسف الرامي</option>
-                      </select>
-                    </div>
-
-                    <label className="flex items-center gap-2 p-2.5 bg-white rounded-xl border cursor-pointer">
-                      <input
-                        type="checkbox"
-                        disabled={!selectedUser.permissions?.manage_joseph}
-                        checked={Boolean(selectedUser.permissions?.joseph_can_edit)}
-                        onChange={e => setSelectedUser({
-                          ...selectedUser,
-                          permissions: { ...selectedUser.permissions, joseph_can_edit: e.target.checked }
-                        })}
-                      />
-                      ✏️ يقدر يعدل الحالات (وإلا مشاهدة فقط)
-                    </label>
-                  </div>
-                </div>
-
-                {/* جدول الشاشات */}
                 <div className="bg-emerald-50/40 p-3.5 rounded-2xl border border-emerald-200 space-y-2.5">
-                  <div className="flex flex-wrap justify-between items-center gap-2">
-                    <strong className="text-emerald-950">🖥️ جدول الشاشات المسموحة (يشوف / يضيف / يعدل / يحذف):</strong>
-                    <div className="flex gap-1.5 text-[11px]">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const nextMap = {};
-                          ALL_AVAILABLE_SCREENS.forEach(s => { nextMap[s.id] = { view: true, add: false, edit: false, delete: false }; });
-                          setSelectedUser({
-                            ...selectedUser,
-                            permissions: {
-                              ...selectedUser.permissions,
-                              screen_permissions: nextMap,
-                              allowed_screens: ALL_AVAILABLE_SCREENS.map(s => s.id),
-                              extra_screens: ALL_AVAILABLE_SCREENS.map(s => s.id),
-                              denied_screens: []
-                            }
-                          });
-                        }}
-                        className="px-2.5 py-1 bg-white border rounded-lg font-bold cursor-pointer hover:bg-emerald-100"
-                      >
-                        👀 يشوف الكل فقط
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const nextMap = {};
-                          ALL_AVAILABLE_SCREENS.forEach(s => { nextMap[s.id] = { view: false, add: false, edit: false, delete: false }; });
-                          setSelectedUser({
-                            ...selectedUser,
-                            permissions: {
-                              ...selectedUser.permissions,
-                              screen_permissions: nextMap,
-                              allowed_screens: [],
-                              extra_screens: [],
-                              denied_screens: ALL_AVAILABLE_SCREENS.map(s => s.id)
-                            }
-                          });
-                        }}
-                        className="px-2.5 py-1 bg-white border rounded-lg font-bold text-red-700 cursor-pointer hover:bg-red-50"
-                      >
-                        🚫 إخفاء الكل
-                      </button>
-                    </div>
-                  </div>
-
+                  <strong className="text-emerald-950 block">🖥️ جدول الشاشات المسموحة (يشوف / يضيف / يعدل / يحذف):</strong>
                   <div className="overflow-x-auto bg-white rounded-2xl border">
                     <table className="w-full text-right text-xs">
                       <thead className="bg-gray-100 text-gray-800">
@@ -964,19 +827,6 @@ export default function PermissionsPage({
                     </table>
                   </div>
                 </div>
-
-                {/* صلاحيات إضافية */}
-                <div className="bg-blue-50/60 p-3.5 rounded-2xl border border-blue-200 space-y-2">
-                  <strong className="text-blue-950 block">🎯 صلاحيات أخرى:</strong>
-                  <div className="grid sm:grid-cols-2 gap-2 text-xs font-bold">
-                    <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={Boolean(selectedUser.permissions?.manage_edu_center)} onChange={e => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, manage_edu_center: e.target.checked } })} /> 🎓 مدير كامل للمركز التعليمي</label>
-                    <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={Boolean(selectedUser.permissions?.is_edu_teacher)} onChange={e => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, is_edu_teacher: e.target.checked } })} /> 👨‍🏫 مدرس بالمركز التعليمي</label>
-                    <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={Boolean(selectedUser.permissions?.manage_trips)} onChange={e => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, manage_trips: e.target.checked } })} /> 🚌 إدارة مكتب الرحلات</label>
-                    <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={Boolean(selectedUser.permissions?.view_cases)} onChange={e => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, view_cases: e.target.checked } })} /> 🔍 بحث الحالة المادية</label>
-                    <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={Boolean(selectedUser.permissions?.view_deacons)} onChange={e => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, view_deacons: e.target.checked } })} /> 🕯️ إدارة الشمامسة</label>
-                    <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={Boolean(selectedUser.permissions?.can_edit_public)} onChange={e => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, can_edit_public: e.target.checked } })} /> ✏️ تعديل صفحة الكنيسة العامة</label>
-                  </div>
-                </div>
               </div>
             )}
           </div>
@@ -989,7 +839,7 @@ export default function PermissionsPage({
           <form onSubmit={handleSaveRoleTemplate} className="bg-white p-5 rounded-3xl border space-y-4 font-bold">
             <div className="flex flex-wrap justify-between items-center gap-2">
               <h3 className="text-base font-black text-[#7a1c24]">
-                {newTplForm.key ? `✏️ تعديل قالب الصلاحية (${newTplForm.label})` : '➕ إنشاء صلاحية / قالب جديد'}
+                {newTplForm.key ? `✏️ تعديل قالب Group Policy (${newTplForm.label})` : '➕ إنشاء قالب Group Policy جديد'}
               </h3>
               {newTplForm.key && (
                 <button type="button" onClick={() => { setNewTplForm(EMPTY_TPL_FORM); setSyncUsersOnTplSave(false); }} className="px-3 py-1.5 bg-gray-100 rounded-xl text-xs cursor-pointer">+ قالب جديد</button>
@@ -999,7 +849,7 @@ export default function PermissionsPage({
             <div className="grid sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-gray-600 mb-1">اسم الصلاحية / القالب *</label>
-                <input required placeholder="مثال: مراقب دروس، سواق يوسف الرامي..." className="w-full p-2.5 border rounded-xl" value={newTplForm.label} onChange={e => setNewTplForm({ ...newTplForm, label: e.target.value })} />
+                <input required placeholder="مثال: ولي أمر، خادم، مراقب دروس..." className="w-full p-2.5 border rounded-xl" value={newTplForm.label} onChange={e => setNewTplForm({ ...newTplForm, label: e.target.value })} />
               </div>
               <div>
                 <label className="block text-xs text-gray-600 mb-1">الدور الأساسي المرتبط به:</label>
@@ -1009,34 +859,8 @@ export default function PermissionsPage({
               </div>
             </div>
 
-            <div className="bg-indigo-50/70 p-3.5 rounded-2xl border border-indigo-200 space-y-2">
-              <strong className="block text-xs text-indigo-950">🎓 صلاحيات المركز التعليمي في هذا القالب:</strong>
-              <div className="flex flex-wrap gap-3 text-xs">
-                <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={newTplForm.actions.edu_view_schedule !== false} onChange={e => setNewTplForm({ ...newTplForm, actions: { ...newTplForm.actions, edu_view_schedule: e.target.checked } })} /> 📅 جدول الدروس</label>
-                <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={Boolean(newTplForm.actions.edu_view_students_attendance)} onChange={e => setNewTplForm({ ...newTplForm, actions: { ...newTplForm.actions, edu_view_students_attendance: e.target.checked } })} /> ✅ حضور الطلاب</label>
-                <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={Boolean(newTplForm.actions.edu_edit)} onChange={e => setNewTplForm({ ...newTplForm, actions: { ...newTplForm.actions, edu_edit: e.target.checked } })} /> ✏️ تعديل وإضافة</label>
-                <label className="flex items-center gap-1 cursor-pointer text-red-800"><input type="checkbox" checked={Boolean(newTplForm.actions.edu_view_prices)} onChange={e => setNewTplForm({ ...newTplForm, actions: { ...newTplForm.actions, edu_view_prices: e.target.checked } })} /> 💰 الأسعار</label>
-                <label className="flex items-center gap-1 cursor-pointer text-red-800"><input type="checkbox" checked={Boolean(newTplForm.actions.edu_view_teachers_attendance)} onChange={e => setNewTplForm({ ...newTplForm, actions: { ...newTplForm.actions, edu_view_teachers_attendance: e.target.checked } })} /> 👨‍🏫 حضور المدرسين</label>
-                <label className="flex items-center gap-1 cursor-pointer text-red-800"><input type="checkbox" checked={Boolean(newTplForm.actions.edu_view_revenue)} onChange={e => setNewTplForm({ ...newTplForm, actions: { ...newTplForm.actions, edu_view_revenue: e.target.checked } })} /> 📊 الإيرادات</label>
-              </div>
-            </div>
-
-            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-300 space-y-2">
-              <strong className="block text-xs text-slate-950">🕊️ صلاحية وصفة خدمة يوسف الرامي في هذا القالب:</strong>
-              <div className="flex flex-wrap gap-3 items-center text-xs">
-                <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={Boolean(newTplForm.actions.manage_joseph)} onChange={e => setNewTplForm({ ...newTplForm, actions: { ...newTplForm.actions, manage_joseph: e.target.checked } })} /> 🕊️ تفعيل خدمة يوسف الرامي</label>
-                <select disabled={!newTplForm.actions.manage_joseph} className="p-2 border rounded-xl bg-white disabled:opacity-50" value={newTplForm.actions.joseph_role || ''} onChange={e => setNewTplForm({ ...newTplForm, actions: { ...newTplForm.actions, joseph_role: e.target.value } })}>
-                  <option value="">-- الصفة --</option>
-                  <option value="worker">👤 فراش / مرافق</option>
-                  <option value="driver">🚐 سواق</option>
-                  <option value="committee">📋 لجنة إدارية</option>
-                </select>
-                <label className="flex items-center gap-1 cursor-pointer"><input type="checkbox" disabled={!newTplForm.actions.manage_joseph} checked={Boolean(newTplForm.actions.joseph_can_edit)} onChange={e => setNewTplForm({ ...newTplForm, actions: { ...newTplForm.actions, joseph_can_edit: e.target.checked } })} /> ✏️ يقدر يعدل الحالات</label>
-              </div>
-            </div>
-
             <div className="bg-gray-50 p-3.5 rounded-2xl border space-y-2">
-              <strong className="block text-xs text-gray-800">الشاشات المسموحة (يشوف / يضيف / يعدل / يحذف):</strong>
+              <strong className="block text-xs text-gray-800">الشاشات المسموحة في القالب (يشوف / يضيف / يعدل / يحذف):</strong>
               <div className="overflow-x-auto bg-white rounded-2xl border">
                 <table className="w-full text-right text-xs">
                   <thead className="bg-gray-100 text-gray-800">
@@ -1075,7 +899,7 @@ export default function PermissionsPage({
 
             <div className="flex flex-wrap gap-2">
               <button type="submit" className="px-6 py-2.5 bg-[#7a1c24] text-white rounded-xl cursor-pointer flex items-center gap-1.5">
-                <CheckCircle2 size={15} /> {newTplForm.key ? 'حفظ تعديل القالب' : '+ إنشاء الصلاحية الجديدة'}
+                <CheckCircle2 size={15} /> {newTplForm.key ? 'حفظ تعديل القالب' : '+ إنشاء القالب الجديد'}
               </button>
               {newTplForm.key && (
                 <button type="button" onClick={() => { setNewTplForm(EMPTY_TPL_FORM); setSyncUsersOnTplSave(false); }} className="px-4 py-2 border rounded-xl cursor-pointer">إلغاء</button>
@@ -1133,7 +957,7 @@ export default function PermissionsPage({
       {/* TAB 4: التعيين الجماعي */}
       {tab === 'bulk' && (
         <div className="bg-white p-5 rounded-3xl border space-y-4 font-bold">
-          <h3 className="text-base font-black text-[#7a1c24]">⚡ تطبيق صلاحية على مجموعة أشخاص دفعة واحدة</h3>
+          <h3 className="text-base font-black text-[#7a1c24]">⚡ تطبيق قالب Group Policy على مجموعة أشخاص دفعة واحدة</h3>
           <div className="grid md:grid-cols-3 gap-3">
             <div><label className="block text-xs text-gray-600 mb-1">1) القالب:</label><select className="w-full p-2.5 border rounded-xl bg-amber-50/40" value={bulkTemplateKey} onChange={e => setBulkTemplateKey(e.target.value)}>{roleTemplates.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}</select></div>
             <div><label className="block text-xs text-gray-600 mb-1">2) فلترة الدور:</label><select className="w-full p-2.5 border rounded-xl bg-white" value={bulkRoleFilter} onChange={e => setBulkRoleFilter(e.target.value)}><option value="all">الكل</option>{Object.entries(ROLE_LABELS).filter(([k]) => k !== 'admin').map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
