@@ -733,6 +733,52 @@ export default function PublicPage({
 
   const showParentChildrenBox = regForm.requested_role === 'parent' || regForm.also_parent;
 
+  // قائمة أزرار الأقسام والخدمات لتنسيقها في Grid متساوي ومتناسق
+  const navButtons = [
+    !newsMeta.hidden && {
+      key: 'nav_news',
+      href: '#sec-news',
+      label: `📰 ${newsMeta.title}`,
+      className: 'bg-white/15 hover:bg-white/25 border border-white/20 text-white font-bold'
+    },
+    !massesMeta.hidden && {
+      key: 'nav_masses',
+      href: '#sec-masses',
+      label: `⛪ ${massesMeta.title}`,
+      className: 'bg-amber-400 hover:bg-amber-300 text-[#4a0e13] font-black shadow'
+    },
+    !tripsMeta.hidden && {
+      key: 'nav_trips',
+      href: '#sec-trips',
+      label: `🚌 ${tripsMeta.title}`,
+      className: 'bg-white/15 hover:bg-white/25 border border-white/20 text-white font-bold'
+    },
+    !priestBioMeta.hidden && {
+      key: 'nav_priests',
+      href: '#sec-priests',
+      label: `✝ ${priestBioMeta.title}`,
+      className: 'bg-white/15 hover:bg-white/25 border border-white/20 text-white font-bold'
+    },
+    !historyMeta.hidden && {
+      key: 'nav_history',
+      href: '#sec-history',
+      label: `📜 ${historyMeta.title}`,
+      className: 'bg-white/15 hover:bg-white/25 border border-white/20 text-white font-bold'
+    },
+    onOpenEdu && theme.show_edu_btn !== false && {
+      key: 'nav_edu',
+      onClick: onOpenEdu,
+      label: '🎓 المركز التعليمي',
+      className: 'bg-indigo-600 hover:bg-indigo-700 border border-indigo-300/40 text-white font-black shadow'
+    },
+    onOpenJoseph && theme.show_joseph_btn !== false && {
+      key: 'nav_joseph',
+      onClick: onOpenJoseph,
+      label: '🕊️ خدمة يوسف الرامي',
+      className: 'bg-slate-900/85 hover:bg-slate-900 border border-white/30 text-white font-black shadow'
+    }
+  ].filter(Boolean);
+
   const renderDynamicSection = (sec) => {
     if (sec.hidden && !canEdit) return null;
 
@@ -1075,99 +1121,117 @@ export default function PublicPage({
 
       {/* الهيدر الرئيسي الموحد */}
       <header className={`bg-linear-to-br ${theme.headerBg} text-white border-b-4 border-amber-400/70 shadow-xl ${theme.sticky_header !== false ? 'sticky top-0 z-40' : ''}`}>
-        <div className="max-w-6xl mx-auto px-4 py-4 md:py-5 space-y-3">
+        <div className="max-w-6xl mx-auto px-4 py-4 md:py-5 space-y-3.5">
           <div className="grid md:grid-cols-12 gap-4 items-center">
-            <div className="md:col-span-8 space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-2xl bg-white/10 border border-amber-300/50 flex items-center justify-center overflow-hidden shadow-inner animate-float-logo shrink-0">
-                    {logoConfig?.url ? (
-                      <img src={logoConfig.url} alt={activeChurchTitle} className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="text-2xl font-black text-amber-300">✝</span>
-                    )}
-                  </div>
-                  <div>
-                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/10 border border-amber-300/30 text-amber-200 text-[10px] font-bold mb-1">
-                      <Sparkles size={11} /> أهلاً بكم في بيت الرب
-                    </div>
-                    <h1 className="text-lg md:text-2xl font-black text-white leading-tight">{activeChurchTitle}</h1>
-                    <p className="text-xs text-white/80">{activeChurchSubtitle}</p>
-                  </div>
+            <div className="md:col-span-8 space-y-3">
+              {/* العنوان + الشعار */}
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-white/10 border border-amber-300/50 flex items-center justify-center overflow-hidden shadow-inner animate-float-logo shrink-0">
+                  {logoConfig?.url ? (
+                    <img src={logoConfig.url} alt={activeChurchTitle} className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-2xl font-black text-amber-300">✝</span>
+                  )}
                 </div>
+                <div className="min-w-0">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/10 border border-amber-300/30 text-amber-200 text-[10px] font-bold mb-1">
+                    <Sparkles size={11} /> أهلاً بكم في بيت الرب
+                  </div>
+                  <h1 className="text-lg md:text-2xl font-black text-white leading-tight">{activeChurchTitle}</h1>
+                  <p className="text-xs text-white/80">{activeChurchSubtitle}</p>
+                </div>
+              </div>
 
-                <div className="flex flex-wrap items-center gap-2">
+              {/* صف أزرار الدخول والتسجيل (شبكة متساوية 2 عمود في الموبايل) */}
+              {isLoggedIn ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={onBackToApp}
+                    className="min-h-[44px] px-4 py-2 bg-white text-[#7a1c24] hover:bg-amber-50 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer shadow transition"
+                  >
+                    <ArrowRight size={15} /> العودة لحسابي
+                  </button>
                   {canEdit && (
-                    <>
-                      <button type="button" onClick={() => openAddContentModal('news')} className="px-3 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl text-xs font-black flex items-center gap-1 cursor-pointer shadow">
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openAddContentModal('news')}
+                        className="min-h-[44px] px-2.5 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl text-xs font-black flex items-center justify-center gap-1 cursor-pointer shadow transition"
+                      >
                         <Plus size={14} /> إضافة محتوى
                       </button>
-                      <button type="button" onClick={openSectionsCustomizer} className="px-2.5 py-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
-                        <Settings size={14} /> ترتيب وتعديل الأقسام
+                      <button
+                        type="button"
+                        onClick={openSectionsCustomizer}
+                        className="min-h-[44px] px-2.5 py-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition"
+                      >
+                        <Settings size={14} /> الأقسام
                       </button>
-                      {onOpenEditor && (
-                        <button type="button" onClick={onOpenEditor} className="px-2.5 py-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-xl text-xs font-bold cursor-pointer">
-                          لوحة التحكم
-                        </button>
-                      )}
-                    </>
-                  )}
-
-                  {isLoggedIn ? (
-                    <button type="button" onClick={onBackToApp} className="px-4 py-2 bg-white text-[#7a1c24] hover:bg-amber-50 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow">
-                      <ArrowRight size={15} /> العودة لحسابي
-                    </button>
-                  ) : (
-                    <>
-                      <button type="button" onClick={() => { setRegStatus({ type: '', msg: '' }); setShowRegister(true); }} className="px-3.5 py-2 bg-white/10 hover:bg-white/20 border border-white/30 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
-                        <UserPlus size={14} /> تسجيل حساب جديد
-                      </button>
-                      <button type="button" onClick={onOpenLogin} className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow">
-                        <LogIn size={14} /> تسجيل الدخول
-                      </button>
-                    </>
+                    </div>
                   )}
                 </div>
-              </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => { setRegStatus({ type: '', msg: '' }); setShowRegister(true); }}
+                    className="min-h-[44px] px-3.5 py-2 bg-white/10 hover:bg-white/20 border border-white/30 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition"
+                  >
+                    <UserPlus size={15} /> تسجيل حساب جديد
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onOpenLogin}
+                    className="min-h-[44px] px-4 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer shadow transition"
+                  >
+                    <LogIn size={15} /> تسجيل الدخول
+                  </button>
+                </div>
+              )}
 
-              {/* صف التابات وأزرار الأقسام */}
-              <div className="flex flex-wrap gap-2 pt-2">
-                {!newsMeta.hidden && (
-                  <a href="#sec-news" className="px-3 py-1.5 bg-white/15 hover:bg-white/25 border border-white/20 text-white rounded-xl text-xs font-bold">
-                    📰 {newsMeta.title}
-                  </a>
-                )}
-                {!massesMeta.hidden && (
-                  <a href="#sec-masses" className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl text-xs font-black shadow">
-                    ⛪ {massesMeta.title}
-                  </a>
-                )}
-                {!tripsMeta.hidden && (
-                  <a href="#sec-trips" className="px-3 py-1.5 bg-white/15 hover:bg-white/25 border border-white/20 text-white rounded-xl text-xs font-bold">
-                    🚌 {tripsMeta.title}
-                  </a>
-                )}
-                {!priestBioMeta.hidden && (
-                  <a href="#sec-priests" className="px-3 py-1.5 bg-white/15 hover:bg-white/25 border border-white/20 text-white rounded-xl text-xs font-bold">
-                    ✝ {priestBioMeta.title}
-                  </a>
-                )}
-                {!historyMeta.hidden && (
-                  <a href="#sec-history" className="px-3 py-1.5 bg-white/15 hover:bg-white/25 border border-white/20 text-white rounded-xl text-xs font-bold">
-                    📜 {historyMeta.title}
-                  </a>
-                )}
-                {onOpenEdu && theme.show_edu_btn !== false && (
-                  <button type="button" onClick={onOpenEdu} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 border border-indigo-300/40 text-white rounded-xl text-xs font-black cursor-pointer shadow">
-                    🎓 المركز التعليمي
+              {isLoggedIn && canEdit && onOpenEditor && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={onOpenEditor}
+                    className="w-full sm:w-auto px-3.5 py-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-xl text-xs font-bold cursor-pointer transition"
+                  >
+                    فتح لوحة التحكم الكاملة
                   </button>
-                )}
-                {onOpenJoseph && theme.show_joseph_btn !== false && (
-                  <button type="button" onClick={onOpenJoseph} className="px-3 py-1.5 bg-slate-900/80 hover:bg-slate-900 border border-white/30 text-white rounded-xl text-xs font-black cursor-pointer shadow">
-                    🕊️ خدمة يوسف الرامي
-                  </button>
-                )}
-              </div>
+                </div>
+              )}
+
+              {/* شبكة متناسقة لأقسام وخدمات الكنيسة (2 عمود في الموبايل و3-4 في الشاشات الأوسع) */}
+              {navButtons.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 pt-0.5">
+                  {navButtons.map((btn, idx) => {
+                    const isOddLast = navButtons.length % 2 === 1 && idx === navButtons.length - 1;
+                    const spanClass = isOddLast ? 'col-span-2 sm:col-span-1' : '';
+                    if (btn.href) {
+                      return (
+                        <a
+                          key={btn.key}
+                          href={btn.href}
+                          className={`min-h-[44px] px-3 py-2 rounded-xl text-xs flex items-center justify-center text-center leading-snug transition ${btn.className} ${spanClass}`}
+                        >
+                          {btn.label}
+                        </a>
+                      );
+                    }
+                    return (
+                      <button
+                        key={btn.key}
+                        type="button"
+                        onClick={btn.onClick}
+                        className={`min-h-[44px] px-3 py-2 rounded-xl text-xs flex items-center justify-center text-center leading-snug cursor-pointer transition ${btn.className} ${spanClass}`}
+                      >
+                        {btn.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* أيقونة السيدة العذراء أو البث المباشر */}
