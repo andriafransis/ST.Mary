@@ -7,11 +7,7 @@ import AdminPageDesigner from '../components/AdminPageDesigner';
 import EducationalCenterManager from '../components/EducationalCenterManager';
 import JosephArimatheaManager from '../components/JosephArimatheaManager';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
-import PermissionsPage, {
-  DEFAULT_ROLE_TEMPLATES,
-  buildScreenPermissionsMap,
-  extractAllowedScreensFromMap
-} from './PermissionsPage';
+import PermissionsPage from './PermissionsPage';
 import {
   UserPlus, Edit3, Trash2, CalendarPlus, BookOpen,
   Search, RefreshCw, FolderEdit, Sparkles, ArrowRight,
@@ -84,8 +80,14 @@ const STAGE_OPTIONS = [
   'أولى ثانوي', 'ثانية ثانوي', 'ثالثة ثانوي',
   'جامعة وخريجين',
   'حرفيين ومهنيين',
-  'أصحاب معاشات'
+  'أصحاب معاشات',
+  'اجتماع الأرامل',
+  'إخوة الرب',
+  'اجتماع الصدى',
+  'شمامسة وألحان'
 ];
+
+const SERVANT_ROLES = ['head_servant', 'vice_head_servant', 'servant', 'meeting_servant', 'mercy_servant'];
 
 const detectGuardianType = (u) => {
   if (!u) return 'father';
@@ -93,6 +95,12 @@ const detectGuardianType = (u) => {
   if (['الأم', 'أم', 'والدة'].includes(String(u.family_role || '').trim())) return 'mother';
   return 'father';
 };
+
+const splitList = (val) =>
+  String(val || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
 
 export default function AdminDashboard({
   users = [], events = [], services = [], caseCategories = [], customCards = [],
@@ -130,12 +138,7 @@ export default function AdminDashboard({
 
   const [cardForm, setCardForm] = useState({ priest_id: '', card_title: '', card_icon: '📌', description: '' });
 
-  const [roleTemplates, setRoleTemplates] = useState(() =>
-    DEFAULT_ROLE_TEMPLATES.map(t => ({
-      ...t,
-      screen_permissions: buildScreenPermissionsMap(t.screens, t.actions)
-    }))
-  );
+  const [roleTemplatesCount, setRoleTemplatesCount] = useState(0);
 
   const [logoRowId, setLogoRowId] = useState(null);
   const [settingsRowId, setSettingsRowId] = useState(null);
@@ -162,38 +165,9 @@ export default function AdminDashboard({
   const loadRoleTemplates = async () => {
     const { data } = await supabase
       .from('church_public_content')
-      .select('*')
-      .eq('kind', 'role_template')
-      .order('created_at', { ascending: true });
-
-    const mergedMap = new Map();
-    DEFAULT_ROLE_TEMPLATES.forEach(t => {
-      mergedMap.set(t.key, {
-        ...t,
-        screen_permissions: buildScreenPermissionsMap(t.screens, t.actions)
-      });
-    });
-
-    if (data && data.length > 0) {
-      data.forEach(row => {
-        try {
-          const obj = JSON.parse(row.body || '{}');
-          const screens = Array.isArray(obj.screens) ? obj.screens : [];
-          const actions = obj.actions || {};
-          mergedMap.set(row.title, {
-            dbId: row.id,
-            key: row.title,
-            ...obj,
-            screens,
-            actions,
-            screen_permissions: buildScreenPermissionsMap(screens, actions, obj.screen_permissions)
-          });
-        } catch {
-          // ignore
-        }
-      });
-    }
-    setRoleTemplates(Array.from(mergedMap.values()));
+      .select('id')
+      .eq('kind', 'role_template');
+    setRoleTemplatesCount(data?.length || 0);
   };
 
   useEffect(() => {
@@ -301,7 +275,7 @@ export default function AdminDashboard({
   )];
   const parentsList = users.filter(u => u.role === 'parent' || parentIdsFromMembers.includes(u.id));
   const priestsList = users.filter(u => u.role === 'priest');
-  const servantsList = users.filter(u => ['head_servant', 'vice_head_servant', 'servant', 'meeting_servant', 'mercy_servant'].includes(u.role));
+  const servantsList = users.filter(u => SERVANT_ROLES.includes(u.role));
   const deaconsList = users.filter(u => u.is_deacon);
   const membersList = users.filter(u => u.role === 'member');
   const parentsWorkersList = users.filter(u => u.role === 'parent' || u.role === 'worker' || parentIdsFromMembers.includes(u.id));
@@ -318,7 +292,7 @@ export default function AdminDashboard({
 
   const shouldShowUsersList = Boolean(userSubTab) || searchQ.trim().length > 0;
   const filteredUsers = getUsersBySubTab().filter(u =>
-    ((u.full_name || '') + ' ' + (u.username || '') + ' ' + (u.phone || '') + ' ' + (u.sector || '') + ' ' + (u.assigned_class || '')).toLowerCase().includes(searchQ.toLowerCase())
+    ((u.full_name || '') + ' ' + (u.username || '') + ' ' + (u.phone || '') + ' ' + (u.sector || '') + ' ' + (u.assigned_class || '') + ' ' + (u.detailed_stage || '')).toLowerCase().includes(searchQ.toLowerCase())
   );
 
   const openAdd = () => {
@@ -344,9 +318,6 @@ export default function AdminDashboard({
     if (!requireAdminGuard()) return;
     setIsEditing(true);
     const parts = (u.full_name || '').split(' ');
-    const rawPerms = u.permissions || {};
-    const existingScreens = Array.isArray(rawPerms.allowed_screens) ? rawPerms.allowed_screens : [];
-    const normalizedMap = buildScreenPermissionsMap(existingScreens, rawPerms, rawPerms.screen_permissions);
     const resolvedGuardianType = u.role === 'parent' ? detectGuardianType(u) : (u.guardian_type || '');
 
     setFormData({
@@ -393,15 +364,17 @@ export default function AdminDashboard({
       priest_wife_phone: u.priest_wife_phone || '',
       priest_family_notes: u.priest_family_notes || '',
       church_job: u.church_job || '',
-      permissions: {
-        ...emptyUser.permissions,
-        ...rawPerms,
-        screen_permissions: normalizedMap,
-        allowed_screens: extractAllowedScreensFromMap(normalizedMap),
-        extra_screens: extractAllowedScreensFromMap(normalizedMap)
-      }
+      permissions: u.permissions || emptyUser.permissions
     });
     setShowModal(true);
+  };
+
+  const toggleMultiFieldValue = (fieldName, value) => {
+    const current = splitList(formData[fieldName]);
+    const next = current.includes(value)
+      ? current.filter(x => x !== value)
+      : [...current, value];
+    setFormData({ ...formData, [fieldName]: next.join(', ') });
   };
 
   const handleSubmit = async (e) => {
@@ -516,7 +489,7 @@ export default function AdminDashboard({
         count: `${users.length} مسجل`,
         color: 'border-teal-300 bg-teal-50/30'
       }] : []),
-      { id: 'roles_permissions', icon: '🔐', title: 'المركز الموحد للصلاحيات والأدوار', desc: 'إنشاء قوالب صلاحيات (الشعب، الكاهن، الخادم، المخدوم...) وتحديد مين يشوف ومين يعدل لكل شاشة ولكل فرد', count: `${roleTemplates.length} قالب • موحّد`, color: 'border-emerald-300 bg-emerald-50/30' },
+      { id: 'roles_permissions', icon: '🔐', title: 'المركز الموحد للصلاحيات والأدوار', desc: 'إنشاء قوالب صلاحيات (الشعب، الكاهن، الخادم، المخدوم...) وتحديد مين يشوف ومين يعدل لكل شاشة ولكل فرد', count: `${roleTemplatesCount} قالب • موحّد`, color: 'border-emerald-300 bg-emerald-50/30' },
       { id: 'page_designer', icon: '🎨', title: 'تصميم وتعديل الصفحة الرئيسية والصفحات', desc: 'ترتيب الأقسام، إضافة ونشر الأخبار والقداسات والرحلات والفيديوهات والكهنة وروابط يوتيوب وفيسبوك', count: 'تحكم كامل', color: 'border-pink-300 bg-pink-50/30' },
       { id: 'events', icon: '⛪', title: 'مواعيد القداسات والاجتماعات', desc: 'إضافة وتعديل مواعيد القداسات، العشيات، والاجتماعات العامة', count: `${events.length} موعد`, color: 'border-amber-200 bg-white' },
       { id: 'services', icon: '🏫', title: 'الفصول والخدمات', desc: 'تنظيم المراحل والفصول وأمناء الخدمة والكاهن المشرف', count: `${services.length} فصل`, color: 'border-blue-200 bg-white' },
@@ -574,6 +547,10 @@ export default function AdminDashboard({
       </div>
     );
   }
+
+  const isServantRoleSelected = SERVANT_ROLES.includes(formData.role);
+  const selectedServantStages = splitList(formData.detailed_stage);
+  const selectedServantClasses = splitList(formData.assigned_class);
 
   return (
     <div className="space-y-4">
@@ -670,6 +647,7 @@ export default function AdminDashboard({
                           {isParentOfChild && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-950">👨‍👦 ولي أمر مسجل</span>}
                           {u.role === 'priest' && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900">{u.priest_degree} {u.ordination_date ? `(سيامة: ${u.ordination_date})` : ''}</span>}
                           {u.is_deacon && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800">شماس ({u.deacon_rank})</span>}
+                          {u.detailed_stage && SERVANT_ROLES.includes(u.role) && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-900">خادم: {u.detailed_stage}</span>}
                           {u.assigned_class && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800">فصل: {u.assigned_class}</span>}
                           {u.permissions?.manage_edu_center && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-900">🎓 مدير مركز تعليمي</span>}
                           {u.permissions?.manage_trips && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-900">🚌 صلاحية رحلات</span>}
@@ -1089,8 +1067,8 @@ export default function AdminDashboard({
                     }}
                   >
                     <option value="priest">أب كاهن</option>
-                    <option value="head_servant">أمين الخدمة</option>
-                    <option value="vice_head_servant">مساعد أمين الخدمة</option>
+                    <option value="head_servant">خادم (أمين خدمة)</option>
+                    <option value="vice_head_servant">خادم (مساعد أمين خدمة)</option>
                     <option value="servant">خادم مرحلة</option>
                     <option value="meeting_servant">خادم اجتماع</option>
                     <option value="mercy_servant">خادم إخوة رب</option>
@@ -1197,7 +1175,7 @@ export default function AdminDashboard({
                 <div><label className="block mb-1">وظيفة العامل / الفراش</label><input className="w-full p-2.5 border rounded-xl" placeholder="فراش الكنيسة / أمن..." value={formData.church_job} onChange={e => setFormData({ ...formData, church_job: e.target.value })} /></div>
               )}
 
-              {(formData.role === 'member' || formData.role === 'servant' || formData.role === 'head_servant' || formData.role === 'vice_head_servant' || formData.role === 'meeting_servant') && (
+              {formData.role === 'member' && (
                 <>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
@@ -1222,6 +1200,74 @@ export default function AdminDashboard({
                     </select>
                   </div>
                 </>
+              )}
+
+              {isServantRoleSelected && (
+                <div className="bg-emerald-50/50 p-3 rounded-2xl border border-emerald-200 space-y-3">
+                  <div>
+                    <label className="block mb-1.5 text-[#7a1c24] font-extrabold">
+                      📖 أماكن ومراحل الخدمة للخادم (يمكنك اختيار أكثر من مكان):
+                    </label>
+                    <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto bg-white p-2 rounded-xl border">
+                      {STAGE_OPTIONS.map((st, i) => {
+                        const checked = selectedServantStages.includes(st);
+                        return (
+                          <label
+                            key={i}
+                            className={`flex items-center gap-1 px-2 py-1 rounded-lg border cursor-pointer text-[11px] ${
+                              checked ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-gray-50 text-gray-800'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              className="hidden"
+                              checked={checked}
+                              onChange={() => toggleMultiFieldValue('detailed_stage', st)}
+                            />
+                            {checked ? '✓ ' : ''}{st}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {services.length > 0 && (
+                    <div>
+                      <label className="block mb-1.5 text-blue-950 font-extrabold">
+                        🏫 الفصول التي يخدم بها (يمكنك اختيار أكثر من فصل):
+                      </label>
+                      <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto bg-white p-2 rounded-xl border">
+                        {services.map(srv => {
+                          const checked = selectedServantClasses.includes(srv.class_name);
+                          return (
+                            <label
+                              key={srv.id}
+                              className={`flex items-center gap-1 px-2 py-1 rounded-lg border cursor-pointer text-[11px] ${
+                                checked ? 'bg-blue-700 text-white border-blue-700' : 'bg-gray-50 text-gray-800'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                className="hidden"
+                                checked={checked}
+                                onChange={() => toggleMultiFieldValue('assigned_class', srv.class_name)}
+                              />
+                              {checked ? '✓ ' : ''}{srv.class_name}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block mb-1">أب الاعتراف</label>
+                    <select className="w-full p-2.5 border rounded-xl bg-white" value={formData.confession_father_id || ''} onChange={e => setFormData({ ...formData, confession_father_id: e.target.value })}>
+                      <option value="">-- اختر --</option>
+                      {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+                    </select>
+                  </div>
+                </div>
               )}
 
               {formData.role === 'member' && (
@@ -1275,128 +1321,6 @@ export default function AdminDashboard({
                   </div>
                 </div>
               )}
-
-              <div className="bg-gray-50 p-3 rounded-2xl border space-y-2.5">
-                <div className="flex flex-wrap justify-between items-center gap-2">
-                  <span className="text-[11px] text-gray-800 font-extrabold">🔐 الصلاحيات وتطبيق قالب جاهز:</span>
-                  {isEditing && formData.id && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowModal(false);
-                        setPermTargetUserId(formData.id);
-                        setActiveCard('roles_permissions');
-                      }}
-                      className="px-2.5 py-1 bg-emerald-100 text-emerald-900 rounded-lg text-[10px] font-black cursor-pointer"
-                    >
-                      تعديل صلاحيات كل شاشة بالتفصيل ↗
-                    </button>
-                  )}
-                </div>
-
-                <div>
-                  <select
-                    className="w-full p-2 border rounded-xl bg-amber-50/60 text-[11px]"
-                    value={formData.permissions?.template_key || ''}
-                    onChange={e => {
-                      const tpl = roleTemplates.find(t => t.key === e.target.value);
-                      if (!tpl) return;
-                      const scrMap = buildScreenPermissionsMap(tpl.screens || [], tpl.actions || {}, tpl.screen_permissions);
-                      const allowed = extractAllowedScreensFromMap(scrMap);
-                      setFormData({
-                        ...formData,
-                        permissions: {
-                          ...formData.permissions,
-                          ...tpl.actions,
-                          template_key: tpl.key,
-                          custom_role_label: tpl.label,
-                          allowed_screens: allowed,
-                          extra_screens: allowed,
-                          screen_permissions: scrMap
-                        }
-                      });
-                    }}
-                  >
-                    <option value="">-- اختر قالب صلاحية جاهز لتطبيقه (اختياري) --</option>
-                    {roleTemplates.map(tpl => (
-                      <option key={tpl.key} value={tpl.key}>{tpl.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="flex flex-wrap gap-3 pt-1">
-                  <label className="flex items-center gap-1 cursor-pointer">
-                    <input type="checkbox" checked={formData.permissions?.can_view !== false} onChange={e => setFormData({ ...formData, permissions: { ...formData.permissions, can_view: e.target.checked } })} />
-                    👀 يقدر يشوف
-                  </label>
-                  <label className="flex items-center gap-1 cursor-pointer">
-                    <input type="checkbox" checked={Boolean(formData.permissions?.can_add)} onChange={e => setFormData({ ...formData, permissions: { ...formData.permissions, can_add: e.target.checked } })} />
-                    ➕ يقدر يضيف
-                  </label>
-                  <label className="flex items-center gap-1 cursor-pointer">
-                    <input type="checkbox" checked={Boolean(formData.permissions?.can_edit_members)} onChange={e => setFormData({ ...formData, permissions: { ...formData.permissions, can_edit_members: e.target.checked } })} />
-                    ✏️ يقدر يعدل
-                  </label>
-                  <label className="flex items-center gap-1 cursor-pointer">
-                    <input type="checkbox" checked={Boolean(formData.permissions?.can_delete)} onChange={e => setFormData({ ...formData, permissions: { ...formData.permissions, can_delete: e.target.checked } })} />
-                    🗑️ يقدر يحذف
-                  </label>
-                </div>
-
-                <div className="flex flex-wrap gap-3 pt-1 border-t">
-                  <label className="flex items-center gap-1 cursor-pointer">
-                    <input type="checkbox" checked={Boolean(formData.permissions?.manage_edu_center)} onChange={e => setFormData({ ...formData, permissions: { ...formData.permissions, manage_edu_center: e.target.checked } })} />
-                    إدارة المركز التعليمي وإضافة الدروس
-                  </label>
-                  <label className="flex items-center gap-1 cursor-pointer">
-                    <input type="checkbox" checked={Boolean(formData.permissions?.manage_trips)} onChange={e => setFormData({ ...formData, permissions: { ...formData.permissions, manage_trips: e.target.checked } })} />
-                    إدارة مكتب الرحلات
-                  </label>
-                  <label className="flex items-center gap-1 cursor-pointer">
-                    <input type="checkbox" checked={Boolean(formData.permissions?.manage_joseph)} onChange={e => setFormData({ ...formData, permissions: { ...formData.permissions, manage_joseph: e.target.checked } })} />
-                    لجنة خدمة يوسف الرامي
-                  </label>
-                  <label className="flex items-center gap-1 cursor-pointer">
-                    <input type="checkbox" checked={Boolean(formData.permissions?.view_cases)} onChange={e => setFormData({ ...formData, permissions: { ...formData.permissions, view_cases: e.target.checked } })} />
-                    بحث الحالة المادية
-                  </label>
-                  <label className="flex items-center gap-1 cursor-pointer">
-                    <input type="checkbox" checked={Boolean(formData.permissions?.view_deacons)} onChange={e => setFormData({ ...formData, permissions: { ...formData.permissions, view_deacons: e.target.checked } })} />
-                    إدارة جدول الشمامسة
-                  </label>
-                  <label className="flex items-center gap-1 cursor-pointer">
-                    <input type="checkbox" checked={Boolean(formData.permissions?.can_edit_public)} onChange={e => setFormData({ ...formData, permissions: { ...formData.permissions, can_edit_public: e.target.checked } })} />
-                    ✏️ تعديل وترتيب صفحة الكنيسة العامة
-                  </label>
-                </div>
-
-                {services.length > 0 && (
-                  <div className="pt-2 border-t space-y-1">
-                    <span className="block text-[10px] text-gray-600">السماح برؤية فصول/خدمات إضافية (غير فصله):</span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {services.map(srv => {
-                        const list = Array.isArray(formData.permissions?.extra_services) ? formData.permissions.extra_services : [];
-                        const checked = list.includes(srv.class_name);
-                        return (
-                          <label key={srv.id} className="flex items-center gap-1 bg-white px-2 py-1 rounded-lg border cursor-pointer text-[10px]">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={e => {
-                                const next = e.target.checked
-                                  ? [...list, srv.class_name]
-                                  : list.filter(x => x !== srv.class_name);
-                                setFormData({ ...formData, permissions: { ...formData.permissions, extra_services: next } });
-                              }}
-                            />
-                            {srv.class_name}
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div><label className="block mb-1">رقم الهاتف *</label><input required type="tel" className="w-full p-2.5 border rounded-xl" value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })} /></div>
