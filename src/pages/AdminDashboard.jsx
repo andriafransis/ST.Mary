@@ -8,6 +8,7 @@ import EducationalCenterManager from '../components/EducationalCenterManager';
 import JosephArimatheaManager from '../components/JosephArimatheaManager';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
 import ServiceGroupFeed, { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/ServiceGroupFeed';
+import ServiceDrillDownCards from '../components/ServiceDrillDownCards';
 import PermissionsPage from './PermissionsPage';
 import {
   UserPlus, Edit3, Trash2, CalendarPlus, BookOpen,
@@ -170,16 +171,15 @@ export default function AdminDashboard({
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState(emptyUser);
 
-  // مودال النقل الفردي والجماعي للخدام والمخدومين
   const [transferModal, setTransferModal] = useState({
     open: false,
-    mode: 'single', // 'single' | 'bulk'
-    targetKind: 'servant', // 'servant' | 'member'
+    mode: 'single',
+    targetKind: 'servant',
     singleUser: null,
     selectedUserIds: [],
     filterSourceService: '',
     filterSourceClass: '',
-    transferAction: 'move', // 'move' | 'add'
+    transferAction: 'move',
     targetService: '',
     targetClasses: [],
     targetSingleClass: '',
@@ -187,14 +187,13 @@ export default function AdminDashboard({
   });
   const [savingTransfer, setSavingTransfer] = useState(false);
 
-  // نقل وتعديل الأب الكاهن المسؤول عن خدمة أو سنة دراسية أو فصل أو مجموعة فصول
   const [priestTransferForm, setPriestTransferForm] = useState({
     fromPriestId: '',
     toPriestId: '',
     serviceName: '',
     yearFilter: '',
     classId: '',
-    mode: 'by_service', // 'by_service' | 'by_class' | 'replace_priest'
+    mode: 'by_service',
     syncPriestSupervisedServices: true
   });
   const [savingPriestTransfer, setSavingPriestTransfer] = useState(false);
@@ -209,7 +208,6 @@ export default function AdminDashboard({
   const [grpForm, setGrpForm] = useState(emptyGroup);
   const [editingGrpId, setEditingGrpId] = useState(null);
 
-  // ربط سريع لمستخدمين محددين بكل خدمة أو اجتماع
   const [quickAssignByGroup, setQuickAssignByGroup] = useState({});
   const [assigningGroupKey, setAssigningGroupKey] = useState('');
 
@@ -273,7 +271,6 @@ export default function AdminDashboard({
     ...services.map(s => s.stage_name).filter(Boolean)
   ])];
 
-  // استخراج السنوات الدراسية / المراحل الفرعية والفصول الفعلية لكل خدمة
   const getServiceHierarchy = (serviceName) => {
     if (!serviceName) return { years: [], ungroupedClasses: [], allClasses: [] };
 
@@ -287,7 +284,6 @@ export default function AdminDashboard({
         (grpObj && grpObj.group_name.includes(s.stage_name))
     );
 
-    // اكتشاف السنوات الدراسية من إعدادات الخدمة أو من أسماء الفصول/المراحل
     const inferredYears = new Set(configuredYears);
     matchedDbClasses.forEach(cls => {
       if (cls.stage_name && cls.stage_name !== serviceName && !grpObj?.group_name?.includes(cls.stage_name)) {
@@ -314,7 +310,6 @@ export default function AdminDashboard({
         return false;
       });
 
-      // لو السنة الدراسية ليها فصول قديسين فعلية نعرضها، ولو ملهاش فصول نعرض السنة نفسها كخيار مباشر
       const selectableOptions = yrClasses.length > 0
         ? yrClasses.map(c => ({
             id: c.id,
@@ -358,6 +353,44 @@ export default function AdminDashboard({
 
   const getClassesForService = (serviceName) => getServiceHierarchy(serviceName).allClasses;
 
+  const handleQuickAddYearFromCard = async (grp, rawYearName) => {
+    if (!requireAdminGuard()) return false;
+    const cleanYear = String(rawYearName || '').trim();
+    if (!cleanYear) {
+      alert('اكتب اسم السنة أو المرحلة الدراسية أولاً (مثال: أولى ابتدائي)');
+      return false;
+    }
+    if (!grp?.id) {
+      alert('قم بتشغيل SQL جدول service_groups أولاً حتى يتم حفظ السنوات في الداتابيز.');
+      return false;
+    }
+
+    const existingStages = normalizeGroupStages(grp.stages);
+    if (existingStages.includes(cleanYear)) {
+      alert('هذه السنة الدراسية مضافة بالفعل داخل هذه الخدمة.');
+      return false;
+    }
+
+    const nextStages = [...existingStages, cleanYear];
+    const { data, error } = await supabase
+      .from('service_groups')
+      .update({ stages: nextStages, has_classes: true })
+      .eq('id', grp.id)
+      .select()
+      .single();
+
+    if (error) {
+      alert('تعذر إضافة السنة الدراسية: ' + error.message);
+      return false;
+    }
+    if (data) {
+      setDbServiceGroups(dbServiceGroups.map(g => (g.id === grp.id ? data : g)));
+      if (onRefresh) await onRefresh();
+      return true;
+    }
+    return false;
+  };
+
   const persistUserUpdate = async (updatedPayload) => {
     if (onUpdateUser) {
       await onUpdateUser(updatedPayload);
@@ -380,7 +413,6 @@ export default function AdminDashboard({
     }
   };
 
-  // حساب الخدمات والفصول التي يشرف عليها كل أب كاهن حالياً
   const getPriestCoverage = (priestId) => {
     const supervisedClasses = services.filter(s => s.priest_id === priestId);
     const priestObj = users.find(u => u.id === priestId);
@@ -408,7 +440,6 @@ export default function AdminDashboard({
     };
   };
 
-  // تنفيذ نقل أو تعديل الكاهن المسؤول عن خدمة أو سنة دراسية أو فصل أو استبدال كاهن بكاهن آخر
   const handlePriestServiceTransfer = async (e) => {
     e.preventDefault();
     if (!requireAdminGuard()) return;
@@ -434,7 +465,6 @@ export default function AdminDashboard({
         }
         affectedClasses = services.filter(s => s.priest_id === priestTransferForm.fromPriestId);
       } else {
-        // by_service (مع إمكانية تحديد سنة دراسية معينة جوه الخدمة)
         if (!priestTransferForm.serviceName) {
           alert('اختر الخدمة المطلوب نقل أو تعديل الكاهن المسؤول عنها');
           return;
@@ -1074,7 +1104,7 @@ export default function AdminDashboard({
       { id: 'roles_permissions', icon: '🔐', title: 'المركز الموحد للصلاحيات والأدوار', desc: 'إنشاء قوالب صلاحيات (الشعب، الكاهن، الخادم، المخدوم...) وتحديد مين يشوف ومين يعدل لكل شاشة ولكل فرد', count: `${roleTemplatesCount} قالب • موحّد`, color: 'border-emerald-300 bg-emerald-50/30' },
       { id: 'page_designer', icon: '🎨', title: 'تصميم وتعديل الصفحة الرئيسية والصفحات', desc: 'ترتيب الأقسام، إضافة ونشر الأخبار والقداسات والرحلات والفيديوهات والكهنة وروابط يوتيوب وفيسبوك', count: 'تحكم كامل', color: 'border-pink-300 bg-pink-50/30' },
       { id: 'events', icon: '⛪', title: 'مواعيد القداسات والاجتماعات', desc: 'إضافة وتعديل مواعيد القداسات، العشيات، والاجتماعات العامة', count: `${events.length} موعد`, color: 'border-amber-200 bg-white' },
-      { id: 'services', icon: '🏫', title: 'الخدمات والاجتماعات والفصول', desc: 'إضافة خدمة بالسنوات الدراسية وفصول القديسين أو اجتماع عام بدون فصول، نقل الكاهن والخدام، وربط المستخدمين', count: `${dbServiceGroups.length} خدمة • ${services.length} فصل`, color: 'border-blue-200 bg-white' },
+      { id: 'services', icon: '🏫', title: 'الخدمات والاجتماعات والفصول', desc: 'تصفح متدرج بالكروت: الخدمة ← السنة الدراسية ← الفصول، مع الإضافة والتعديل والنقل من جوه الكروت', count: `${dbServiceGroups.length} خدمة • ${services.length} فصل`, color: 'border-blue-200 bg-white' },
       { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل، المواد، الأسعار، حضور الطلاب والمدرسين، وشيت المحاسبة', count: 'إدارة الدروس', color: 'border-indigo-200 bg-white' },
       { id: 'joseph_arimathea', icon: '🕊️', title: 'خدمة يوسف الرامي', desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، خط سير السائق، ومتابعة المرافقين', count: 'خدمة المنتقلين', color: 'border-slate-300 bg-white' },
       { id: 'burial_and_caskets', icon: '⚰️', title: 'أماكن الدفن والصناديق وألحان يوسف الرامي', desc: 'جدول أماكن الدفن بالترقيم المتسلسل ورسوم الانتقال + مخزون الصناديق + ألحان يوسف الرامي وسلايدر الصوت', count: 'جداول وألحان', color: 'border-cyan-200 bg-white' },
@@ -1404,6 +1434,41 @@ export default function AdminDashboard({
         <div className="space-y-4 text-xs">
           {renderTopBack('🏫 الخدمات والاجتماعات والسنوات الدراسية وفصولها')}
 
+          {/* تصفح متدرج بالكروت: الخدمة ← السنة الدراسية ← الفصول */}
+          <ServiceDrillDownCards
+            groups={effectiveGroups}
+            services={services}
+            users={users}
+            isAdmin={isAdmin}
+            onSelectService={(grp) => {
+              if (!isAdmin) return;
+              setSrvForm(prev => ({
+                ...prev,
+                stage_name: grp.group_name,
+                academic_year: ''
+              }));
+            }}
+            onSelectYear={(grp, yr) => {
+              if (!isAdmin) return;
+              setSrvForm(prev => ({
+                ...prev,
+                stage_name: grp.group_name,
+                academic_year: yr.yearName || ''
+              }));
+            }}
+            onQuickAddYear={handleQuickAddYearFromCard}
+            onQuickAddClassForYear={(grp, yr) => {
+              setEditingSrvId(null);
+              setSrvForm({
+                ...emptyService,
+                stage_name: grp.group_name,
+                academic_year: yr.yearName || '',
+                head_servant_name: grp.head_servant_name || ''
+              });
+              document.getElementById('add-class-form')?.scrollIntoView({ behavior: 'smooth' });
+            }}
+          />
+
           {/* كارت نقل وتعديل الأب الكاهن المسؤول عن خدمة أو سنة دراسية أو فصل */}
           {isAdmin && (
             <div className="bg-purple-50/50 p-4 rounded-3xl border-2 border-purple-200 space-y-3 font-bold shadow-sm">
@@ -1566,7 +1631,7 @@ export default function AdminDashboard({
 
           {isAdmin && (
             <div className="bg-amber-50/50 p-4 rounded-3xl border-2 border-amber-300 space-y-3 font-bold shadow-sm">
-              <h3 className="text-sm font-black flex items-center gap-1.5 text-[#7a1c24]">
+              <h3 className="text-sm font-extrabold flex items-center gap-1.5 text-[#7a1c24]">
                 <Layers size={16} /> {editingGrpId ? '✏️ تعديل الخدمة / الاجتماع' : '① أولاً: إضافة خدمة أو اجتماع والسنوات الدراسية التابعة لها'}
               </h3>
               <form onSubmit={handleSaveServiceGroup} className="space-y-3">
@@ -2460,7 +2525,6 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* مودال النقل الفردي والجماعي للخدام والمخدومين */}
       {transferModal.open && isAdmin && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto">
