@@ -16,6 +16,32 @@ import {
   Users, Settings, Save, Upload, ShieldCheck, Lock, Layers, X
 } from 'lucide-react';
 
+// توحيد وتنسيق رتب الشمامسة لضمان التطابق الكامل بين الداتابيز والشاشات
+export const DEACON_RANKS = [
+  { value: 'أبصالتس', label: 'أبصالتس (مرتل)' },
+  { value: 'اغنسطس', label: 'اغنسطس (قارئ)' },
+  { value: 'إبصاديا', label: 'إبصاديا (مبدأ شماس)' },
+  { value: 'دياكون', label: 'دياكون (شماس كامل)' },
+  { value: 'أرشيدياكون', label: 'أرشيدياكون (رئيس شمامسة)' }
+];
+
+export const normalizeDeaconRank = (rank) => {
+  if (!rank) return 'أبصالتس';
+  const clean = String(rank).trim();
+  if (clean.includes('أبصالت') || clean.includes('ابصالت') || clean.includes('مرتل')) return 'أبصالتس';
+  if (clean.includes('اغنسط') || clean.includes('أغنسط') || clean.includes('قارئ')) return 'اغنسطس';
+  if (clean.includes('إبصاد') || clean.includes('ابصاد') || clean.includes('مبدأ')) return 'إبصاديا';
+  if (clean.includes('أرشي') || clean.includes('ارشي') || clean.includes('رئيس')) return 'أرشيدياكون';
+  if (clean.includes('دياكون') || clean.includes('كامل')) return 'دياكون';
+  return clean;
+};
+
+export const getDeaconRankLabel = (rank) => {
+  const norm = normalizeDeaconRank(rank);
+  const found = DEACON_RANKS.find(r => r.value === norm);
+  return found ? found.label : (rank || 'شماس');
+};
+
 const emptyUser = {
   first_name: '', second_name: '', third_name: '', fourth_name: '',
   gender: 'ذكر',
@@ -26,7 +52,7 @@ const emptyUser = {
   dob: '', address: '', job_title: '',
   parent_id: '', father_id: '', mother_id: '', family_tree_id: '', confession_father_id: '',
   father_full_name: '', father_phone: '', mother_full_name: '', mother_phone: '',
-  is_deacon: false, deacon_rank: 'اغنسطس',
+  is_deacon: false, deacon_rank: 'أبصالتس',
   priest_degree: 'قس', ordination_date: '', promotion_date: '',
   priest_wife_full_name: '', priest_wife_phone: '', priest_family_notes: '',
   church_job: '',
@@ -389,7 +415,8 @@ export default function AdminDashboard({
       guardian_type: presetRole === 'parent' ? 'father' : '',
       family_role: presetRole === 'parent' ? 'الأب' : 'ابن/ابنة',
       member_status: 'active',
-      is_deacon: userSubTab === 'deacons'
+      is_deacon: userSubTab === 'deacons',
+      deacon_rank: 'أبصالتس'
     });
     setShowModal(true);
   };
@@ -436,7 +463,7 @@ export default function AdminDashboard({
       mother_full_name: u.mother_full_name || '',
       mother_phone: u.mother_phone || '',
       is_deacon: Boolean(u.is_deacon),
-      deacon_rank: u.deacon_rank || 'اغنسطس',
+      deacon_rank: normalizeDeaconRank(u.deacon_rank),
       priest_degree: u.priest_degree || 'قس',
       ordination_date: u.ordination_date || '',
       promotion_date: u.promotion_date || '',
@@ -480,6 +507,8 @@ export default function AdminDashboard({
       ? (formData.guardian_type === 'mother' ? 'mother' : 'father')
       : (formData.guardian_type || '');
 
+    const normalizedRank = formData.is_deacon ? normalizeDeaconRank(formData.deacon_rank) : null;
+
     const payload = {
       ...formData,
       gender: formData.gender || 'ذكر',
@@ -503,7 +532,9 @@ export default function AdminDashboard({
         ? chosenMotherId
         : null,
       family_tree_id: formData.family_tree_id || null,
-      confession_father_id: formData.confession_father_id || null
+      confession_father_id: formData.confession_father_id || null,
+      is_deacon: Boolean(formData.is_deacon),
+      deacon_rank: normalizedRank
     };
 
     if (isEditing) {
@@ -739,7 +770,14 @@ export default function AdminDashboard({
                           )}
                           {isParentOfChild && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-950">👨‍👦 ولي أمر مسجل</span>}
                           {u.role === 'priest' && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900">{u.priest_degree} {u.ordination_date ? `(سيامة: ${u.ordination_date})` : ''}</span>}
-                          {u.is_deacon && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800">شماس ({u.deacon_rank})</span>}
+                          
+                          {/* الرتبة الدقيقة للشماس بدون تكرار الكلمات */}
+                          {u.is_deacon && (
+                            <span className="px-2.5 py-0.5 rounded text-[10px] font-extrabold bg-purple-100 text-purple-900 border border-purple-200">
+                              🕯️ شماس: {getDeaconRankLabel(u.deacon_rank)}
+                            </span>
+                          )}
+
                           {u.detailed_stage && SERVANT_ROLES.includes(u.role) && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-900">خادم: {u.detailed_stage}</span>}
                           {u.assigned_class && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800">فصل: {u.assigned_class}</span>}
                           {u.permissions?.manage_edu_center && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-900">🎓 مدير مركز تعليمي</span>}
@@ -824,7 +862,6 @@ export default function AdminDashboard({
         <div className="space-y-4 text-xs">
           {renderTopBack('🏫 الخدمات والاجتماعات والفصول التابعة لها')}
 
-          {/* ① أولاً: إضافة وتعديل وحذف الخدمة أو الاجتماع العام */}
           {isAdmin && (
             <div className="bg-amber-50/50 p-4 rounded-3xl border-2 border-amber-300 space-y-3 font-bold shadow-sm">
               <h3 className="text-sm font-black flex items-center gap-1.5 text-[#7a1c24]">
@@ -1002,7 +1039,6 @@ export default function AdminDashboard({
             </div>
           )}
 
-          {/* ② ثانياً: إضافة فصل وربطه بإحدى الخدمات اللي لها فصول */}
           {isAdmin && (
             <form
               id="add-class-form"
@@ -1072,7 +1108,6 @@ export default function AdminDashboard({
             </form>
           )}
 
-          {/* ③ عرض كل خدمة أو اجتماع عام مع تفاصيله وفصوله */}
           <div className="grid md:grid-cols-2 gap-3">
             {effectiveGroups.map((grp, idx) => {
               const stagesArr = normalizeGroupStages(grp.stages);
@@ -1582,15 +1617,25 @@ export default function AdminDashboard({
                 </div>
               )}
 
+              {/* قسم الشماس: متطابق 100% مع الرتب المعتمدة */}
               <div className="bg-purple-50 p-3 rounded-2xl border border-purple-200 space-y-2">
                 <label className="flex items-center gap-2 cursor-pointer font-bold text-purple-950">
                   <input type="checkbox" checked={formData.is_deacon} onChange={e => setFormData({ ...formData, is_deacon: e.target.checked })} />
                   هل هذا الشخص شماس بخدمة الكنيسة؟
                 </label>
                 {formData.is_deacon && (
-                  <select className="w-full p-2 border rounded-xl bg-white" value={formData.deacon_rank} onChange={e => setFormData({ ...formData, deacon_rank: e.target.value })}>
-                    <option value="أبصالتس">أبصالتس (مرتل)</option><option value="اغنسطس">اغنسطس (قارئ)</option><option value="إبصاديا">إبصاديا (مبدأ شماس)</option><option value="شماس كامل">شماس كامل (دياكون)</option>
-                  </select>
+                  <div>
+                    <label className="block mb-1 text-purple-900 text-[11px]">رتبة الشماس الحالية *</label>
+                    <select
+                      className="w-full p-2 border rounded-xl bg-white"
+                      value={normalizeDeaconRank(formData.deacon_rank)}
+                      onChange={e => setFormData({ ...formData, deacon_rank: e.target.value })}
+                    >
+                      {DEACON_RANKS.map(rk => (
+                        <option key={rk.value} value={rk.value}>{rk.label}</option>
+                      ))}
+                    </select>
+                  </div>
                 )}
               </div>
 

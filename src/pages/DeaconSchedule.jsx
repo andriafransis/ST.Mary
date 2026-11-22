@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLogger';
@@ -30,15 +31,25 @@ const DEFAULT_LITURGY_BOOKS = [
   { key: 'euchologion_reconciliation', title: '🤝 صلوات الصلح', category: 'كتاب الخولاجي' },
   { key: 'euchologion_anaphora_fraction', title: '🍞 التقديس والقسمة', category: 'كتاب الخولاجي' },
   { key: 'euchologion_commemorations', title: '📜 المجمع والتراحيم', category: 'كتاب الخولاجي' },
-   { key: 'euchologion_blessings', title: '🕊️ البركات والختام', category: 'كتاب الخولاجي' },
+  { key: 'euchologion_blessings', title: '🕊️ البركات والختام', category: 'كتاب الخولاجي' },
   { key: 'ritual_funeral', title: '🕯️ الطقس الحزايني (التجنيز)', category: 'الطقوس الكنسية' },
   { key: 'ritual_third_day', title: '🕊️ طقس صلاة الثالث', category: 'الطقوس الكنسية' },
   { key: 'ritual_laqqan', title: '💧 طقس صلوات اللقان', category: 'الطقوس الكنسية' },
   { key: 'ritual_baptism', title: '✝ طقس سر المعمودية والميرون', category: 'الطقوس الكنسية' }
 ];
 
+export const normalizeDeaconRank = (rank) => {
+  if (!rank) return 'شماس';
+  const clean = String(rank).trim();
+  if (clean.includes('أبصالت') || clean.includes('ابصالت') || clean.includes('مرتل')) return 'أبصالتس (مرتل)';
+  if (clean.includes('اغنسط') || clean.includes('أغنسط') || clean.includes('قارئ')) return 'اغنسطس (قارئ)';
+  if (clean.includes('إبصاد') || clean.includes('ابصاد') || clean.includes('مبدأ')) return 'إبصاديا (مبدأ)';
+  if (clean.includes('أرشي') || clean.includes('ارشي') || clean.includes('رئيس')) return 'أرشيدياكون (رئيس شمامسة)';
+  if (clean.includes('دياكون') || clean.includes('كامل')) return 'دياكون (شماس كامل)';
+  return clean;
+};
+
 export default function DeaconSchedule({ deacons = [], currentUser, canEdit = false }) {
-  // 'hub' | 'schedule' | 'katameros' | 'agpeya' | 'liturgy' | 'euchologion' | 'rituals' | 'visitations'
   const [activeCard, setActiveCard] = useState('hub');
   const [schedules, setSchedules] = useState([]);
   const [visitations, setVisitations] = useState([]);
@@ -243,7 +254,6 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
     if (!error) setVisitations(visitations.filter(v => v.id !== id));
   };
 
-  // الشماس يشوف جدوله وتوزيعاته للقراءة فقط (View Only)
   const displayedSchedules = canEdit ? schedules : schedules.filter(s => s.deacon_id === currentUser?.id);
   const maxDaysInMonth = selectedCopticMonth === 'نسيء' ? 6 : 30;
   const savedDaysInSelectedMonth = new Set(
@@ -266,9 +276,6 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
     </div>
   );
 
-  // ==============================================================
-  // HUB: الكروت الكبيرة لشاشة الشماس
-  // ==============================================================
   if (activeCard === 'hub') {
     const cards = [
       { id: 'schedule', icon: '📅', title: 'جدول التوزيع والخدمات', desc: canEdit ? 'توزيع الشمامسة على المذبح والقراءات' : 'عرض مواعيد خدمتك وتوزيعك (قراءة فقط)', count: `${displayedSchedules.length} ميعاد`, color: 'border-red-200 bg-white' },
@@ -316,9 +323,6 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
     );
   }
 
-  // ==============================================================
-  // كارت الأجبية (View Only للشماس العادي)
-  // ==============================================================
   if (activeCard === 'agpeya') {
     return (
       <div className="space-y-4 text-xs" dir="rtl">
@@ -328,9 +332,6 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
     );
   }
 
-  // ==============================================================
-  // كارت القداس الإلهي أو كتاب الخولاجي أو الطقوس الكنسية (الحزايني، اللقان، الثالث، المعمودية)
-  // ==============================================================
   if (activeCard === 'liturgy' || activeCard === 'euchologion' || activeCard === 'rituals') {
     const targetCategory =
       activeCard === 'liturgy'
@@ -428,9 +429,6 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
     );
   }
 
-  // ==============================================================
-  // كارت القطمارس السنوي (13 شهر قبطي)
-  // ==============================================================
   if (activeCard === 'katameros') {
     return (
       <div className="space-y-4 text-xs" dir="rtl">
@@ -545,9 +543,6 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
     );
   }
 
-  // ==============================================================
-  // كارت جدول التوزيع (View Only للشماس العادي)
-  // ==============================================================
   if (activeCard === 'schedule') {
     return (
       <div className="space-y-4 text-xs" dir="rtl">
@@ -565,7 +560,11 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
             <div className="grid md:grid-cols-4 gap-2">
               <select required className="p-2.5 border rounded-xl" value={form.deacon_id} onChange={e => setForm({ ...form, deacon_id: e.target.value })}>
                 <option value="">-- اختر الشماس * --</option>
-                {deacons.map(d => <option key={d.id} value={d.id}>{d.full_name} ({d.deacon_rank || 'شماس'})</option>)}
+                {deacons.map(d => (
+                  <option key={d.id} value={d.id}>
+                    {d.full_name} ({normalizeDeaconRank(d.deacon_rank)})
+                  </option>
+                ))}
               </select>
               <select className="p-2.5 border rounded-xl bg-blue-50/40" value={form.prayer_hour} onChange={e => setForm({ ...form, prayer_hour: e.target.value })}>
                 {PRAYER_HOURS.map((h, i) => <option key={i} value={h}>{h}</option>)}
@@ -628,9 +627,6 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
     );
   }
 
-  // ==============================================================
-  // كارت افتقاد الشمامسة (للمشرف فقط)
-  // ==============================================================
   if (activeCard === 'visitations' && canEdit) {
     return (
       <div className="space-y-4 text-xs" dir="rtl">
