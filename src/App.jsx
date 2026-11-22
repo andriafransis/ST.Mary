@@ -19,7 +19,7 @@ import MemberDashboard from './pages/MemberDashboard';
 import ParentDashboard from './pages/ParentDashboard';
 import DeaconSchedule from './pages/DeaconSchedule';
 import CertificatesRegistry from './pages/CertificatesRegistry';
-import { LogOut, Bell, Menu, X } from 'lucide-react';
+import { LogOut, Bell, GraduationCap, HeartHandshake, Menu, X } from 'lucide-react';
 
 const SAVED_USER_KEY = 'church_app_logged_user_id';
 const DEFAULT_CHURCH_NAME = 'كنيسة السيدة العذراء مريم بالمطرية';
@@ -137,9 +137,8 @@ export default function App() {
       return;
     }
     const { allowed, defaultScreen } = resolveScreens(currentUser, roleScreens);
-    const startScr = allowed.has('public_page') ? 'public_page' : defaultScreen;
     if (!activeScreen || !allowed.has(activeScreen)) {
-      setActiveScreen(startScr || '');
+      setActiveScreen(defaultScreen || '');
     }
   }, [currentUser, roleScreens]);
 
@@ -163,9 +162,8 @@ export default function App() {
       setCurrentUser(user);
       setExtraScreen('');
       setMobileMenuOpen(false);
-      const { allowed, defaultScreen } = resolveScreens(user, roleScreens);
-      const startScr = allowed.has('public_page') ? 'public_page' : defaultScreen;
-      setActiveScreen(startScr || '');
+      const { defaultScreen } = resolveScreens(user, roleScreens);
+      setActiveScreen(defaultScreen || '');
       fetchData();
     } else {
       setLoginError('اسم المستخدم أو كلمة المرور غير صحيحة.');
@@ -208,7 +206,6 @@ export default function App() {
     children_names: u.children_names || '',
     parent_id: u.parent_id || null,
     father_id: u.father_id || null,
-    mother_id: u.mother_id || null,
     confession_father_id: u.confession_father_id || null,
     confession_father: u.confession_father || '',
     confession_status: u.confession_status || 'مخدوم جديد',
@@ -449,6 +446,7 @@ export default function App() {
 
   const publicAccess = getScreenAccess(currentUser, 'public_page', roleScreens);
   const publicEditorAccess = getScreenAccess(currentUser, 'public_editor', roleScreens);
+  const eduAccess = getScreenAccess(currentUser, 'edu_center', roleScreens);
   const tripsAccess = getScreenAccess(currentUser, 'trips_office', roleScreens);
   const deaconsAccess = getScreenAccess(currentUser, 'deacons', roleScreens);
 
@@ -458,6 +456,14 @@ export default function App() {
     Boolean(currentUser.permissions?.can_edit_public) ||
     publicAccess.edit ||
     publicEditorAccess.edit;
+
+  const canManageEduCenter =
+    isAdmin ||
+    isPriest ||
+    currentUser.role === 'edu_manager' ||
+    Boolean(currentUser.permissions?.manage_edu_center) ||
+    Boolean(currentUser.permissions?.is_edu_teacher) ||
+    eduAccess.edit;
 
   const canAccessTripsOffice =
     isAdmin ||
@@ -500,7 +506,7 @@ export default function App() {
     );
   }
 
-  const navScreens = Array.from(new Set(SCREEN_ORDER)).filter(s => {
+  const navScreens = [...SCREEN_ORDER, ...(canEditPublic ? ['public_editor'] : [])].filter(s => {
     if (s === 'public_editor' && !canEditPublic) return false;
     if (s === 'trips_office') return canAccessTripsOffice;
     return allowed.has(s);
@@ -512,10 +518,17 @@ export default function App() {
     setMobileMenuOpen(false);
   };
 
+  const selectExtra = (ext) => {
+    setExtraScreen(ext);
+    setMobileMenuOpen(false);
+  };
+
   return (
     <div className="min-h-screen bg-[#f6f4ef] flex flex-col" dir="rtl">
+      {/* هيدر علوي ثابت ومظبوط لجميع الشاشات (موبايل + ديسكتوب) */}
       <header className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#68161d] text-white sticky top-0 z-40 shadow-md print:hidden">
         <div className="max-w-6xl mx-auto px-3 sm:px-5 py-2.5 flex items-center justify-between gap-2">
+          {/* يمين الهيدر: اللوجو الجميل + الاسم */}
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
             {churchLogoUrl ? (
               <img
@@ -546,6 +559,7 @@ export default function App() {
             </div>
           </div>
 
+          {/* يسار الهيدر: الإشعارات + خروج + زر القائمة للموبايل */}
           <div className="flex items-center gap-1.5 shrink-0">
             {!['member', 'parent', 'worker'].includes(currentUser.role) && upcomingBirthdays.length > 0 && (
               <span
@@ -577,6 +591,7 @@ export default function App() {
           </div>
         </div>
 
+        {/* شريط التابات العلوي المدمج */}
         <div className="bg-[#5a1218]/75 border-t border-white/10">
           <div className="max-w-6xl mx-auto px-3 sm:px-5 py-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar lg:flex-wrap">
             {navScreens.map(scr => {
@@ -599,9 +614,34 @@ export default function App() {
                 </button>
               );
             })}
+
+            <button
+              type="button"
+              onClick={() => selectExtra('edu_center')}
+              className={`px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition ${
+                extraScreen === 'edu_center'
+                  ? 'bg-amber-400 text-[#4a0e13] shadow-sm font-black'
+                  : 'bg-white/10 hover:bg-white/20 text-white/95'
+              }`}
+            >
+              <GraduationCap size={14} /> {canManageEduCenter ? 'إدارة المركز التعليمي' : 'المركز التعليمي'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => selectExtra('joseph_arimathea')}
+              className={`px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition ${
+                extraScreen === 'joseph_arimathea'
+                  ? 'bg-amber-400 text-[#4a0e13] shadow-sm font-black'
+                  : 'bg-red-600/80 hover:bg-red-600 text-white'
+              }`}
+            >
+              <HeartHandshake size={14} /> يوسف الرامي
+            </button>
           </div>
         </div>
 
+        {/* قائمة الموبايل المنسدلة */}
         {mobileMenuOpen && (
           <div className="lg:hidden bg-[#4a0e13] border-t border-white/15 px-3 py-3 shadow-xl">
             <p className="text-[10px] text-amber-200/80 font-bold mb-2">كل الشاشات المتاحة لحسابك:</p>
@@ -624,6 +664,26 @@ export default function App() {
                   </button>
                 );
               })}
+              <button
+                type="button"
+                onClick={() => selectExtra('edu_center')}
+                className={`px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
+                  extraScreen === 'edu_center' ? 'bg-amber-400 text-[#4a0e13] font-black' : 'bg-white/10 text-white'
+                }`}
+              >
+                <GraduationCap size={14} className="shrink-0" />
+                <span className="truncate">المركز التعليمي</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => selectExtra('joseph_arimathea')}
+                className={`px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
+                  extraScreen === 'joseph_arimathea' ? 'bg-amber-400 text-[#4a0e13] font-black' : 'bg-red-700/80 text-white'
+                }`}
+              >
+                <HeartHandshake size={14} className="shrink-0" />
+                <span className="truncate">يوسف الرامي</span>
+              </button>
             </div>
           </div>
         )}
