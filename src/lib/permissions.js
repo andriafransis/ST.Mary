@@ -1,165 +1,223 @@
+// src/lib/permissions.js
+
 export const SCREEN_ORDER = [
-  'public_page', 'admin_panel', 'priest_panel', 'servant_panel', 'member_panel', 'parent_panel',
-  'edu_center', 'joseph_arimathea', 'trips_office', 'approvals', 'deacons', 'certs',
-  'public_editor', 'permissions'
+  'admin_panel',
+  'priest_panel',
+  'servant_panel',
+  'member_panel',
+  'parent_panel',
+  'approvals',
+  'permissions',
+  'trips_office',
+  'deacons',
+  'certs',
+  'public_editor',
+  'public_page'
 ];
 
 export const SCREEN_LABELS = {
-  public_page: 'صفحة الكنيسة',
-  admin_panel: 'لوحة الإدارة',
-  priest_panel: 'شاشة الكاهن',
-  servant_panel: 'شاشة الخادم',
-  member_panel: 'شاشة المخدوم',
-  parent_panel: 'شاشة ولي الأمر',
-  edu_center: 'المركز التعليمي',
-  joseph_arimathea: 'خدمة يوسف الرامي',
-  trips_office: 'مكتب الرحلات العامة',
-  approvals: 'طلبات الانضمام',
-  deacons: 'جدول الشمامسة',
-  certs: 'الشهادات والأسرار',
-  public_editor: 'تعديل صفحة الكنيسة',
-  permissions: 'الصلاحيات'
+  admin_panel: '🛠️ لوحة الإدارة',
+  priest_panel: '✝ لوحة الأب الكاهن',
+  servant_panel: '📖 لوحة الخادم',
+  member_panel: '👤 فقرة المخدوم',
+  parent_panel: '👨‍👩‍👦 متابعة ولي الأمر',
+  approvals: '✅ طلبات الانضمام',
+  permissions: '🔐 إدارة الصلاحيات',
+  trips_office: '🚌 مكتب الرحلات',
+  deacons: '🕯️ جدول الشمامسة',
+  certs: '📜 سجل الشهادات',
+  public_editor: '✏️ تعديل الصفحة العامة',
+  public_page: '🌐 صفحة الكنيسة العامة'
 };
 
-export const ALL_SCREENS = [...SCREEN_ORDER];
-
-export const ALL_AVAILABLE_SCREENS = [
-  { id: 'public_page', label: '1) 🌐 صفحة الكنيسة العامة' },
-  { id: 'member_panel', label: '2) 👤 شاشة المخدوم / الشعب' },
-  { id: 'parent_panel', label: '3) 👨‍👩‍👦 شاشة ولي الأمر' },
-  { id: 'servant_panel', label: '4) 📖 شاشة الخادم' },
-  { id: 'priest_panel', label: '5) ✝ شاشة الأب الكاهن' },
-  { id: 'edu_center', label: '6) 🎓 المركز التعليمي' },
-  { id: 'joseph_arimathea', label: '7) 🕊️ خدمة يوسف الرامي' },
-  { id: 'trips_office', label: '8) 🚌 مكتب الرحلات العامة' },
-  { id: 'deacons', label: '9) 🕯️ جدول الشمامسة' },
-  { id: 'certs', label: '10) 📜 الشهادات والأسرار' },
-  { id: 'approvals', label: '11) ✅ طلبات الانضمام' },
-  { id: 'public_editor', label: '12) ✏️ تعديل صفحة الكنيسة' },
-  { id: 'permissions', label: '13) 🔐 شاشة الصلاحيات' },
-  { id: 'admin_panel', label: '14) 🛡️ لوحة الإدارة' }
-];
-
-export const ROLES = [
-  { key: 'admin', label: '🛡️ سوبر أدمن' },
-  { key: 'priest', label: '✝ أب كاهن' },
-  { key: 'head_servant', label: '⭐ أمين الخدمة' },
-  { key: 'vice_head_servant', label: '🌟 مساعد أمين الخدمة' },
-  { key: 'servant', label: '📖 خادم مرحلة' },
-  { key: 'meeting_servant', label: '🎤 خادم اجتماع' },
-  { key: 'mercy_servant', label: '🤝 خادم إخوة رب' },
-  { key: 'member', label: '👤 مخدوم' },
-  { key: 'parent', label: '👨‍👩‍👦 ولي أمر' },
-  { key: 'worker', label: '🛠️ عامل' }
-];
-
-export const DEFAULT_ROLE_SCREENS = {
-  admin: { screens: ALL_SCREENS, def: 'public_page' },
-  priest: { screens: ['public_page', 'priest_panel', 'trips_office', 'approvals', 'public_editor', 'deacons', 'certs', 'edu_center', 'joseph_arimathea'], def: 'public_page' },
-  head_servant: { screens: ['public_page', 'admin_panel', 'trips_office', 'approvals'], def: 'public_page' },
-  vice_head_servant: { screens: ['public_page', 'admin_panel', 'approvals'], def: 'public_page' },
-  servant: { screens: ['public_page', 'servant_panel'], def: 'public_page' },
-  meeting_servant: { screens: ['public_page', 'servant_panel'], def: 'public_page' },
-  mercy_servant: { screens: ['public_page', 'servant_panel'], def: 'public_page' },
-  member: { screens: ['public_page', 'member_panel'], def: 'public_page' },
-  worker: { screens: ['public_page', 'member_panel'], def: 'public_page' },
-  parent: { screens: ['public_page', 'parent_panel'], def: 'public_page' }
-};
-
-const LEGACY_FLAGS = {
-  view_priest_panel: 'priest_panel',
-  view_servant_panel: 'servant_panel',
-  view_member_panel: 'member_panel',
-  view_parent_panel: 'parent_panel',
-  view_deacons: 'deacons',
-  view_certs: 'certs',
-  can_edit_public: 'public_editor'
-};
-
-export function resolveScreens(user, roleScreensRows = []) {
-  const allowed = new Set();
-  let def = null;
-
-  if (!user) return { allowed, defaultScreen: null };
-
-  if (user.role === 'admin') {
-    ALL_SCREENS.forEach(k => allowed.add(k));
-    def = 'public_page';
-  } else {
-    const rows = roleScreensRows.filter(r => r.role === user.role);
-    if (rows.length > 0) {
-      rows.forEach(r => {
-        allowed.add(r.screen);
-        if (!def && r.is_default) def = r.screen;
-      });
-    } else if (DEFAULT_ROLE_SCREENS[user.role]) {
-      DEFAULT_ROLE_SCREENS[user.role].screens.forEach(k => allowed.add(k));
-      def = DEFAULT_ROLE_SCREENS[user.role].def;
+export const ROLE_DEFAULT_PERMISSIONS = {
+  admin: {
+    defaultScreen: 'admin_panel',
+    screens: {
+      admin_panel: { view: true, create: true, edit: true, delete: true },
+      priest_panel: { view: true, create: true, edit: true, delete: true },
+      servant_panel: { view: true, create: true, edit: true, delete: true },
+      member_panel: { view: true, create: true, edit: true, delete: true },
+      parent_panel: { view: true, create: true, edit: true, delete: true },
+      approvals: { view: true, create: true, edit: true, delete: true },
+      permissions: { view: true, create: true, edit: true, delete: true },
+      trips_office: { view: true, create: true, edit: true, delete: true },
+      deacons: { view: true, create: true, edit: true, delete: true },
+      certs: { view: true, create: true, edit: true, delete: true },
+      public_editor: { view: true, create: true, edit: true, delete: true },
+      public_page: { view: true, create: false, edit: false, delete: false }
+    }
+  },
+  priest: {
+    defaultScreen: 'priest_panel',
+    screens: {
+      priest_panel: { view: true, create: true, edit: true, delete: true },
+      servant_panel: { view: true, create: true, edit: true, delete: false },
+      member_panel: { view: true, create: false, edit: false, delete: false },
+      approvals: { view: true, create: false, edit: true, delete: false },
+      trips_office: { view: true, create: true, edit: true, delete: false },
+      deacons: { view: true, create: true, edit: true, delete: false },
+      certs: { view: true, create: true, edit: true, delete: false },
+      public_editor: { view: true, create: true, edit: true, delete: false },
+      public_page: { view: true, create: false, edit: false, delete: false }
+    }
+  },
+  head_servant: {
+    defaultScreen: 'servant_panel',
+    screens: {
+      servant_panel: { view: true, create: true, edit: true, delete: false },
+      member_panel: { view: true, create: false, edit: false, delete: false },
+      approvals: { view: true, create: false, edit: true, delete: false },
+      trips_office: { view: true, create: true, edit: false, delete: false },
+      deacons: { view: true, create: false, edit: false, delete: false },
+      public_page: { view: true, create: false, edit: false, delete: false }
+    }
+  },
+  vice_head_servant: {
+    defaultScreen: 'servant_panel',
+    screens: {
+      servant_panel: { view: true, create: true, edit: true, delete: false },
+      member_panel: { view: true, create: false, edit: false, delete: false },
+      trips_office: { view: true, create: true, edit: false, delete: false },
+      deacons: { view: true, create: false, edit: false, delete: false },
+      public_page: { view: true, create: false, edit: false, delete: false }
+    }
+  },
+  servant: {
+    defaultScreen: 'servant_panel',
+    screens: {
+      servant_panel: { view: true, create: true, edit: true, delete: false },
+      member_panel: { view: true, create: false, edit: false, delete: false },
+      trips_office: { view: true, create: false, edit: false, delete: false },
+      public_page: { view: true, create: false, edit: false, delete: false }
+    }
+  },
+  meeting_servant: {
+    defaultScreen: 'servant_panel',
+    screens: {
+      servant_panel: { view: true, create: true, edit: true, delete: false },
+      public_page: { view: true, create: false, edit: false, delete: false }
+    }
+  },
+  mercy_servant: {
+    defaultScreen: 'servant_panel',
+    screens: {
+      servant_panel: { view: true, create: true, edit: true, delete: false },
+      public_page: { view: true, create: false, edit: false, delete: false }
+    }
+  },
+  member: {
+    defaultScreen: 'member_panel',
+    screens: {
+      member_panel: { view: true, create: false, edit: false, delete: false },
+      trips_office: { view: true, create: false, edit: false, delete: false },
+      public_page: { view: true, create: false, edit: false, delete: false }
+    }
+  },
+  parent: {
+    defaultScreen: 'parent_panel',
+    screens: {
+      parent_panel: { view: true, create: true, edit: false, delete: false },
+      public_page: { view: true, create: false, edit: false, delete: false }
+    }
+  },
+  worker: {
+    defaultScreen: 'public_page',
+    screens: {
+      public_page: { view: true, create: false, edit: false, delete: false },
+      deacons: { view: true, create: false, edit: false, delete: false }
     }
   }
+};
 
-  const p = user.permissions || {};
-  (p.extra_screens || []).forEach(k => allowed.add(k));
-  Object.entries(LEGACY_FLAGS).forEach(([flag, screen]) => {
-    if (p[flag] === true) allowed.add(screen);
-    if (p[flag] === false && user.role !== 'admin') allowed.delete(screen);
-  });
-  if (user.is_deacon && p.view_deacons !== false) allowed.add('deacons');
+export function getDetailedScreenPermissions(user, screenKey, roleScreens = []) {
+  const role = user?.role || 'member';
+  const roleCfg = ROLE_DEFAULT_PERMISSIONS[role] || ROLE_DEFAULT_PERMISSIONS.member;
+  const base = roleCfg.screens?.[screenKey] || { view: false, create: false, edit: false, delete: false };
 
-  if (p.screen_permissions && typeof p.screen_permissions === 'object' && Object.keys(p.screen_permissions).length > 0) {
-    Object.entries(p.screen_permissions).forEach(([scr, sp]) => {
-      if (sp?.view === true) allowed.add(scr);
-      else if (sp?.view === false && user.role !== 'admin') allowed.delete(scr);
-    });
+  // 1) تطبيق إعدادات جدول role_screens إن وُجدت للدور والشاشة
+  const dbRow = Array.isArray(roleScreens)
+    ? roleScreens.find(r => r.role === role && r.screen_key === screenKey)
+    : null;
+
+  let perms = {
+    view: dbRow ? (dbRow.can_view ?? dbRow.allowed ?? base.view) : base.view,
+    create: dbRow ? (dbRow.can_create ?? false) : base.create,
+    edit: dbRow ? (dbRow.can_edit ?? false) : base.edit,
+    delete: dbRow ? (dbRow.can_delete ?? false) : base.delete
+  };
+
+  // 2) لو تم تفعيل وضع "عرض فقط" على الدور أو المستخدم
+  if (user?.permissions?.read_only === true) {
+    perms = { ...perms, create: false, edit: false, delete: false };
   }
 
-  if (user.role !== 'admin') (p.denied_screens || []).forEach(k => allowed.delete(k));
-
-  if (p.default_screen && allowed.has(p.default_screen)) {
-    def = p.default_screen;
-  } else if (allowed.has('public_page')) {
-    def = 'public_page';
-  }
-
-  if (!def || !allowed.has(def)) {
-    def = allowed.has('public_page')
-      ? 'public_page'
-      : (SCREEN_ORDER.find(k => allowed.has(k)) || null);
-  }
-
-  return { allowed, defaultScreen: def };
-}
-
-export function getScreenAccess(user, screenId, roleScreensRows = []) {
-  if (!user) return { view: false, add: false, edit: false, delete: false };
-  if (user.role === 'admin') return { view: true, add: true, edit: true, delete: true };
-
-  const p = user.permissions || {};
-  const sp = p.screen_permissions?.[screenId];
-  const { allowed } = resolveScreens(user, roleScreensRows);
-
-  if (sp && typeof sp === 'object') {
-    const canView = Boolean(sp.view) && !(p.denied_screens || []).includes(screenId);
-    const canEdit = screenId === 'public_editor'
-      ? (canView && (Boolean(sp.edit) || Boolean(p.can_edit_public)))
-      : (canView && Boolean(sp.edit));
-    return {
-      view: canView,
-      add: canView && Boolean(sp.add),
-      edit: canEdit,
-      delete: canView && Boolean(sp.delete)
+  // 3) تطبيق التخصيص الفردي للشاشة على مستوى المستخدم إن وُجد
+  const userScreenOverride = user?.permissions?.screens?.[screenKey];
+  if (userScreenOverride && typeof userScreenOverride === 'object') {
+    perms = {
+      view: userScreenOverride.view !== undefined ? Boolean(userScreenOverride.view) : perms.view,
+      create: userScreenOverride.create !== undefined ? Boolean(userScreenOverride.create) : perms.create,
+      edit: userScreenOverride.edit !== undefined ? Boolean(userScreenOverride.edit) : perms.edit,
+      delete: userScreenOverride.delete !== undefined ? Boolean(userScreenOverride.delete) : perms.delete
     };
   }
 
-  const canView = allowed.has(screenId);
-  const canEdit = screenId === 'public_editor'
-    ? (canView && (Boolean(p.can_edit_public) || Boolean(p.can_edit_members)))
-    : (canView && Boolean(p.can_edit_members));
+  // لو لم يُسمح بالعرض (view = false) فلا يُسمح بالإضافة أو التعديل أو الحذف
+  if (!perms.view) {
+    return { view: false, create: false, edit: false, delete: false };
+  }
 
-  return {
-    view: canView,
-    add: canView && Boolean(p.can_add),
-    edit: canEdit,
-    delete: canView && Boolean(p.can_delete)
-  };
+  return perms;
+}
+
+export function resolveScreens(user, roleScreens = []) {
+  const allowed = new Set();
+  const detailedByScreen = {};
+
+  if (!user) {
+    return { allowed, defaultScreen: '', detailedByScreen };
+  }
+
+  const role = user.role || 'member';
+  const roleCfg = ROLE_DEFAULT_PERMISSIONS[role] || ROLE_DEFAULT_PERMISSIONS.member;
+
+  // أي شاشة مضافة صراحة في role_screens لهذا الدور أو في user.permissions.screens
+  const candidateKeys = new Set([
+    ...SCREEN_ORDER,
+    ...Object.keys(roleCfg.screens || {}),
+    ...(Array.isArray(roleScreens) ? roleScreens.filter(r => r.role === role).map(r => r.screen_key) : []),
+    ...Object.keys(user?.permissions?.screens || {})
+  ]);
+
+  candidateKeys.forEach(scrKey => {
+    const p = getDetailedScreenPermissions(user, scrKey, roleScreens);
+    detailedByScreen[scrKey] = p;
+    if (p.view) {
+      allowed.add(scrKey);
+    }
+  });
+
+  // لو الأدمن حدد شاشات مخصصة صراحة في user.permissions.allowed_screens
+  if (Array.isArray(user?.permissions?.allowed_screens)) {
+    const customSet = new Set(user.permissions.allowed_screens);
+    Array.from(allowed).forEach(k => {
+      if (!customSet.has(k) && k !== 'public_page') {
+        allowed.delete(k);
+        if (detailedByScreen[k]) detailedByScreen[k].view = false;
+      }
+    });
+  }
+
+  const preferredDefault = user?.permissions?.default_screen || roleCfg.defaultScreen;
+  const defaultScreen =
+    preferredDefault && allowed.has(preferredDefault)
+      ? preferredDefault
+      : Array.from(allowed)[0] || '';
+
+  return { allowed, defaultScreen, detailedByScreen };
+}
+
+export function getScreenAccess(user, screenKey, roleScreens = []) {
+  return getDetailedScreenPermissions(user, screenKey, roleScreens);
 }
