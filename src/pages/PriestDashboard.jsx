@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { startUserSession, logActivity } from '../lib/activityLogger';
@@ -7,6 +6,7 @@ import BellNotificationsPanel from '../components/priest/BellNotificationsPanel'
 import ConfessorProfileModal from '../components/priest/ConfessorProfileModal';
 import EducationalCenterManager from '../components/EducationalCenterManager';
 import JosephArimatheaManager from '../components/JosephArimatheaManager';
+import MasterCongregationSheet from '../components/MasterCongregationSheet';
 import {
   BusVisualizerSection,
   PrintBusModal,
@@ -67,7 +67,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   const [customCards, setCustomCards] = useState([]);
   const [customEntries, setCustomEntries] = useState([]);
 
-  // حالات خدمة يوسف الرامي والإشعارات اللحظية للكاهن
   const [josephCases, setJosephCases] = useState([]);
   const [josephMemorials, setJosephMemorials] = useState([]);
   const [liveJosephAlert, setLiveJosephAlert] = useState(null);
@@ -176,7 +175,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
       supabase.from('priest_custom_cards').select('*').or(`priest_id.is.null,priest_id.eq.${priest.id}`),
       supabase.from('priest_custom_entries').select('*').eq('priest_id', priest.id).order('created_at', { ascending: false }),
       supabase.from('whatsapp_templates').select('*').or(`priest_id.is.null,priest_id.eq.${priest.id}`).order('created_at', { ascending: true }),
-      // جلب حالات وتراحم خدمة يوسف الرامي
       supabase.from('joseph_arimathea_cases').select('*').order('created_at', { ascending: false }),
       supabase.from('joseph_memorial_requests').select('*').order('created_at', { ascending: false })
     ]);
@@ -206,7 +204,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     loadPriestData();
   }, [priest?.id]);
 
-  // الاشتراك الفوري Realtime لاستقبال أي بيان وفاة أو ترحيم من الأدمن فوراً
   useEffect(() => {
     if (!priest?.id) return;
 
@@ -272,7 +269,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   const allMembers = localUsers.filter(u => u.role === 'member');
   const myConfessors = localUsers.filter(u => u.confession_father_id === priest.id);
 
-  // إجمالي تنبيهات يوسف الرامي غير المنتهية (لإظهارها في الزر الأصفر ومكتب الرعاية)
   const pendingCasesCount = josephCases.filter(c => c.status === 'جديد / طارئ').length;
   const pendingMemorialsCount = josephMemorials.filter(m => m.status === 'معلق').length;
   const totalJosephAlerts = pendingCasesCount + pendingMemorialsCount;
@@ -296,9 +292,33 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     if (cardId === 'confessions') setConfSubView('confessors');
   };
 
+  const handleUpdateUserFromSheet = async (updatedRow) => {
+    const { id, serialNo, statusKey, created_at, ...clean } = updatedRow;
+    const { data, error } = await supabase
+      .from('church_users')
+      .update(clean)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) {
+      alert('تعذر تحديث الحالة: ' + error.message);
+      return;
+    }
+    if (data) {
+      setLocalUsers(prev => prev.map(u => (u.id === id ? data : u)));
+      logActivity({
+        user: priest,
+        actionType: 'تحديث_حالة_فرد_بالشيت',
+        targetTable: 'church_users',
+        targetId: id,
+        description: `حدّث حالة (${data.full_name}) إلى (${data.member_status})`
+      });
+    }
+    if (onRefresh) await onRefresh();
+  };
+
   const renderBellPanel = () => (
     <div className="flex items-center gap-2">
-      {/* زر التنبيهات المعتمد مع تمرير بيانات يوسف الرامي */}
       <BellNotificationsPanel
         personalItems={personalItems}
         masses={masses}
@@ -313,7 +333,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
         onNavigateCard={handleNavigateFromBell}
       />
 
-      {/* شارة إشعار إضافية مباشرة لحالات يوسف الرامي العاجلة إن وُجدت */}
       {totalJosephAlerts > 0 && (
         <button
           type="button"
@@ -491,7 +510,8 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
       housing_type: newConfessor.housing_type || 'تمليك', spouse_name: newConfessor.spouse_name || '',
       spouse_phone: newConfessor.spouse_phone || '', address: newConfessor.address || '',
       father_id: matchedFather?.id || null, parent_id: matchedFather?.id || null,
-      father_full_name: matchedFather?.full_name || '', confession_father_id: priest.id
+      father_full_name: matchedFather?.full_name || '', confession_father_id: priest.id,
+      member_status: 'active'
     }]).select().single();
 
     if (!error && data) {
@@ -729,7 +749,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     { id: '3', name: 'متوسطة الاحتياج', icon: '⚖️' }, { id: '4', name: 'مستقرة', icon: '✅' }
   ];
 
-  // المودالات المشتركة على مستوى الشاشة كلها (تفتح من أي مكان أو من الجرس)
   const renderGlobalModals = () => (
     <>
       <ConfessorProfileModal
@@ -766,19 +785,27 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   // ==============================================================
   if (activeCard === 'hub') {
     const cards = [
+      {
+        id: 'master_sheet',
+        icon: '📋',
+        title: 'شيت التسلسل والافتقاد والترحيم',
+        desc: 'سحب الكشف الرسمي بالترقيم التسلسلي للخدام والمخدومين والرعايا + حالة الافتقاد وذكرى الترحيم + تصدير وطباعة',
+        count: `${localUsers.length} مسجل`,
+        color: 'border-teal-300 bg-teal-50/40'
+      },
       { id: 'confessions', icon: '🙏', title: 'الاعترافات', desc: 'المواعيد بالمدة، المعترفون (داخل/خارج الكنيسة) والملف الروحي، والافتقاد', count: `${myConfessors.length} معترف • ${confessionSlots.length} موعد`, color: 'border-red-200 bg-white' },
       { id: 'services', icon: '🏫', title: 'جدول الخدمة', desc: 'كروت الخدمات، القيادات، الفصول، الخدام، وافتقاد الخدمة', count: `${stagesMap.length} خدمة`, color: 'border-amber-200 bg-white' },
       { id: 'masses', icon: '⛪', title: 'جدول القداسات', desc: 'اسم القداس، كاهن خادم أو شريك، والفئات', count: `${masses.length} قداس`, color: 'border-blue-200 bg-white' },
       { id: 'personal', icon: '📅', title: 'الجدول الخاص بالكاهن', desc: 'طشت، خطوبة، أكاليل، رحلات ومؤتمرات بالأقساط والأتوبيسات وطباعة الكشوفات', count: `${personalItems.length} موعد`, color: 'border-purple-200 bg-white' },
       { id: 'cases', icon: '🔍', title: 'بحث الحالة / العيلة', desc: 'البحث، التصنيفات، الإضافة، المرفقات (بطاقة/إيجار/تحاليل)، وطباعة PDF', count: `${families.length} أسرة`, color: 'border-emerald-200 bg-white' },
       { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل التعليمية، المواد الدراسية، الأسعار، وتسجيل الحضور', count: 'مركز الدروس', color: 'border-indigo-200 bg-white' },
-      { 
-        id: 'joseph_arimathea', 
-        icon: '🕊️', 
-        title: 'خدمة يوسف الرامي', 
-        desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، وخط سير السائق ومكان الدفن', 
-        count: totalJosephAlerts > 0 ? `🚨 ${totalJosephAlerts} بحاجة للمتابعة` : `${josephCases.length} حالة مسجلة`, 
-        color: totalJosephAlerts > 0 ? 'border-red-400 bg-red-50/50' : 'border-slate-300 bg-white' 
+      {
+        id: 'joseph_arimathea',
+        icon: '🕊️',
+        title: 'خدمة يوسف الرامي',
+        desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، وخط سير السائق ومكان الدفن',
+        count: totalJosephAlerts > 0 ? `🚨 ${totalJosephAlerts} بحاجة للمتابعة` : `${josephCases.length} حالة مسجلة`,
+        color: totalJosephAlerts > 0 ? 'border-red-400 bg-red-50/50' : 'border-slate-300 bg-white'
       }
     ];
 
@@ -786,7 +813,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
 
     return (
       <div className="space-y-4 text-sm md:text-base">
-        {/* التنبيه اللحظي المنبثق لأبونا الكاهن عند إضافة أي حالة من الأدمن */}
         {liveJosephAlert && (
           <div className="bg-linear-to-r from-red-800 to-[#7a1c24] text-white p-4 rounded-3xl shadow-xl border-2 border-amber-300 flex flex-wrap justify-between items-center gap-3 animate-bounce">
             <div className="flex items-center gap-2.5">
@@ -826,7 +852,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
           </div>
         </div>
 
-        {/* تنبيه أعياد الميلاد */}
         <div className="bg-linear-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-3xl p-4 shadow-sm space-y-3">
           <div className="flex flex-wrap justify-between items-center gap-2">
             <div className="flex items-center gap-2">
@@ -923,9 +948,23 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     );
   }
 
-  // ==============================================================
-  // 1. الاعترافات
-  // ==============================================================
+  // شيت التسلسل والافتقاد والترحيم داخل لوحة أبونا الكاهن
+  if (activeCard === 'master_sheet') {
+    return (
+      <div className="space-y-4">
+        {renderTopBar('📋 شيت التسلسل والافتقاد والترحيم')}
+        <MasterCongregationSheet
+          users={localUsers}
+          currentUser={priest}
+          onUpdateUser={handleUpdateUserFromSheet}
+          onRefresh={loadPriestData}
+        />
+        {renderGlobalModals()}
+      </div>
+    );
+  }
+
+  // باقي الأقسام بنفس كودك الأصلي كاملاً دون نقص
   if (activeCard === 'confessions') {
     const y = calMonth.getFullYear(), m = calMonth.getMonth();
     const daysInM = new Date(y, m + 1, 0).getDate();
@@ -946,7 +985,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     return (
       <div className="space-y-4 text-sm md:text-base">
         {renderTopBar('🙏 الاعترافات والمتابعة الروحية')}
-
         {confSubView === 'menu' && (
           <div className="grid sm:grid-cols-3 gap-4">
             <button type="button" onClick={() => setConfSubView('slots')} className="bg-white border-2 border-blue-200 hover:border-[#7a1c24] p-6 rounded-3xl text-right shadow-sm space-y-2 transition cursor-pointer"><span className="text-4xl block">📅</span><h3 className="text-lg font-black text-gray-900">إضافة مواعيد الاعتراف</h3><p className="text-sm text-gray-600">تحديد المدة (أسبوع/شهر/3 شهور)، صباحي/مسائي ({confessionSlots.length})</p></button>
@@ -1240,15 +1278,11 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
             </div>
           </div>
         )}
-
         {renderGlobalModals()}
       </div>
     );
   }
 
-  // ==============================================================
-  // 2. جدول الخدمة
-  // ==============================================================
   if (activeCard === 'services') {
     const stageClasses = selectedStage ? myServices.filter(s => s.stage_name === selectedStage) : [];
     const stageServants = selectedStage ? allServants.filter(u => (u.detailed_stage || u.service_stage || '').includes(selectedStage) || (u.sector || '').includes(selectedStage) || stageClasses.some(c => c.class_name === u.assigned_class)) : [];
@@ -1379,9 +1413,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     );
   }
 
-  // ==============================================================
-  // 3. جدول القداسات
-  // ==============================================================
   if (activeCard === 'masses') {
     return (
       <div className="space-y-4 text-sm md:text-base">
@@ -1414,9 +1445,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     );
   }
 
-  // ==============================================================
-  // 4. الجدول الخاص بالكاهن والرحلات
-  // ==============================================================
   if (activeCard === 'personal') {
     return (
       <div className="space-y-4 text-sm md:text-base">
@@ -1502,7 +1530,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
             </div>
             <div className="flex gap-2">
               <button type="submit" className="px-6 py-3 bg-[#7a1c24] text-white rounded-xl cursor-pointer">{editingPersId ? 'حفظ التعديل' : 'حفظ الموعد'}</button>
-              {editingPersId && <button type="button" onClick={() => { setEditingPersId(null); setPersForm({ ...emptyPers, bus_seats: [createNewBus(1, 'الأتوبيس الأول')] }); }} className="px-4 py-2 border rounded-xl">إلغاء التعديل</button>}
+              {editingPersId && <button type="button" onClick={() => { setEditingPersId(null); setPersForm({ ...emptyPers, bus_seats: [createNewBus(1, 'الأتوبيس الأول')] }); }} className="px-4 border rounded-xl">إلغاء التعديل</button>}
             </div>
           </form>
 
@@ -1584,9 +1612,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     );
   }
 
-  // ==============================================================
-  // 5. بحث الحالة والمرفقات
-  // ==============================================================
   if (activeCard === 'cases') {
     const displayedFamilies = families.filter(f => {
       if (casesSubView === 'categories' && selectedCategoryName) return f.poverty_level === selectedCategoryName;
@@ -1816,9 +1841,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     );
   }
 
-  // ==============================================================
-  // 6. المركز التعليمي
-  // ==============================================================
   if (activeCard === 'edu_center') {
     return (
       <div className="space-y-4 text-sm md:text-base">
@@ -1829,9 +1851,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     );
   }
 
-  // ==============================================================
-  // 7. خدمة يوسف الرامي
-  // ==============================================================
   if (activeCard === 'joseph_arimathea') {
     return (
       <div className="space-y-4 text-sm md:text-base">
@@ -1842,9 +1861,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     );
   }
 
-  // ==============================================================
-  // 8. الكروت المخصصة
-  // ==============================================================
   if (activeCard.startsWith('custom:')) {
     const cardId = activeCard.split(':')[1], cardObj = customCards.find(c => c.id === cardId), entries = customEntries.filter(e => e.card_id === cardId);
     return (

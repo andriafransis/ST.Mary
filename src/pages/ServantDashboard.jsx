@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Phone, Search, UserPlus, Calendar, MessageSquareText, Layers, MessageCircle, AlertTriangle, Users, MapPin, X } from 'lucide-react';
+import { Phone, Search, UserPlus, Calendar, MessageSquareText, Layers, MessageCircle, AlertTriangle, Users, MapPin, X, FileSpreadsheet } from 'lucide-react';
 import BirthdayBanner from '../components/BirthdayBanner';
+import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
 
 const STAGE_OPTIONS = [
   'حضانة',
@@ -17,8 +18,12 @@ const STAGE_OPTIONS = [
 
 export default function ServantDashboard({
   servant, users = [], services = [], activities = [], memberNotes = [], birthdays = [],
-  onAddMember, onSaveActivity, onSaveMemberNote
+  onAddMember, onSaveActivity, onSaveMemberNote, onRefresh
 }) {
+  const canAdd = servant?.permissions?.can_add !== false;
+  const canExtractSheet = canExtractMasterSheet(servant);
+  const [showMasterSheet, setShowMasterSheet] = useState(false);
+
   const assignedClass = (servant.assigned_class || '').trim();
   const baseStages = (servant.service_stage || servant.detailed_stage || '')
     .split(',')
@@ -34,7 +39,7 @@ export default function ServantDashboard({
   if (allowedTargets.length === 0) allowedTargets.push('أولى ابتدائي');
 
   const [selectedScope, setSelectedScope] = useState(allowedTargets[0]);
-  const [viewMode, setViewMode] = useState('list'); // 'list' | 'followup'
+  const [viewMode, setViewMode] = useState('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [hiddenNotes, setHiddenNotes] = useState({});
@@ -66,7 +71,8 @@ export default function ServantDashboard({
     assigned_class: assignedClass || '',
     dob: '', address: '',
     confession_status: 'منتظم',
-    has_communion: true
+    has_communion: true,
+    member_status: 'active'
   };
   const [newMember, setNewMember] = useState(emptyMember);
 
@@ -117,6 +123,7 @@ export default function ServantDashboard({
     ).toLowerCase().includes(searchQuery.toLowerCase()));
 
   const openAddMemberModal = () => {
+    if (!canAdd) return alert('🔒 غير مسموح لك بإضافة مخدومين حسب صلاحياتك الحالية.');
     setNewMember({
       ...emptyMember,
       assigned_class: assignedClass || (services.some(s => s.class_name === selectedScope) ? selectedScope : ''),
@@ -128,6 +135,7 @@ export default function ServantDashboard({
 
   const handleCreateMember = (e) => {
     e.preventDefault();
+    if (!canAdd) return;
     const full_name = [newMember.first_name, newMember.second_name, newMember.third_name, newMember.fourth_name].map(s => s.trim()).filter(Boolean).join(' ');
     const father_full_name = [newMember.father_first, newMember.father_second, newMember.father_third, newMember.father_fourth].map(s => s.trim()).filter(Boolean).join(' ');
     const mother_full_name = [newMember.mother_first, newMember.mother_second, newMember.mother_third, newMember.mother_fourth].map(s => s.trim()).filter(Boolean).join(' ');
@@ -160,11 +168,47 @@ export default function ServantDashboard({
     setNoteModal(false);
   };
 
+  if (canExtractSheet && showMasterSheet) {
+    return (
+      <div className="space-y-4" dir="rtl">
+        <div className="bg-white p-4 rounded-2xl border shadow-2xs flex justify-between items-center print:hidden">
+          <button
+            type="button"
+            onClick={() => setShowMasterSheet(false)}
+            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-xs font-black cursor-pointer"
+          >
+            ← رجوع لشاشة الخدمة
+          </button>
+          <span className="text-xs font-black text-[#7a1c24]">📋 شيت التسلسل والافتقاد (أمين الخدمة)</span>
+        </div>
+        <MasterCongregationSheet
+          users={users}
+          currentUser={servant}
+          onRefresh={onRefresh}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4" dir="rtl">
       <BirthdayBanner birthdays={scopeBirthdays} />
 
-      {/* اختيار الفصل / الخدمة المخصصة */}
+      {canExtractSheet && (
+        <div className="bg-teal-50/70 border border-teal-200 p-3.5 rounded-2xl flex flex-wrap justify-between items-center gap-2 text-xs">
+          <div className="font-bold text-teal-950">
+            📋 بصفتك <strong>أمين الخدمة</strong>، يمكنك سحب شيت التسلسل والافتقاد والترحيم وتصديره أو طباعته.
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowMasterSheet(true)}
+            className="px-4 py-2 bg-teal-800 hover:bg-teal-900 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
+          >
+            <FileSpreadsheet size={15} /> فتح شيت التسلسل والافتقاد
+          </button>
+        </div>
+      )}
+
       <div className="space-y-2">
         <div className="flex items-center gap-1.5 text-xs font-black text-gray-700 px-1">
           <Layers size={15} className="text-[#7a1c24]" /> فصلك وخدمتك المخصصة:
@@ -197,7 +241,6 @@ export default function ServantDashboard({
         </div>
       </div>
 
-      {/* شريط التحكم الرئيسي للفصل */}
       <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3 text-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
@@ -213,16 +256,17 @@ export default function ServantDashboard({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={openAddMemberModal}
-            className="w-full md:w-auto px-4 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white text-xs font-black rounded-2xl flex items-center justify-center gap-1.5 shadow cursor-pointer transition"
-          >
-            <UserPlus size={16} /> إضافة مخدوم للفصل
-          </button>
+          {canAdd && (
+            <button
+              type="button"
+              onClick={openAddMemberModal}
+              className="w-full md:w-auto px-4 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white text-xs font-black rounded-2xl flex items-center justify-center gap-1.5 shadow cursor-pointer transition"
+            >
+              <UserPlus size={16} /> إضافة مخدوم للفصل
+            </button>
+          )}
         </div>
 
-        {/* تبويب الفلترة + البحث */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-2 border-t border-gray-100">
           <div className="grid grid-cols-2 gap-1.5 bg-gray-100 p-1 rounded-2xl">
             <button
@@ -267,7 +311,6 @@ export default function ServantDashboard({
         </div>
       </div>
 
-      {/* قائمة المخدومين */}
       {displayedMembers.length === 0 ? (
         <div className="bg-white p-8 sm:p-10 rounded-3xl border border-dashed border-gray-300 text-center space-y-3">
           <div className="w-12 h-12 rounded-2xl bg-red-50 text-[#7a1c24] flex items-center justify-center mx-auto">
@@ -279,7 +322,7 @@ export default function ServantDashboard({
               {searchQuery ? 'جرّب البحث بكلمة مختلفة.' : 'يمكنك إضافة أول مخدوم للفصل بسهولة من الزر بالأسفل.'}
             </p>
           </div>
-          {!searchQuery && viewMode === 'list' && (
+          {!searchQuery && viewMode === 'list' && canAdd && (
             <button
               type="button"
               onClick={openAddMemberModal}
@@ -320,7 +363,6 @@ export default function ServantDashboard({
                     </div>
                   </div>
 
-                  {/* أزرار التواصل والإجراءات (متجاوبة على الموبايل) */}
                   <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 w-full lg:w-auto shrink-0">
                     {callPhone && (
                       <>
@@ -374,7 +416,6 @@ export default function ServantDashboard({
         </div>
       )}
 
-      {/* مودال إضافة مخدوم للفصل */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50">
           <div className="bg-white rounded-3xl w-full max-w-xl p-4 sm:p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto">
@@ -462,7 +503,6 @@ export default function ServantDashboard({
         </div>
       )}
 
-      {/* مودال الملاحظات */}
       {noteModal && noteMember && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-55">
           <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-3 text-xs font-bold">
@@ -487,7 +527,6 @@ export default function ServantDashboard({
         </div>
       )}
 
-      {/* مودال الأنشطة والحضور */}
       {actModal && selectedMember && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-55">
           <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-3 text-xs font-bold">
