@@ -112,6 +112,27 @@ function buildObituaryShareText(c) {
   return lines.join('\n');
 }
 
+function buildMemorialShareText(m) {
+  const lines = [
+    '✝ «طُوبَى لِلَّذِينَ يَمُوتُونَ فِي الرَّبِّ مُنْذُ الآنَ» (رؤ 14: 13)',
+    '',
+    `🕯️ *${m.memorial_type || 'ترحيم وتذكار'}*`,
+    `للمنتقل / المنتقلة: *${m.deceased_name || ''}*`,
+    ''
+  ];
+
+  if (m.mass_date || m.mass_time) {
+    lines.push(`⛪ *القداس الإلهي:* ${m.mass_date || ''} ${m.mass_time ? `الساعة ${m.mass_time}` : ''}`.trim());
+  }
+
+  if (m.needs_hall && m.hall_name) {
+    lines.push(`🏛️ *الاستقبال / القاعة:* ${m.hall_name} ${m.hall_slot ? `(${m.hall_slot})` : ''}`.trim());
+  }
+
+  lines.push('', 'اذكرونا في صلواتكم • المسيح يعزي الأسرة وجميع محبيهم.');
+  return lines.join('\n');
+}
+
 function wrapCanvasText(ctx, text, maxWidth) {
   const words = String(text || '').split(' ');
   const lines = [];
@@ -218,6 +239,109 @@ function downloadObituaryCardImage(c) {
   link.click();
 }
 
+function downloadMemorialCardImage(m) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1080;
+  canvas.height = 1080;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  ctx.direction = 'rtl';
+  ctx.textAlign = 'center';
+
+  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  grad.addColorStop(0, '#3b0b11');
+  grad.addColorStop(0.28, '#5c121a');
+  grad.addColorStop(0.28, '#fcf8f2');
+  grad.addColorStop(1, '#f3eadb');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(30, 30, canvas.width - 60, canvas.height - 60);
+
+  ctx.fillStyle = '#fde68a';
+  ctx.font = 'bold 44px sans-serif';
+  ctx.fillText('✝', canvas.width / 2, 85);
+
+  ctx.fillStyle = '#fffbeb';
+  ctx.font = 'bold 30px sans-serif';
+  ctx.fillText(m.memorial_type || 'ذكرى الأربعين', canvas.width / 2, 138);
+
+  ctx.fillStyle = '#f3d27a';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillText('«طُوبَى لِلَّذِينَ يَمُوتُونَ فِي الرَّبِّ مُنْذُ الآنَ» (رؤ 14: 13)', canvas.width / 2, 182);
+
+  // الجنب الأيمن: السيدة العذراء مريم
+  ctx.fillStyle = '#fff9eb';
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 3;
+  ctx.fillRect(80, 340, 210, 260);
+  ctx.strokeRect(80, 340, 210, 260);
+  ctx.fillStyle = '#4a0e13';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.fillText('السيدة العذراء', 185, 440);
+  ctx.font = 'bold 18px sans-serif';
+  ctx.fillText('والدة الإله', 185, 475);
+  ctx.font = 'bold 34px sans-serif';
+  ctx.fillText('👑', 185, 535);
+
+  // الجنب الأيسر: الصليب والترحيم
+  ctx.fillStyle = '#fff9eb';
+  ctx.fillRect(790, 340, 210, 260);
+  ctx.strokeRect(790, 340, 210, 260);
+  ctx.fillStyle = '#4a0e13';
+  ctx.font = 'bold 42px sans-serif';
+  ctx.fillText('✝', 895, 445);
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillText('صلاة وترحيم', 895, 495);
+  ctx.font = 'bold 18px sans-serif';
+  ctx.fillText('على المذبح المقدس', 895, 530);
+
+  // المنتصف: اسم المنتقل
+  ctx.fillStyle = '#4a0e13';
+  ctx.font = 'bold 48px sans-serif';
+  const nameLines = wrapCanvasText(ctx, m.deceased_name || '', 440);
+  let y = 415;
+  nameLines.forEach(line => {
+    ctx.fillText(line, canvas.width / 2, y);
+    y += 58;
+  });
+
+  ctx.fillStyle = '#1f2937';
+  ctx.font = 'bold 28px sans-serif';
+  let infoY = 685;
+
+  if (m.mass_date || m.mass_time) {
+    ctx.fillText(
+      `القداس الإلهي: ${m.mass_date || ''} ${m.mass_time ? `— الساعة ${m.mass_time}` : ''}`.trim(),
+      canvas.width / 2,
+      infoY
+    );
+    infoY += 48;
+  }
+
+  if (m.needs_hall && m.hall_name) {
+    ctx.fillText(
+      `الاستقبال / القاعة: ${m.hall_name} ${m.hall_slot ? `(${m.hall_slot})` : ''}`.trim(),
+      canvas.width / 2,
+      infoY
+    );
+    infoY += 48;
+  }
+
+  ctx.fillStyle = '#7a1c24';
+  ctx.font = 'bold 26px sans-serif';
+  ctx.fillText('اذكرونا في صلواتكم • المسيح يعزي الأسرة وجميع محبيهم', canvas.width / 2, canvas.height - 75);
+
+  const link = document.createElement('a');
+  const safeName = (m.deceased_name || 'memorial').replace(/[^\u0600-\u06FFa-zA-Z0-9_-]+/g, '_');
+  link.download = `ترحيم_${safeName}.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
 export default function JosephArimatheaManager({
   currentUser,
   users = [],
@@ -230,7 +354,6 @@ export default function JosephArimatheaManager({
   const isAdminUser = currentUser?.role === 'admin';
   const isPriest = currentUser?.role === 'priest';
 
-  // صلاحية إدارة مالية ولجنة كنيسة (أبونا + الأدمن + مجلس الكنيسة)
   const isFinanceAuthorized = Boolean(
     isAdminUser ||
     isPriest ||
@@ -269,11 +392,9 @@ export default function JosephArimatheaManager({
     if (users && users.length > 0) setSystemUsers(users);
   }, [users]);
 
-  // الصفحة الرئيسية متاحة للجميع افتراضياً، والأدمن يفتح على لوحة الإدارة (cases) طبيعي
   const [activeMainTab, setActiveMainTab] = useState('cases');
   const [adminSubTab, setAdminSubTab] = useState('cases');
 
-  // البيانات
   const [cases, setCases] = useState([]);
   const [memorialRequests, setMemorialRequests] = useState([]);
   const [burialLocations, setBurialLocations] = useState([]);
@@ -283,28 +404,25 @@ export default function JosephArimatheaManager({
   const [activeTrack, setActiveTrack] = useState(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
 
-  // إعدادات حساب وتليفون InstaPay
   const [instapayAccount, setInstapayAccount] = useState('church.donation@instapay');
   const [instapayPhone, setInstapayPhone] = useState('01200000000');
   const [isSavingInstapay, setIsSavingInstapay] = useState(false);
 
-  // إدخال قاعة جديدة
   const [newHallName, setNewHallName] = useState('');
   const [newHallCapacity, setNewHallCapacity] = useState('');
   const [newHallFee, setNewHallFee] = useState('');
 
-  // بحث إضافة الطاقم (سائقين وفراشين)
   const [staffSearchQuery, setStaffSearchQuery] = useState('');
 
-  // رفع صورة الإيصال ومعاينتها
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const [viewingImage, setViewingImage] = useState(null);
 
-  // كارت النعي والمشاركة بعد تقديم الطلب أو من البطاقة
   const [obituaryCardCase, setObituaryCardCase] = useState(null);
+  const [memorialCardItem, setMemorialCardItem] = useState(null);
+  const [printMemorialCard, setPrintMemorialCard] = useState(null);
   const [copiedObituary, setCopiedObituary] = useState(false);
+  const [copiedMemorial, setCopiedMemorial] = useState(false);
 
-  // إشعارات الكاهن واللجنة اللحظية
   const [notifications, setNotifications] = useState([]);
   const [showNotificationsMenu, setShowNotificationsMenu] = useState(false);
   const [liveToast, setLiveToast] = useState(null);
@@ -316,7 +434,6 @@ export default function JosephArimatheaManager({
 
   const audioRef = useRef(null);
 
-  // حالات النوافذ والطباعة
   const [showDeathForm, setShowDeathForm] = useState(isLoggedIn && !isStaff && canReport);
   const [showMemorialForm, setShowMemorialForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -326,7 +443,6 @@ export default function JosephArimatheaManager({
   const [filterMassDate, setFilterMassDate] = useState(todayISO);
   const [sentNoticeSuccess, setSentNoticeSuccess] = useState(false);
 
-  // فلاتر حساب الفراشين والعشور
   const [statsWorkerName, setStatsWorkerName] = useState('');
   const [statsStartDate, setStatsStartDate] = useState(() => {
     const d = new Date();
@@ -383,6 +499,7 @@ export default function JosephArimatheaManager({
     deceased_name: '',
     memorial_type: 'ذكرى الأربعين',
     mass_date: todayISO,
+    mass_time: '08:00',
     requester_name: currentUser?.full_name || '',
     requester_phone: currentUser?.phone || '',
     relationship: 'أب',
@@ -751,6 +868,33 @@ export default function JosephArimatheaManager({
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
   };
 
+  const handleShareMemorialText = async (m) => {
+    const text = buildMemorialShareText(m);
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: `${m.memorial_type || 'ترحيم'} — ${m.deceased_name}`,
+          text
+        });
+        return;
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedMemorial(true);
+      setTimeout(() => setCopiedMemorial(false), 3000);
+    } catch (_) {
+      alert(text);
+    }
+  };
+
+  const handleSendMemorialWhatsApp = (m) => {
+    const text = buildMemorialShareText(m);
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
   if (!isLoggedIn) {
     const openCaskets = caskets.filter(c => c.status === 'متاح');
     return (
@@ -1025,6 +1169,7 @@ export default function JosephArimatheaManager({
     setMemForm({
       ...emptyMemorial,
       ...item,
+      mass_time: item.mass_time || '08:00',
       hall_id: item.hall_id || '',
       hall_name: item.hall_name || '',
       instapay_ref: item.instapay_ref || '',
@@ -1048,6 +1193,9 @@ export default function JosephArimatheaManager({
       setMemForm(emptyMemorial);
       setShowMemorialForm(false);
     }
+    if (memorialCardItem?.id === item.id) {
+      setMemorialCardItem(null);
+    }
   };
 
   const handleSaveMemorial = async (e) => {
@@ -1062,6 +1210,7 @@ export default function JosephArimatheaManager({
       deceased_name: memForm.deceased_name.trim(),
       memorial_type: memForm.memorial_type,
       mass_date: memForm.mass_date,
+      mass_time: memForm.mass_time || '08:00',
       requester_name: memForm.requester_name || '',
       requester_phone: memForm.requester_phone || '',
       relationship: memForm.relationship || '',
@@ -1097,11 +1246,13 @@ export default function JosephArimatheaManager({
         description: `تعديل ترحيم: ${data.deceased_name} (${data.memorial_type}) • الإيصال: ${serial}`
       });
 
-      setMemorialRequests(prev => prev.map(m => (m.id === editingMemorialId ? data : m)));
+      const updatedItem = { ...data, mass_time: data.mass_time || memForm.mass_time || '08:00' };
+      setMemorialRequests(prev => prev.map(m => (m.id === editingMemorialId ? updatedItem : m)));
+      setMemorialCardItem(updatedItem);
       setEditingMemorialId(null);
       setShowMemorialForm(false);
       setMemForm(emptyMemorial);
-      alert('✅ تم تعديل طلب الترحيم بنجاح!');
+      alert('✅ تم تعديل طلب الترحيم وتجهيز كارت الترحيم بنجاح!');
       return;
     }
 
@@ -1126,15 +1277,17 @@ export default function JosephArimatheaManager({
       targetId: data.id
     });
 
-    setMemorialRequests(prev => [data, ...prev]);
-    setPrintMemorialReceipt(data);
+    const createdItem = { ...(data || payload), mass_time: (data?.mass_time || memForm.mass_time || '08:00') };
+    setMemorialRequests(prev => [createdItem, ...prev]);
+    setMemorialCardItem(createdItem);
+    setPrintMemorialReceipt(createdItem);
     setShowMemorialForm(false);
     setMemForm(emptyMemorial);
 
     if (payload.status === 'معلق') {
-      alert(`✅ تم إرسال طلب الترحيم للجنة الكنيسة والآباء الكهنة بنجاح!\nسيكون الاسم في كشف المذبح فور اعتماده.`);
+      alert(`✅ تم إرسال طلب الترحيم وتجهيز كارت الترحيم (${createdItem.memorial_type}) للطباعة والمشاركة!`);
     } else {
-      alert(`✅ تم اعتماد الترحيم وتثبيته في كشف المذبح!\nرقم الإيصال: ${serial}`);
+      alert(`✅ تم اعتماد الترحيم وتثبيته في كشف المذبح وتجهيز كارت الترحيم!\nرقم الإيصال: ${serial}`);
     }
   };
 
@@ -1250,7 +1403,6 @@ export default function JosephArimatheaManager({
     <div className="space-y-4 text-sm md:text-base font-sans" dir="rtl">
       {renderBackgroundAudio()}
 
-      {/* تنبيه منبثق فوري للكاهن (Live Toast) عند إضافة أي بيان جديد */}
       {liveToast && (
         <div className="fixed bottom-6 left-6 z-50 bg-[#4a0e13] text-white border-2 border-amber-400 p-4 rounded-2xl shadow-2xl max-w-sm space-y-2 animate-bounce print:hidden">
           <div className="flex justify-between items-start gap-2">
@@ -1361,7 +1513,13 @@ export default function JosephArimatheaManager({
 
           <button
             type="button"
-            onClick={() => { setEditingMemorialId(null); setMemForm(emptyMemorial); setShowMemorialForm(true); setShowDeathForm(false); }}
+            onClick={() => {
+              setEditingMemorialId(null);
+              setMemForm(emptyMemorial);
+              setActiveMainTab('memorials');
+              setShowMemorialForm(true);
+              setShowDeathForm(false);
+            }}
             className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-amber-950 font-black rounded-xl text-xs flex items-center gap-1.5 shadow cursor-pointer"
           >
             <HeartHandshake size={15} /> تقديم كارت ترحيم
@@ -1601,6 +1759,116 @@ export default function JosephArimatheaManager({
             </div>
           )}
 
+          {/* كارت الترحيم (ذكرى الأربعين / ذكرى سنوية / ترحيم وتذكار) بالصليب والجانبين وموعد القداس */}
+          {memorialCardItem && (
+            <div className="bg-amber-50/80 border-2 border-amber-400 p-5 rounded-3xl space-y-4 shadow-md print:hidden">
+              <div className="flex flex-wrap justify-between items-center gap-2 border-b border-amber-300 pb-3">
+                <div>
+                  <h4 className="font-black text-[#4a0e13] text-base flex items-center gap-2">
+                    <HeartHandshake size={18} className="text-[#7a1c24]" /> كارت الترحيم ({memorialCardItem.memorial_type || 'ذكرى الأربعين'}) — جاهز للطباعة والشير
+                  </h4>
+                  <p className="text-xs text-gray-600">يمكنك طباعة الكارت مباشرة، أو تنزيله كصورة PNG، أو مشاركته على واتساب وفيسبوك.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMemorialCardItem(null)}
+                  className="px-3 py-1 bg-white border rounded-xl text-xs font-bold text-gray-700 cursor-pointer"
+                >
+                  ✕ إغلاق الكارت
+                </button>
+              </div>
+
+              <div className="max-w-2xl mx-auto bg-gradient-to-b from-[#4a0e13] via-[#fcf8f2] to-[#f3eadb] border-2 border-amber-500 rounded-3xl overflow-hidden shadow">
+                <div className="bg-[#2b090d] text-amber-200 p-4 text-center space-y-1">
+                  <div className="text-2xl text-amber-300">✝</div>
+                  <div className="font-black text-base md:text-lg text-white">
+                    {memorialCardItem.memorial_type || 'ذكرى الأربعين'}
+                  </div>
+                  <p className="text-xs text-amber-100/90">
+                    «طُوبَى لِلَّذِينَ يَمُوتُونَ فِي الرَّبِّ مُنْذُ الآنَ» (رؤ 14: 13)
+                  </p>
+                </div>
+
+                <div className="p-5 grid grid-cols-1 sm:grid-cols-3 items-center gap-3 text-center">
+                  {/* الجنب الأيمن: صورة السيدة العذراء مريم */}
+                  <div className="bg-[#fff9eb] border-2 border-amber-400 rounded-2xl p-3 space-y-1 shadow-sm">
+                    <div className="text-2xl">👑</div>
+                    <div className="font-black text-xs md:text-sm text-[#4a0e13]">السيدة العذراء</div>
+                    <div className="text-[11px] font-bold text-amber-900">والدة الإله</div>
+                  </div>
+
+                  {/* المنتصف: الصليب والترحيم واسم المنتقل */}
+                  <div className="space-y-2 py-2">
+                    <div className="text-3xl text-[#7a1c24] font-black">✝</div>
+                    <div className="text-xs font-black text-amber-900">
+                      {memorialCardItem.memorial_type || 'ذكرى الأربعين'}
+                    </div>
+                    <h3 className="text-lg md:text-xl font-black text-[#4a0e13] border-y border-amber-300 py-2">
+                      {memorialCardItem.deceased_name}
+                    </h3>
+                  </div>
+
+                  {/* الجنب الأيسر: الصليب والمذبح المقدس */}
+                  <div className="bg-[#fff9eb] border-2 border-amber-400 rounded-2xl p-3 space-y-1 shadow-sm">
+                    <div className="text-2xl text-[#7a1c24] font-black">✝</div>
+                    <div className="font-black text-xs md:text-sm text-[#4a0e13]">صلاة وترحيم</div>
+                    <div className="text-[11px] font-bold text-amber-900">على المذبح المقدس</div>
+                  </div>
+                </div>
+
+                <div className="px-5 pb-5 text-center space-y-1.5 text-xs md:text-sm font-bold text-gray-800">
+                  {(memorialCardItem.mass_date || memorialCardItem.mass_time) && (
+                    <p>
+                      ⛪ <strong>القداس الإلهي:</strong> {memorialCardItem.mass_date || ''}{' '}
+                      {memorialCardItem.mass_time ? `— الساعة ${memorialCardItem.mass_time}` : ''}
+                    </p>
+                  )}
+                  {memorialCardItem.needs_hall && memorialCardItem.hall_name && (
+                    <p>
+                      🏛️ <strong>الاستقبال / القاعة:</strong> {memorialCardItem.hall_name}{' '}
+                      {memorialCardItem.hall_slot ? `(${memorialCardItem.hall_slot})` : ''}
+                    </p>
+                  )}
+                  <p className="text-xs font-black text-[#7a1c24] pt-2 border-t border-amber-300">
+                    اذكرونا في صلواتكم • المسيح يعزي الأسرة وجميع محبيهم
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap justify-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => { setPrintMemorialCard(memorialCardItem); setTimeout(() => window.print(), 100); }}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow"
+                >
+                  <Printer size={15} /> طباعة كارت الترحيم
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadMemorialCardImage(memorialCardItem)}
+                  className="px-4 py-2 bg-[#7a1c24] hover:bg-[#5b141a] text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow"
+                >
+                  <Download size={15} /> تنزيل الكارت كصورة (PNG)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSendMemorialWhatsApp(memorialCardItem)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow"
+                >
+                  <MessageCircle size={15} /> شير على واتساب
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleShareMemorialText(memorialCardItem)}
+                  className="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow"
+                >
+                  {copiedMemorial ? <Check size={15} /> : <Share2 size={15} />}
+                  {copiedMemorial ? 'تم نسخ نص الترحيم للفيسبوك!' : 'شير / نسخ لفيسبوك'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* تبويب تعديل حساب InstaPay للأدمن */}
           {isAdminUser && activeMainTab === 'instapay_settings' && (
             <div className="bg-white p-6 rounded-3xl border space-y-4 print:hidden max-w-xl">
@@ -1645,7 +1913,7 @@ export default function JosephArimatheaManager({
             </div>
           )}
 
-          {/* تبويب إدارة القاعات وسعتها وأسعارها بدقة (خاص بالأدمن وأبونا) */}
+          {/* تبويب إدارة القاعات وسعتها وأسعارها بدقة */}
           {isFinanceAuthorized && activeMainTab === 'halls_settings' && (
             <div className="bg-white p-5 rounded-3xl border space-y-5 print:hidden">
               <div className="border-b pb-3 flex justify-between items-center">
@@ -1758,7 +2026,7 @@ export default function JosephArimatheaManager({
             </div>
           )}
 
-          {/* تبويب تعيين وإلغاء صلاحيات السائقين والفراشين (للأدمن) */}
+          {/* تبويب تعيين وإلغاء صلاحيات السائقين والفراشين */}
           {isAdminUser && activeMainTab === 'staff_manage' && (
             <div className="bg-white p-5 rounded-3xl border space-y-5 print:hidden">
               <div className="border-b pb-3">
@@ -1877,17 +2145,17 @@ export default function JosephArimatheaManager({
             </div>
           )}
 
-          {/* نموذج تقديم كارت ترحيم */}
+          {/* نموذج تقديم كارت ترحيم (أربعين / سنوية / ترحيم وتذكار عام) */}
           {showMemorialForm && (
             <form onSubmit={handleSaveMemorial} className="bg-amber-50/60 p-5 rounded-3xl border-2 border-amber-300 space-y-4 print:hidden">
               <div className="flex justify-between items-center border-b border-amber-200 pb-2">
                 <h4 className="font-black text-amber-950 text-base flex items-center gap-2">
-                  <HeartHandshake size={18} className="text-[#7a1c24]" /> {editingMemorialId ? 'تعديل كارت الترحيم' : 'تسجيل كارت ترحيم جديد (أربعين / سنوية)'}
+                  <HeartHandshake size={18} className="text-[#7a1c24]" /> {editingMemorialId ? 'تعديل كارت الترحيم' : 'تسجيل كارت ترحيم جديد (ذكرى الأربعين / ذكرى سنوية)'}
                 </h4>
                 <button type="button" onClick={() => { setShowMemorialForm(false); setEditingMemorialId(null); setMemForm(emptyMemorial); }} className="text-gray-500 hover:text-black text-xs font-bold">✕ إغلاق</button>
               </div>
 
-              <div className="grid sm:grid-cols-3 gap-3">
+              <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-3">
                 <div>
                   <label className="block text-xs text-gray-700 font-bold mb-1">اسم المنتقل المراد ترحيمه *</label>
                   <input
@@ -1911,13 +2179,22 @@ export default function JosephArimatheaManager({
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-700 font-bold mb-1">تاريخ القداس الإلهي المطلوب *</label>
+                  <label className="block text-xs text-gray-700 font-bold mb-1">تاريخ القداس الإلهي *</label>
                   <input
                     type="date"
                     required
                     className="w-full p-2.5 border rounded-xl bg-white text-xs font-bold"
                     value={memForm.mass_date}
                     onChange={e => setMemForm({ ...memForm, mass_date: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-700 font-bold mb-1">ساعة القداس الإلهي</label>
+                  <input
+                    type="time"
+                    className="w-full p-2.5 border rounded-xl bg-white text-xs font-bold"
+                    value={memForm.mass_time}
+                    onChange={e => setMemForm({ ...memForm, mass_time: e.target.value })}
                   />
                 </div>
               </div>
@@ -2102,7 +2379,7 @@ export default function JosephArimatheaManager({
                 type="submit"
                 className="w-full py-3 bg-[#7a1c24] hover:bg-[#5b141a] text-white rounded-2xl font-black text-xs md:text-sm cursor-pointer shadow transition"
               >
-                {editingMemorialId ? 'حفظ تعديلات كارت الترحيم ✅' : 'إرسال طلب الترحيم للجنة الكنيسة والآباء الكهنة 🕊️'}
+                {editingMemorialId ? 'حفظ التعديلات وإخراج كارت الترحيم ✅' : 'حفظ وإخراج كارت الترحيم للطباعة والشير 🕊️'}
               </button>
             </form>
           )}
@@ -2489,19 +2766,19 @@ export default function JosephArimatheaManager({
             </div>
           )}
 
-          {/* تبويب كروت الترحيم مع معاينة صورة الإيصال للجنة وأبونا */}
+          {/* تبويب كروت الترحيم مع عرض الكارت وطباعته وشيره */}
           {activeMainTab === 'memorials' && (
             <div className="space-y-4">
               <div className="bg-white p-4 rounded-3xl border flex flex-wrap justify-between items-center gap-3">
                 <div>
-                  <h4 className="font-black text-gray-900 text-base">🕯️ طلبات الترحيم ومراجعة الدفع</h4>
-                  <p className="text-xs text-gray-500">الطلبات المعلقة تتطلب اعتماد لجنة الكنيسة أو أبونا الكاهن لتظهر في ورقة المذبح.</p>
+                  <h4 className="font-black text-gray-900 text-base">🕯️ طلبات الترحيم (أربعين / سنوية) ومراجعة الدفع</h4>
+                  <p className="text-xs text-gray-500">يمكنك إخراج كارت الترحيم وطباعته أو مشاركته مباشرة، والطلبات المعلقة تعتمد من اللجنة أو أبونا لورقة المذبح.</p>
                 </div>
                 <button
                   onClick={() => { setEditingMemorialId(null); setMemForm(emptyMemorial); setShowMemorialForm(true); }}
                   className="px-4 py-2 bg-[#7a1c24] text-white rounded-xl text-xs font-black cursor-pointer shadow"
                 >
-                  + إضافة اسم للترحيم
+                  + إضافة كارت ترحيم (أربعين / سنوية)
                 </button>
               </div>
 
@@ -2509,12 +2786,14 @@ export default function JosephArimatheaManager({
                 {memorialRequests.map(m => (
                   <div key={m.id} className="p-4 rounded-3xl border bg-white flex flex-wrap justify-between items-center gap-3">
                     <div className="space-y-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="px-2.5 py-0.5 rounded-lg text-xs font-black bg-amber-100 text-amber-950">{m.status}</span>
                         <strong className="text-base text-gray-900">{m.deceased_name}</strong>
-                        <span className="text-xs text-gray-500 font-bold">({m.memorial_type})</span>
+                        <span className="px-2 py-0.5 bg-purple-100 text-purple-950 rounded-lg text-xs font-black">{m.memorial_type}</span>
                       </div>
-                      <p className="text-xs text-gray-600">قداس: <strong>{m.mass_date}</strong> • مقدم الطلب: {m.requester_name}</p>
+                      <p className="text-xs text-gray-600">
+                        قداس: <strong>{m.mass_date}</strong> {m.mass_time ? `الساعة ${m.mass_time}` : ''} • مقدم الطلب: {m.requester_name}
+                      </p>
 
                       {m.receipt_image_url && (
                         <div className="pt-1">
@@ -2530,6 +2809,14 @@ export default function JosephArimatheaManager({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setMemorialCardItem(m)}
+                        className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-amber-950 rounded-xl text-xs font-black flex items-center gap-1 cursor-pointer"
+                      >
+                        <Share2 size={13} /> كارت الترحيم / طباعة وشير
+                      </button>
+
                       {(isChurchCouncil || isPriest) && m.status === 'معلق' && (
                         <>
                           <button
@@ -2774,6 +3061,33 @@ export default function JosephArimatheaManager({
                   <span>المبلغ الإجمالي المستحق للصرف: <strong className="text-base text-emerald-800">{totalWorkerFee} ج.م</strong></span>
                   <span>توقيع أمين الصندوق / الكاهن: ........................</span>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* طباعة كارت الترحيم (ذكرى الأربعين / ذكرى سنوية) */}
+          {printMemorialCard && (
+            <div className="hidden print:block p-8 border-2 border-gray-900 rounded-3xl max-w-2xl mx-auto space-y-4">
+              <div className="text-center border-b-2 border-gray-900 pb-3">
+                <div className="text-2xl font-black">✝</div>
+                <h2 className="text-xl font-black">{printMemorialCard.memorial_type || 'ذكرى الأربعين'}</h2>
+                <p className="text-xs text-gray-700">«طُوبَى لِلَّذِينَ يَمُوتُونَ فِي الرَّبِّ مُنْذُ الآنَ» (رؤ 14: 13)</p>
+              </div>
+              <div className="grid grid-cols-3 items-center text-center gap-3 py-2">
+                <div className="border p-2 rounded-xl text-xs font-bold">👑 السيدة العذراء والدة الإله</div>
+                <div className="text-xl font-black">{printMemorialCard.deceased_name}</div>
+                <div className="border p-2 rounded-xl text-xs font-bold">✝ صلاة وترحيم على المذبح</div>
+              </div>
+              <div className="space-y-1.5 text-sm text-center">
+                {(printMemorialCard.mass_date || printMemorialCard.mass_time) && (
+                  <p><strong>القداس الإلهي:</strong> {printMemorialCard.mass_date || ''} {printMemorialCard.mass_time ? `— الساعة ${printMemorialCard.mass_time}` : ''}</p>
+                )}
+                {printMemorialCard.needs_hall && printMemorialCard.hall_name && (
+                  <p><strong>الاستقبال / القاعة:</strong> {printMemorialCard.hall_name} {printMemorialCard.hall_slot ? `(${printMemorialCard.hall_slot})` : ''}</p>
+                )}
+              </div>
+              <div className="text-center text-xs font-bold border-t pt-2">
+                اذكرونا في صلواتكم • المسيح يعزي الأسرة وجميع محبيهم
               </div>
             </div>
           )}
