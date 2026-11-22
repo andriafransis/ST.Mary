@@ -861,7 +861,6 @@ export default function AdminDashboard({
                     onChange={e => setGrpForm({ ...grpForm, gender_target: e.target.value })}
                   >
                     <option value="عام (الكل: ذكور وإناث)">👥 عام (الكل: ذكور وإناث)</option>
-                    <option value="متقسمة (بنين وبنات منفصلين)">🔀 مقسّمة (بنين وبنات / رجال وسيدات)</option>
                     <option value="ذكور / بنين فقط">♂️ ذكور / بنين فقط</option>
                     <option value="إناث / بنات فقط">♀️ إناث / بنات فقط</option>
                     <option value="أطفال (بنين وبنات)">🧸 أطفال (بنين وبنات)</option>
