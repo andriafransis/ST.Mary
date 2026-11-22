@@ -85,7 +85,7 @@ const emptyEvent = {
 };
 
 const emptyService = {
-  stage_name: '', class_name: '', class_gender: 'عام', meeting_time: '',
+  stage_name: '', academic_year: '', class_name: '', class_gender: 'عام', meeting_time: '',
   room_name: '', head_servant_name: '', vice_head_name: '', priest_id: ''
 };
 
@@ -187,11 +187,12 @@ export default function AdminDashboard({
   });
   const [savingTransfer, setSavingTransfer] = useState(false);
 
-  // نقل وتعديل الأب الكاهن المسؤول عن خدمة أو فصل أو مجموعة فصول
+  // نقل وتعديل الأب الكاهن المسؤول عن خدمة أو سنة دراسية أو فصل أو مجموعة فصول
   const [priestTransferForm, setPriestTransferForm] = useState({
     fromPriestId: '',
     toPriestId: '',
     serviceName: '',
+    yearFilter: '',
     classId: '',
     mode: 'by_service', // 'by_service' | 'by_class' | 'replace_priest'
     syncPriestSupervisedServices: true
@@ -272,27 +273,90 @@ export default function AdminDashboard({
     ...services.map(s => s.stage_name).filter(Boolean)
   ])];
 
-  const getClassesForService = (serviceName) => {
-    if (!serviceName) return [];
-    const grpObj = effectiveGroups.find(g => g.group_name === serviceName);
-    const subStages = grpObj ? normalizeGroupStages(grpObj.stages) : [];
+  // استخراج السنوات الدراسية / المراحل الفرعية والفصول الفعلية لكل خدمة
+  const getServiceHierarchy = (serviceName) => {
+    if (!serviceName) return { years: [], ungroupedClasses: [], allClasses: [] };
 
-    const matchedFromDb = services.filter(
+    const grpObj = effectiveGroups.find(g => g.group_name === serviceName);
+    const configuredYears = grpObj ? normalizeGroupStages(grpObj.stages) : [];
+
+    const matchedDbClasses = services.filter(
       s =>
         s.stage_name === serviceName ||
-        subStages.includes(s.stage_name) ||
+        configuredYears.includes(s.stage_name) ||
         (grpObj && grpObj.group_name.includes(s.stage_name))
     );
 
-    if (matchedFromDb.length > 0) return matchedFromDb;
+    // اكتشاف السنوات الدراسية من إعدادات الخدمة أو من أسماء الفصول/المراحل
+    const inferredYears = new Set(configuredYears);
+    matchedDbClasses.forEach(cls => {
+      if (cls.stage_name && cls.stage_name !== serviceName && !grpObj?.group_name?.includes(cls.stage_name)) {
+        inferredYears.add(cls.stage_name);
+      }
+      const txt = `${cls.class_name || ''} ${cls.stage_name || ''}`;
+      STAGE_OPTIONS.forEach(st => {
+        if (txt.includes(st)) inferredYears.add(st);
+      });
+      if (/kg\s*1|كي\s*جي\s*1/i.test(txt)) inferredYears.add('KG 1');
+      if (/kg\s*2|كي\s*جي\s*2/i.test(txt)) inferredYears.add('KG 2');
+    });
 
-    return subStages.map((st, idx) => ({
-      id: `stage-${serviceName}-${idx}`,
-      class_name: st,
-      stage_name: serviceName,
-      isVirtualStage: true
-    }));
+    const yearsList = [...inferredYears].filter(Boolean);
+
+    const years = yearsList.map((yr, yIdx) => {
+      const yrClasses = matchedDbClasses.filter(cls => {
+        const clsStage = String(cls.stage_name || '').trim();
+        const clsName = String(cls.class_name || '').trim();
+        if (clsStage === yr) return true;
+        if (clsName.includes(yr)) return true;
+        if (/kg\s*1|كي\s*جي\s*1/i.test(yr) && /kg\s*1|كي\s*جي\s*1/i.test(`${clsStage} ${clsName}`)) return true;
+        if (/kg\s*2|كي\s*جي\s*2/i.test(yr) && /kg\s*2|كي\s*جي\s*2/i.test(`${clsStage} ${clsName}`)) return true;
+        return false;
+      });
+
+      // لو السنة الدراسية ليها فصول قديسين فعلية نعرضها، ولو ملهاش فصول نعرض السنة نفسها كخيار مباشر
+      const selectableOptions = yrClasses.length > 0
+        ? yrClasses.map(c => ({
+            id: c.id,
+            label: c.class_name,
+            value: c.class_name,
+            isVirtual: false,
+            rawClass: c
+          }))
+        : [{
+            id: `yr-opt-${serviceName}-${yr}-${yIdx}`,
+            label: `${yr} (شعبة عامة)`,
+            value: yr,
+            isVirtual: true,
+            rawClass: null
+          }];
+
+      return {
+        yearName: yr,
+        dbClasses: yrClasses,
+        selectableOptions
+      };
+    });
+
+    const assignedClassIds = new Set(years.flatMap(y => y.dbClasses.map(c => c.id)));
+    const ungroupedClasses = matchedDbClasses.filter(c => !assignedClassIds.has(c.id));
+
+    const allClasses = [
+      ...ungroupedClasses.map(c => ({
+        id: c.id,
+        label: c.class_name,
+        value: c.class_name,
+        yearName: '',
+        isVirtual: false,
+        rawClass: c
+      })),
+      ...years.flatMap(y => y.selectableOptions.map(opt => ({ ...opt, yearName: y.yearName })))
+    ];
+
+    return { years, ungroupedClasses, allClasses };
   };
+
+  const getClassesForService = (serviceName) => getServiceHierarchy(serviceName).allClasses;
 
   const persistUserUpdate = async (updatedPayload) => {
     if (onUpdateUser) {
@@ -344,7 +408,7 @@ export default function AdminDashboard({
     };
   };
 
-  // تنفيذ نقل أو تعديل الكاهن المسؤول عن خدمة أو فصل أو استبدال كاهن بكاهن آخر
+  // تنفيذ نقل أو تعديل الكاهن المسؤول عن خدمة أو سنة دراسية أو فصل أو استبدال كاهن بكاهن آخر
   const handlePriestServiceTransfer = async (e) => {
     e.preventDefault();
     if (!requireAdminGuard()) return;
@@ -370,15 +434,23 @@ export default function AdminDashboard({
         }
         affectedClasses = services.filter(s => s.priest_id === priestTransferForm.fromPriestId);
       } else {
-        // by_service
+        // by_service (مع إمكانية تحديد سنة دراسية معينة جوه الخدمة)
         if (!priestTransferForm.serviceName) {
           alert('اختر الخدمة المطلوب نقل أو تعديل الكاهن المسؤول عنها');
           return;
         }
-        const matched = getClassesForService(priestTransferForm.serviceName).filter(c => !c.isVirtualStage);
+        const hierarchy = getServiceHierarchy(priestTransferForm.serviceName);
+        let matchedDb = hierarchy.allClasses.filter(c => !c.isVirtual && c.rawClass).map(c => c.rawClass);
+        if (priestTransferForm.yearFilter) {
+          const yrObj = hierarchy.years.find(y => y.yearName === priestTransferForm.yearFilter);
+          const yrIds = new Set((yrObj?.dbClasses || []).map(c => c.id));
+          matchedDb = matchedDb.filter(
+            c => yrIds.has(c.id) || String(`${c.class_name || ''} ${c.stage_name || ''}`).includes(priestTransferForm.yearFilter)
+          );
+        }
         affectedClasses = priestTransferForm.fromPriestId
-          ? matched.filter(c => c.priest_id === priestTransferForm.fromPriestId)
-          : matched;
+          ? matchedDb.filter(c => c.priest_id === priestTransferForm.fromPriestId)
+          : matchedDb;
       }
 
       for (const cls of affectedClasses) {
@@ -505,7 +577,7 @@ export default function AdminDashboard({
         });
       } else {
         const classesOfOldService = cfg.filterSourceService
-          ? getClassesForService(cfg.filterSourceService).map(c => c.class_name)
+          ? getClassesForService(cfg.filterSourceService).map(c => c.value)
           : [];
         if (cfg.filterSourceService) {
           nextStages = nextStages.filter(st => st !== cfg.filterSourceService);
@@ -620,7 +692,11 @@ export default function AdminDashboard({
         const cleanExisting = dbServiceGroups.filter(g => g.id);
         setDbServiceGroups([...cleanExisting, data].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)));
         if (data.has_classes !== false) {
-          setSrvForm(prev => ({ ...prev, stage_name: data.group_name }));
+          setSrvForm(prev => ({
+            ...prev,
+            stage_name: data.group_name,
+            academic_year: stagesArr[0] || ''
+          }));
         }
         setGrpForm({ ...emptyGroup, sort_order: cleanExisting.length + 2 });
         if (onRefresh) await onRefresh();
@@ -774,7 +850,6 @@ export default function AdminDashboard({
   const parentIdsFromMembers = [...new Set(
     users.flatMap(u => [u.parent_id, u.father_id, u.mother_id].filter(Boolean))
   )];
-  const parentsList = users.filter(u => u.role === 'parent' || parentIdsFromMembers.includes(u.id));
   const priestsList = users.filter(u => u.role === 'priest');
   const servantsList = users.filter(u => SERVANT_ROLES.includes(u.role));
   const deaconsList = users.filter(u => u.is_deacon);
@@ -999,7 +1074,7 @@ export default function AdminDashboard({
       { id: 'roles_permissions', icon: '🔐', title: 'المركز الموحد للصلاحيات والأدوار', desc: 'إنشاء قوالب صلاحيات (الشعب، الكاهن، الخادم، المخدوم...) وتحديد مين يشوف ومين يعدل لكل شاشة ولكل فرد', count: `${roleTemplatesCount} قالب • موحّد`, color: 'border-emerald-300 bg-emerald-50/30' },
       { id: 'page_designer', icon: '🎨', title: 'تصميم وتعديل الصفحة الرئيسية والصفحات', desc: 'ترتيب الأقسام، إضافة ونشر الأخبار والقداسات والرحلات والفيديوهات والكهنة وروابط يوتيوب وفيسبوك', count: 'تحكم كامل', color: 'border-pink-300 bg-pink-50/30' },
       { id: 'events', icon: '⛪', title: 'مواعيد القداسات والاجتماعات', desc: 'إضافة وتعديل مواعيد القداسات، العشيات، والاجتماعات العامة', count: `${events.length} موعد`, color: 'border-amber-200 bg-white' },
-      { id: 'services', icon: '🏫', title: 'الخدمات والاجتماعات والفصول', desc: 'إضافة خدمة بفصول أو اجتماع عام بدون فصول، نقل وتعديل الكاهن والخدام، وربط المستخدمين بالخدمات', count: `${dbServiceGroups.length} خدمة • ${services.length} فصل`, color: 'border-blue-200 bg-white' },
+      { id: 'services', icon: '🏫', title: 'الخدمات والاجتماعات والفصول', desc: 'إضافة خدمة بالسنوات الدراسية وفصول القديسين أو اجتماع عام بدون فصول، نقل الكاهن والخدام، وربط المستخدمين', count: `${dbServiceGroups.length} خدمة • ${services.length} فصل`, color: 'border-blue-200 bg-white' },
       { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل، المواد، الأسعار، حضور الطلاب والمدرسين، وشيت المحاسبة', count: 'إدارة الدروس', color: 'border-indigo-200 bg-white' },
       { id: 'joseph_arimathea', icon: '🕊️', title: 'خدمة يوسف الرامي', desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، خط سير السائق، ومتابعة المرافقين', count: 'خدمة المنتقلين', color: 'border-slate-300 bg-white' },
       { id: 'burial_and_caskets', icon: '⚰️', title: 'أماكن الدفن والصناديق وألحان يوسف الرامي', desc: 'جدول أماكن الدفن بالترقيم المتسلسل ورسوم الانتقال + مخزون الصناديق + ألحان يوسف الرامي وسلايدر الصوت', count: 'جداول وألحان', color: 'border-cyan-200 bg-white' },
@@ -1056,7 +1131,9 @@ export default function AdminDashboard({
   }
 
   const groupsWithClasses = effectiveGroups.filter(g => g.has_classes !== false);
-  const selectedClassServiceObj = groupsWithClasses.find(g => g.group_name === (srvForm.stage_name || groupsWithClasses[0]?.group_name));
+  const chosenClassServiceName = srvForm.stage_name || groupsWithClasses[0]?.group_name || '';
+  const selectedClassServiceObj = groupsWithClasses.find(g => g.group_name === chosenClassServiceName);
+  const selectedServiceHierarchy = getServiceHierarchy(chosenClassServiceName);
   const selectedServantTagsInForm = splitList(grpForm.servants_names);
 
   const allGroupStagesFlat = [...new Set([
@@ -1081,6 +1158,8 @@ export default function AdminDashboard({
     }
     return true;
   });
+
+  const priestTransferHierarchy = getServiceHierarchy(priestTransferForm.serviceName);
 
   return (
     <div className="space-y-4">
@@ -1323,14 +1402,14 @@ export default function AdminDashboard({
 
       {activeCard === 'services' && (
         <div className="space-y-4 text-xs">
-          {renderTopBack('🏫 الخدمات والاجتماعات والفصول التابعة لها')}
+          {renderTopBack('🏫 الخدمات والاجتماعات والسنوات الدراسية وفصولها')}
 
-          {/* كارت نقل وتعديل الأب الكاهن المسؤول عن خدمة أو فصل */}
+          {/* كارت نقل وتعديل الأب الكاهن المسؤول عن خدمة أو سنة دراسية أو فصل */}
           {isAdmin && (
             <div className="bg-purple-50/50 p-4 rounded-3xl border-2 border-purple-200 space-y-3 font-bold shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-black flex items-center gap-1.5 text-purple-950">
-                  <ArrowLeftRight size={16} /> ✝ نقل وتعديل الكاهن المسؤول عن خدمة أو فصل (عند تغير السنة أو المسؤوليات)
+                  <ArrowLeftRight size={16} /> ✝ نقل وتعديل الكاهن المسؤول عن خدمة أو سنة دراسية أو فصل
                 </h3>
                 <div className="flex gap-1 text-[11px]">
                   <button
@@ -1338,7 +1417,7 @@ export default function AdminDashboard({
                     onClick={() => setPriestTransferForm(prev => ({ ...prev, mode: 'by_service' }))}
                     className={`px-2.5 py-1 rounded-lg cursor-pointer ${priestTransferForm.mode === 'by_service' ? 'bg-purple-800 text-white' : 'bg-white border text-gray-700'}`}
                   >
-                    حسب الخدمة
+                    حسب الخدمة / السنة
                   </button>
                   <button
                     type="button"
@@ -1360,21 +1439,36 @@ export default function AdminDashboard({
               <form onSubmit={handlePriestServiceTransfer} className="space-y-2.5">
                 <div className="grid md:grid-cols-4 gap-2">
                   {priestTransferForm.mode === 'by_service' && (
-                    <div>
-                      <label className="block text-[10px] text-gray-600 mb-0.5">① الخدمة المستهدفة *</label>
-                      <select
-                        className="w-full p-2.5 border rounded-xl bg-white"
-                        value={priestTransferForm.serviceName}
-                        onChange={e => setPriestTransferForm(prev => ({ ...prev, serviceName: e.target.value }))}
-                      >
-                        <option value="">-- اختر الخدمة --</option>
-                        {availableServantServices.map((s, idx) => <option key={idx} value={s}>{s}</option>)}
-                      </select>
-                    </div>
+                    <>
+                      <div>
+                        <label className="block text-[10px] text-gray-600 mb-0.5">① الخدمة المستهدفة *</label>
+                        <select
+                          className="w-full p-2.5 border rounded-xl bg-white"
+                          value={priestTransferForm.serviceName}
+                          onChange={e => setPriestTransferForm(prev => ({ ...prev, serviceName: e.target.value, yearFilter: '' }))}
+                        >
+                          <option value="">-- اختر الخدمة --</option>
+                          {availableServantServices.map((s, idx) => <option key={idx} value={s}>{s}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-gray-600 mb-0.5">السنة الدراسية (اختياري)</label>
+                        <select
+                          className="w-full p-2.5 border rounded-xl bg-white"
+                          value={priestTransferForm.yearFilter}
+                          onChange={e => setPriestTransferForm(prev => ({ ...prev, yearFilter: e.target.value }))}
+                        >
+                          <option value="">-- كل سنوات الخدمة --</option>
+                          {priestTransferHierarchy.years.map((yr, idx) => (
+                            <option key={idx} value={yr.yearName}>{yr.yearName}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </>
                   )}
 
                   {priestTransferForm.mode === 'by_class' && (
-                    <div>
+                    <div className="md:col-span-2">
                       <label className="block text-[10px] text-gray-600 mb-0.5">① الفصل المحدد *</label>
                       <select
                         className="w-full p-2.5 border rounded-xl bg-white"
@@ -1387,19 +1481,19 @@ export default function AdminDashboard({
                     </div>
                   )}
 
-                  <div>
-                    <label className="block text-[10px] text-gray-600 mb-0.5">
-                      {priestTransferForm.mode === 'replace_priest' ? '① الكاهن الحالي المراد نقله *' : 'الكاهن السابق (اختياري)'}
-                    </label>
-                    <select
-                      className="w-full p-2.5 border rounded-xl bg-white"
-                      value={priestTransferForm.fromPriestId}
-                      onChange={e => setPriestTransferForm(prev => ({ ...prev, fromPriestId: e.target.value }))}
-                    >
-                      <option value="">-- الكل / غير محدد --</option>
-                      {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-                    </select>
-                  </div>
+                  {priestTransferForm.mode === 'replace_priest' && (
+                    <div>
+                      <label className="block text-[10px] text-gray-600 mb-0.5">① الكاهن الحالي المراد نقله *</label>
+                      <select
+                        className="w-full p-2.5 border rounded-xl bg-white"
+                        value={priestTransferForm.fromPriestId}
+                        onChange={e => setPriestTransferForm(prev => ({ ...prev, fromPriestId: e.target.value }))}
+                      >
+                        <option value="">-- اختر الكاهن الحالي --</option>
+                        {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+                      </select>
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-[10px] text-gray-600 mb-0.5">② الأب الكاهن الجديد المسؤول *</label>
@@ -1424,6 +1518,20 @@ export default function AdminDashboard({
                     </button>
                   </div>
                 </div>
+
+                {priestTransferForm.mode !== 'replace_priest' && (
+                  <div className="max-w-xs">
+                    <label className="block text-[10px] text-gray-600 mb-0.5">تصفية بكاهن سابق محدد (اختياري)</label>
+                    <select
+                      className="w-full p-2 border rounded-xl bg-white text-[11px]"
+                      value={priestTransferForm.fromPriestId}
+                      onChange={e => setPriestTransferForm(prev => ({ ...prev, fromPriestId: e.target.value }))}
+                    >
+                      <option value="">-- الكل --</option>
+                      {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+                    </select>
+                  </div>
+                )}
 
                 <label className="flex items-center gap-2 text-[11px] text-purple-950 cursor-pointer">
                   <input
@@ -1459,13 +1567,13 @@ export default function AdminDashboard({
           {isAdmin && (
             <div className="bg-amber-50/50 p-4 rounded-3xl border-2 border-amber-300 space-y-3 font-bold shadow-sm">
               <h3 className="text-sm font-black flex items-center gap-1.5 text-[#7a1c24]">
-                <Layers size={16} /> {editingGrpId ? '✏️ تعديل الخدمة / الاجتماع' : '① أولاً: إضافة خدمة أو اجتماع (تحديد: بفصول أم بدون • الفئة والحضور • الأمين والخدام • الميعاد)'}
+                <Layers size={16} /> {editingGrpId ? '✏️ تعديل الخدمة / الاجتماع' : '① أولاً: إضافة خدمة أو اجتماع والسنوات الدراسية التابعة لها'}
               </h3>
               <form onSubmit={handleSaveServiceGroup} className="space-y-3">
                 <div className="grid md:grid-cols-4 gap-2">
                   <input
                     required
-                    placeholder="اسم الخدمة أو الاجتماع (مثال: خدمة ابتدائي / دراسة الكتاب / إخوة الرب) *"
+                    placeholder="اسم الخدمة (مثال: خدمة ابتدائي / حضانة / شعب عام) *"
                     className="md:col-span-2 p-2.5 border rounded-xl bg-white"
                     value={grpForm.group_name}
                     onChange={e => setGrpForm({ ...grpForm, group_name: e.target.value })}
@@ -1483,7 +1591,7 @@ export default function AdminDashboard({
                       });
                     }}
                   >
-                    <option value="yes">📚 خدمة لها فصول بداخلها</option>
+                    <option value="yes">📚 خدمة لها سنوات / فصول بداخلها</option>
                     <option value="no">🕊️ اجتماع عام / خدمة بدون فصول</option>
                   </select>
                   <select
@@ -1612,7 +1720,7 @@ export default function AdminDashboard({
 
                 <div className="flex flex-wrap gap-2">
                   <input
-                    placeholder="الأقسام أو الصفوف الفرعية جواها (اختياري، مثل: أولى إعدادي, ثانية إعدادي)"
+                    placeholder="السنوات الدراسية أو المراحل الفرعية جوه الخدمة (مثال: أولى ابتدائي, ثانية ابتدائي أو KG 1, KG 2)"
                     className="flex-1 min-w-55 p-2.5 border rounded-xl bg-white font-normal"
                     value={grpForm.stagesText}
                     onChange={e => setGrpForm({ ...grpForm, stagesText: e.target.value })}
@@ -1642,55 +1750,103 @@ export default function AdminDashboard({
                 if (!requireAdminGuard()) return;
                 const chosenServiceName = srvForm.stage_name || groupsWithClasses[0]?.group_name || '';
                 if (!chosenServiceName) return alert('أضف أولاً خدمة لها فصول ثم اخترها هنا');
+
+                const yearTag = String(srvForm.academic_year || '').trim();
+                const baseClassName = String(srvForm.class_name || '').trim();
+                const fullClassTitle = yearTag && !baseClassName.includes(yearTag)
+                  ? `${yearTag} - ${baseClassName}`
+                  : baseClassName;
+
                 const finalClassName =
-                  srvForm.class_gender && srvForm.class_gender !== 'عام' && !srvForm.class_name.includes(srvForm.class_gender)
-                    ? `${srvForm.class_name.trim()} (${srvForm.class_gender})`
-                    : srvForm.class_name.trim();
-                const { class_gender, ...cleanSrv } = srvForm;
-                const payload = { ...cleanSrv, class_name: finalClassName, stage_name: chosenServiceName, priest_id: srvForm.priest_id || null };
+                  srvForm.class_gender && srvForm.class_gender !== 'عام' && !fullClassTitle.includes(srvForm.class_gender)
+                    ? `${fullClassTitle} (${srvForm.class_gender})`
+                    : fullClassTitle;
+
+                const { class_gender, academic_year, ...cleanSrv } = srvForm;
+                const payload = {
+                  ...cleanSrv,
+                  class_name: finalClassName,
+                  stage_name: yearTag || chosenServiceName,
+                  priest_id: srvForm.priest_id || null
+                };
                 if (editingSrvId) { onUpdateService({ ...payload, id: editingSrvId }); setEditingSrvId(null); }
                 else { onAddService(payload); }
-                setSrvForm({ ...emptyService, stage_name: chosenServiceName });
+                setSrvForm({ ...emptyService, stage_name: chosenServiceName, academic_year: yearTag });
               }}
               className="bg-white p-4 rounded-3xl border space-y-3 font-bold shadow-sm"
             >
               <h3 className="text-sm font-extrabold flex items-center gap-1 text-[#7a1c24]">
-                <BookOpen size={16} /> {editingSrvId ? '✏️ تعديل الفصل' : '② ثانياً: إضافة فصل وربطه بالخدمة التابع لها (تظهر هنا الخدمات اللي لها فصول فقط)'}
+                <BookOpen size={16} /> {editingSrvId ? '✏️ تعديل الفصل' : '② ثانياً: إضافة فصل (باسم قديس مثلاً) وربطه بالخدمة والسنة الدراسية'}
               </h3>
               <div className="grid md:grid-cols-4 gap-2">
-                <select
-                  required
-                  className="p-2.5 border rounded-xl bg-amber-50/50"
-                  value={srvForm.stage_name || groupsWithClasses[0]?.group_name || ''}
-                  onChange={e => setSrvForm({ ...srvForm, stage_name: e.target.value })}
-                >
-                  <option value="">-- اختر الخدمة التابع لها الفصل * --</option>
-                  {groupsWithClasses.map((g, i) => (
-                    <option key={g.id || i} value={g.group_name}>
-                      {g.icon || '🏫'} {g.group_name} ({g.gender_target || 'عام'})
-                    </option>
-                  ))}
-                </select>
-                <input required placeholder="اسم الفصل (مثال: فصل مارجرجس / أولى) *" className="p-2.5 border rounded-xl" value={srvForm.class_name} onChange={e => setSrvForm({ ...srvForm, class_name: e.target.value })} />
-                <select
-                  className="p-2.5 border rounded-xl bg-white"
-                  value={srvForm.class_gender || 'عام'}
-                  onChange={e => setSrvForm({ ...srvForm, class_gender: e.target.value })}
-                >
-                  <option value="عام">👥 فصل مشترك / عام</option>
-                  <option value="بنين">♂️ فصل بنين</option>
-                  <option value="بنات">♀️ فصل بنات</option>
-                </select>
-                <select className="p-2.5 border rounded-xl bg-amber-50/40" value={srvForm.priest_id || ''} onChange={e => setSrvForm({ ...srvForm, priest_id: e.target.value })}>
-                  <option value="">-- الأب الكاهن المشرف --</option>
-                  {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-                </select>
+                <div>
+                  <label className="block text-[10px] text-gray-600 mb-0.5">① الخدمة *</label>
+                  <select
+                    required
+                    className="w-full p-2.5 border rounded-xl bg-amber-50/50"
+                    value={chosenClassServiceName}
+                    onChange={e => setSrvForm({ ...srvForm, stage_name: e.target.value, academic_year: '' })}
+                  >
+                    <option value="">-- اختر الخدمة * --</option>
+                    {groupsWithClasses.map((g, i) => (
+                      <option key={g.id || i} value={g.group_name}>
+                        {g.icon || '🏫'} {g.group_name} ({g.gender_target || 'عام'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] text-gray-600 mb-0.5">② العام الدراسي / المرحلة الفرعية</label>
+                  <select
+                    className="w-full p-2.5 border rounded-xl bg-white"
+                    value={srvForm.academic_year || ''}
+                    onChange={e => setSrvForm({ ...srvForm, academic_year: e.target.value })}
+                  >
+                    <option value="">-- عام / بدون سنة محددة --</option>
+                    {selectedServiceHierarchy.years.map((yr, yIdx) => (
+                      <option key={yIdx} value={yr.yearName}>{yr.yearName}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] text-gray-600 mb-0.5">③ اسم الفصل (قديس أو فصل) *</label>
+                  <input
+                    required
+                    placeholder="مثال: فصل مارمينا / مارجرجس *"
+                    className="w-full p-2.5 border rounded-xl"
+                    value={srvForm.class_name}
+                    onChange={e => setSrvForm({ ...srvForm, class_name: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] text-gray-600 mb-0.5">نوع الفصل والأب الكاهن</label>
+                  <div className="flex gap-1.5">
+                    <select
+                      className="p-2.5 border rounded-xl bg-white"
+                      value={srvForm.class_gender || 'عام'}
+                      onChange={e => setSrvForm({ ...srvForm, class_gender: e.target.value })}
+                    >
+                      <option value="عام">👥 عام</option>
+                      <option value="بنين">♂️ بنين</option>
+                      <option value="بنات">♀️ بنات</option>
+                    </select>
+                    <select className="flex-1 p-2.5 border rounded-xl bg-amber-50/40" value={srvForm.priest_id || ''} onChange={e => setSrvForm({ ...srvForm, priest_id: e.target.value })}>
+                      <option value="">-- الكاهن --</option>
+                      {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+                    </select>
+                  </div>
+                </div>
               </div>
+
               {selectedClassServiceObj?.gender_target?.includes('متقسمة') && (
                 <p className="text-[11px] text-amber-900 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-200">
                   💡 الخدمة المختارة ({selectedClassServiceObj.group_name}) مقسّمة — حدد من القائمة هل الفصل ده **بنين** أم **بنات**.
                 </p>
               )}
+
               <div className="grid md:grid-cols-4 gap-2">
                 <input placeholder="أمين الفصل / الخدمة" className="p-2.5 border rounded-xl" value={srvForm.head_servant_name} onChange={e => setSrvForm({ ...srvForm, head_servant_name: e.target.value })} />
                 <input placeholder="مساعد / خدام الفصل" className="p-2.5 border rounded-xl" value={srvForm.vice_head_name} onChange={e => setSrvForm({ ...srvForm, vice_head_name: e.target.value })} />
@@ -1706,8 +1862,9 @@ export default function AdminDashboard({
           <div className="grid md:grid-cols-2 gap-3">
             {effectiveGroups.map((grp, idx) => {
               const groupKey = String(grp.id || grp.group_name || idx);
-              const stagesArr = normalizeGroupStages(grp.stages);
-              const subScopeOptions = [...new Set([grp.group_name, ...stagesArr].filter(Boolean))];
+              const hierarchy = getServiceHierarchy(grp.group_name);
+              const stagesArr = hierarchy.years.map(y => y.yearName);
+              const subScopeOptions = [...new Set([grp.group_name, ...stagesArr, ...hierarchy.allClasses.map(c => c.value)].filter(Boolean))];
               const selectedQuickScope = quickAssignByGroup[groupKey]?.scope || grp.group_name;
               const selectedQuickUserId = quickAssignByGroup[groupKey]?.userId || '';
 
@@ -1718,9 +1875,7 @@ export default function AdminDashboard({
                 return subScopeOptions.some(opt => combined.includes(opt) || combined.some(item => item.includes(opt)));
               });
 
-              const classesInThisService = services.filter(
-                s => s.stage_name === grp.group_name || grp.group_name.includes(s.stage_name)
-              );
+              const classesInThisService = hierarchy.allClasses.filter(c => !c.isVirtual && c.rawClass).map(c => c.rawClass);
 
               const priestsInThisService = [...new Set(
                 classesInThisService.map(c => c.priest_id).filter(Boolean)
@@ -1737,7 +1892,7 @@ export default function AdminDashboard({
                           {grp.gender_target || 'عام (الكل: ذكور وإناث)'}
                         </span>
                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${grp.has_classes !== false ? 'bg-emerald-50 text-emerald-900' : 'bg-purple-50 text-purple-900'}`}>
-                          {grp.has_classes !== false ? '📚 لها فصول' : '🕊️ اجتماع عام بدون فصول'}
+                          {grp.has_classes !== false ? '📚 لها سنوات / فصول' : '🕊️ اجتماع عام بدون فصول'}
                         </span>
                       </div>
                       {(grp.service_day || grp.start_time) && (
@@ -1757,7 +1912,7 @@ export default function AdminDashboard({
                         <p className="text-[11px] text-gray-600">👥 <strong>الخدام:</strong> {grp.servants_names}</p>
                       )}
                       {stagesArr.length > 0 && (
-                        <p className="text-[11px] text-gray-500">الأقسام: {stagesArr.join(' • ')}</p>
+                        <p className="text-[11px] text-gray-500">السنوات / المراحل: {stagesArr.join(' • ')}</p>
                       )}
                     </div>
 
@@ -1768,7 +1923,8 @@ export default function AdminDashboard({
                           onClick={() => setPriestTransferForm(prev => ({
                             ...prev,
                             mode: 'by_service',
-                            serviceName: grp.group_name
+                            serviceName: grp.group_name,
+                            yearFilter: ''
                           }))}
                           className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-950 rounded-lg font-bold cursor-pointer"
                         >
@@ -1779,7 +1935,12 @@ export default function AdminDashboard({
                             type="button"
                             onClick={() => {
                               setEditingSrvId(null);
-                              setSrvForm({ ...emptyService, stage_name: grp.group_name, head_servant_name: grp.head_servant_name || '' });
+                              setSrvForm({
+                                ...emptyService,
+                                stage_name: grp.group_name,
+                                academic_year: stagesArr[0] || '',
+                                head_servant_name: grp.head_servant_name || ''
+                              });
                               document.getElementById('add-class-form')?.scrollIntoView({ behavior: 'smooth' });
                             }}
                             className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 rounded-lg font-bold cursor-pointer"
@@ -1802,7 +1963,7 @@ export default function AdminDashboard({
                               service_day: grp.service_day || '',
                               start_time: grp.start_time || '',
                               end_time: grp.end_time || '',
-                              stagesText: stagesArr.join(', '),
+                              stagesText: normalizeGroupStages(grp.stages).join(', '),
                               sort_order: grp.sort_order || idx + 1
                             });
                             window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1941,47 +2102,103 @@ export default function AdminDashboard({
                   )}
 
                   {grp.has_classes !== false ? (
-                    classesInThisService.length === 0 ? (
-                      <p className="text-[11px] text-gray-400">لا توجد فصول مضافة داخل هذه الخدمة بعد.</p>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {classesInThisService.map(srv => {
-                          const pObj = priestsList.find(p => p.id === srv.priest_id);
-                          return (
-                            <div key={srv.id} className="p-2.5 bg-[#fbfaf7] rounded-2xl border flex justify-between items-center gap-2">
-                              <div>
-                                <strong className="text-xs text-gray-900 block">{srv.class_name}</strong>
-                                <span className="text-[11px] text-gray-500">
-                                  {pObj && `✝ ${pObj.full_name} • `}
-                                  {srv.head_servant_name && `⭐ الأمين: ${srv.head_servant_name} `}
-                                  {srv.vice_head_name && `• الخدام: ${srv.vice_head_name} `}
-                                  {srv.meeting_time && `• ⏰ ${srv.meeting_time}`}
-                                </span>
-                              </div>
-                              {isAdmin && (
-                                <div className="flex gap-1 shrink-0">
-                                  <button
-                                    type="button"
-                                    onClick={() => setPriestTransferForm(prev => ({
-                                      ...prev,
-                                      mode: 'by_class',
-                                      classId: srv.id,
-                                      fromPriestId: srv.priest_id || ''
-                                    }))}
-                                    className="px-2 py-1 bg-purple-50 text-purple-900 rounded-lg text-[10px] font-bold cursor-pointer"
-                                    title="نقل / تعديل كاهن الفصل"
-                                  >
-                                    ✝ كاهن
-                                  </button>
-                                  <button onClick={() => { setEditingSrvId(srv.id); setSrvForm({ ...emptyService, ...srv, class_gender: 'عام' }); document.getElementById('add-class-form')?.scrollIntoView({ behavior: 'smooth' }); }} className="p-1.5 bg-white border rounded-lg cursor-pointer"><Edit3 size={12} /></button>
-                                  <button onClick={() => onDeleteService(srv.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer"><Trash2 size={12} /></button>
-                                </div>
-                              )}
+                    <div className="space-y-2">
+                      {hierarchy.years.map((yr, yIdx) => (
+                        <div key={yIdx} className="p-2.5 bg-[#fbfaf7] rounded-2xl border space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <strong className="text-xs text-[#7a1c24]">📘 {yr.yearName}</strong>
+                            <span className="text-[10px] text-gray-500">
+                              {yr.dbClasses.length > 0 ? `${yr.dbClasses.length} فصل` : 'شعبة عامة (بدون فصول مضافة)'}
+                            </span>
+                          </div>
+                          {yr.dbClasses.length > 0 && (
+                            <div className="space-y-1">
+                              {yr.dbClasses.map(srv => {
+                                const pObj = priestsList.find(p => p.id === srv.priest_id);
+                                return (
+                                  <div key={srv.id} className="p-2 bg-white rounded-xl border flex justify-between items-center gap-2">
+                                    <div>
+                                      <strong className="text-xs text-gray-900 block">{srv.class_name}</strong>
+                                      <span className="text-[11px] text-gray-500">
+                                        {pObj && `✝ ${pObj.full_name} • `}
+                                        {srv.head_servant_name && `⭐ الأمين: ${srv.head_servant_name} `}
+                                        {srv.vice_head_name && `• الخدام: ${srv.vice_head_name} `}
+                                        {srv.meeting_time && `• ⏰ ${srv.meeting_time}`}
+                                      </span>
+                                    </div>
+                                    {isAdmin && (
+                                      <div className="flex gap-1 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => setPriestTransferForm(prev => ({
+                                            ...prev,
+                                            mode: 'by_class',
+                                            classId: srv.id,
+                                            fromPriestId: srv.priest_id || ''
+                                          }))}
+                                          className="px-2 py-1 bg-purple-50 text-purple-900 rounded-lg text-[10px] font-bold cursor-pointer"
+                                          title="نقل / تعديل كاهن الفصل"
+                                        >
+                                          ✝ كاهن
+                                        </button>
+                                        <button onClick={() => { setEditingSrvId(srv.id); setSrvForm({ ...emptyService, ...srv, stage_name: grp.group_name, academic_year: yr.yearName, class_gender: 'عام' }); document.getElementById('add-class-form')?.scrollIntoView({ behavior: 'smooth' }); }} className="p-1.5 bg-white border rounded-lg cursor-pointer"><Edit3 size={12} /></button>
+                                        <button onClick={() => onDeleteService(srv.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer"><Trash2 size={12} /></button>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
-                          );
-                        })}
-                      </div>
-                    )
+                          )}
+                        </div>
+                      ))}
+
+                      {hierarchy.ungroupedClasses.length > 0 && (
+                        <div className="space-y-1.5">
+                          {hierarchy.ungroupedClasses.map(srv => {
+                            const pObj = priestsList.find(p => p.id === srv.priest_id);
+                            return (
+                              <div key={srv.id} className="p-2.5 bg-[#fbfaf7] rounded-2xl border flex justify-between items-center gap-2">
+                                <div>
+                                  <strong className="text-xs text-gray-900 block">{srv.class_name}</strong>
+                                  <span className="text-[11px] text-gray-500">
+                                    {pObj && `✝ ${pObj.full_name} • `}
+                                    {srv.head_servant_name && `⭐ الأمين: ${srv.head_servant_name} `}
+                                    {srv.vice_head_name && `• الخدام: ${srv.vice_head_name} `}
+                                    {srv.meeting_time && `• ⏰ ${srv.meeting_time}`}
+                                  </span>
+                                </div>
+                                {isAdmin && (
+                                  <div className="flex gap-1 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => setPriestTransferForm(prev => ({
+                                        ...prev,
+                                        mode: 'by_class',
+                                        classId: srv.id,
+                                        fromPriestId: srv.priest_id || ''
+                                      }))}
+                                      className="px-2 py-1 bg-purple-50 text-purple-900 rounded-lg text-[10px] font-bold cursor-pointer"
+                                      title="نقل / تعديل كاهن الفصل"
+                                    >
+                                      ✝ كاهن
+                                    </button>
+                                    <button onClick={() => { setEditingSrvId(srv.id); setSrvForm({ ...emptyService, ...srv, stage_name: grp.group_name, academic_year: '', class_gender: 'عام' }); document.getElementById('add-class-form')?.scrollIntoView({ behavior: 'smooth' }); }} className="p-1.5 bg-white border rounded-lg cursor-pointer"><Edit3 size={12} /></button>
+                                    <button onClick={() => onDeleteService(srv.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer"><Trash2 size={12} /></button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {hierarchy.years.length === 0 && hierarchy.ungroupedClasses.length === 0 && (
+                        <p className="text-[11px] text-gray-500 bg-[#fbfaf7] p-2.5 rounded-xl border">
+                          عامة / بدون فصول فرعية مسجلة حالياً (تظهر كاختيار مباشر باسم الخدمة).
+                        </p>
+                      )}
+                    </div>
                   ) : (
                     <p className="text-[11px] text-purple-900 bg-purple-50/50 p-2 rounded-xl border border-purple-100">
                       🕊️ اجتماع عام / خدمة مفتوحة بدون فصول فرعية (تظهر ككارت لأعضائها وخدامها).
@@ -2321,7 +2538,7 @@ export default function AdminDashboard({
                       >
                         <option value="">-- الكل --</option>
                         {getClassesForService(transferModal.filterSourceService || availableServantServices[0]).map((c, idx) => (
-                          <option key={c.id || idx} value={c.class_name}>{c.class_name}</option>
+                          <option key={c.id || idx} value={c.value}>{c.label}</option>
                         ))}
                       </select>
                     </div>
@@ -2418,29 +2635,82 @@ export default function AdminDashboard({
 
               {transferModal.targetKind === 'servant' ? (
                 <div className="bg-blue-50/40 p-3 rounded-2xl border border-blue-200 space-y-2">
-                  <label className="block text-blue-950">② اختر الفصول التابعة لـ ({transferModal.targetService || 'الخدمة'}):</label>
-                  {getClassesForService(transferModal.targetService).length === 0 ? (
-                    <p className="text-[11px] text-gray-400">لا توجد فصول مسجلة تحت هذه الخدمة بعد.</p>
+                  <label className="block text-blue-950">② اختر السنوات أو الفصول التابعة لـ ({transferModal.targetService || 'الخدمة'}):</label>
+                  {getServiceHierarchy(transferModal.targetService).years.length > 0 ? (
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {getServiceHierarchy(transferModal.targetService).years.map((yr, yIdx) => (
+                        <div key={yIdx} className="bg-white p-2 rounded-xl border space-y-1">
+                          <div className="text-[10px] font-black text-[#7a1c24]">{yr.yearName}</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {yr.selectableOptions.map((optItem) => {
+                              const checked = transferModal.targetClasses.includes(optItem.value);
+                              return (
+                                <button
+                                  key={optItem.id || optItem.value}
+                                  type="button"
+                                  onClick={() => setTransferModal(prev => ({
+                                    ...prev,
+                                    targetClasses: checked
+                                      ? prev.targetClasses.filter(c => c !== optItem.value)
+                                      : [...prev.targetClasses, optItem.value]
+                                  }))}
+                                  className={`px-2.5 py-1 rounded-xl border text-[11px] cursor-pointer ${
+                                    checked ? 'bg-blue-700 text-white border-blue-700' : 'bg-gray-50 text-gray-800'
+                                  }`}
+                                >
+                                  {checked ? '✓ ' : '+ '}{optItem.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                      {getServiceHierarchy(transferModal.targetService).ungroupedClasses.length > 0 && (
+                        <div className="bg-white p-2 rounded-xl border flex flex-wrap gap-1.5">
+                          {getServiceHierarchy(transferModal.targetService).ungroupedClasses.map((clsItem) => {
+                            const checked = transferModal.targetClasses.includes(clsItem.class_name);
+                            return (
+                              <button
+                                key={clsItem.id}
+                                type="button"
+                                onClick={() => setTransferModal(prev => ({
+                                  ...prev,
+                                  targetClasses: checked
+                                    ? prev.targetClasses.filter(c => c !== clsItem.class_name)
+                                    : [...prev.targetClasses, clsItem.class_name]
+                                }))}
+                                className={`px-2.5 py-1 rounded-xl border text-[11px] cursor-pointer ${
+                                  checked ? 'bg-blue-700 text-white border-blue-700' : 'bg-gray-50 text-gray-800'
+                                }`}
+                              >
+                                {checked ? '✓ ' : '+ '}{clsItem.class_name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ) : getClassesForService(transferModal.targetService).length === 0 ? (
+                    <p className="text-[11px] text-gray-500">خدمة عامة / بدون فصول فرعية (تُعتمد الخدمة نفسها).</p>
                   ) : (
                     <div className="flex flex-wrap gap-1.5">
                       {getClassesForService(transferModal.targetService).map((clsItem) => {
-                        const clsName = clsItem.class_name;
-                        const checked = transferModal.targetClasses.includes(clsName);
+                        const checked = transferModal.targetClasses.includes(clsItem.value);
                         return (
                           <button
-                            key={clsItem.id || clsName}
+                            key={clsItem.id || clsItem.value}
                             type="button"
                             onClick={() => setTransferModal(prev => ({
                               ...prev,
                               targetClasses: checked
-                                ? prev.targetClasses.filter(c => c !== clsName)
-                                : [...prev.targetClasses, clsName]
+                                ? prev.targetClasses.filter(c => c !== clsItem.value)
+                                : [...prev.targetClasses, clsItem.value]
                             }))}
                             className={`px-2.5 py-1.5 rounded-xl border text-[11px] cursor-pointer ${
                               checked ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-gray-800'
                             }`}
                           >
-                            {checked ? '✓ ' : '+ '}{clsName}
+                            {checked ? '✓ ' : '+ '}{clsItem.label}
                           </button>
                         );
                       })}
@@ -2463,16 +2733,16 @@ export default function AdminDashboard({
                 </div>
               ) : (
                 <div>
-                  <label className="block mb-1 text-blue-950">② الفصل التابع للمرحلة الهدف</label>
+                  <label className="block mb-1 text-blue-950">② السنة الدراسية / الفصل التابع للمرحلة الهدف</label>
                   <select
                     className="w-full p-2.5 border rounded-xl bg-white"
                     value={transferModal.targetSingleClass}
                     onChange={e => setTransferModal(prev => ({ ...prev, targetSingleClass: e.target.value }))}
                   >
-                    <option value="">-- اختر الفصل --</option>
+                    <option value="">-- اختر السنة أو الفصل --</option>
                     {getClassesForService(transferModal.targetService).map((clsItem) => (
-                      <option key={clsItem.id || clsItem.class_name} value={clsItem.class_name}>
-                        {clsItem.class_name}
+                      <option key={clsItem.id || clsItem.value} value={clsItem.value}>
+                        {clsItem.yearName ? `${clsItem.yearName} ← ${clsItem.label}` : clsItem.label}
                       </option>
                     ))}
                   </select>
@@ -2658,7 +2928,7 @@ export default function AdminDashboard({
                         onChange={e => {
                           const nextStage = e.target.value;
                           const nextStageClasses = getClassesForService(nextStage);
-                          const keepCurrentClass = nextStageClasses.some(c => c.class_name === formData.assigned_class);
+                          const keepCurrentClass = nextStageClasses.some(c => c.value === formData.assigned_class);
                           setFormData({
                             ...formData,
                             detailed_stage: nextStage,
@@ -2670,16 +2940,16 @@ export default function AdminDashboard({
                       </select>
                     </div>
                     <div>
-                      <label className="block mb-1">② الفصل التابع للمرحلة</label>
+                      <label className="block mb-1">② السنة الدراسية / الفصل التابع للمرحلة</label>
                       <select
                         className="w-full p-2.5 border rounded-xl bg-white"
                         value={formData.assigned_class || ''}
                         onChange={e => setFormData({ ...formData, assigned_class: e.target.value })}
                       >
-                        <option value="">-- اختر الفصل --</option>
+                        <option value="">-- اختر السنة أو الفصل --</option>
                         {getClassesForService(formData.detailed_stage).map((srv) => (
-                          <option key={srv.id || srv.class_name} value={srv.class_name}>
-                            {srv.class_name}
+                          <option key={srv.id || srv.value} value={srv.value}>
+                            {srv.yearName ? `${srv.yearName} ← ${srv.label}` : srv.label}
                           </option>
                         ))}
                       </select>
@@ -2743,38 +3013,95 @@ export default function AdminDashboard({
                   {selectedServantStages.length > 0 && (
                     <div className="space-y-2">
                       <label className="block text-blue-950 font-extrabold">
-                        ② اختر الفصول التابعة لكل خدمة للخادم:
+                        ② اختر السنوات أو الفصول التابعة لكل خدمة للخادم:
                       </label>
-                      <div className="space-y-2 max-h-56 overflow-y-auto">
+                      <div className="space-y-2 max-h-64 overflow-y-auto">
                         {selectedServantStages.map((srvName, sIdx) => {
-                          const srvClasses = getClassesForService(srvName);
+                          const hierarchy = getServiceHierarchy(srvName);
                           return (
-                            <div key={sIdx} className="bg-white p-2.5 rounded-xl border space-y-1.5">
+                            <div key={sIdx} className="bg-white p-2.5 rounded-xl border space-y-2">
                               <div className="text-[11px] font-black text-[#7a1c24] flex items-center justify-between">
-                                <span>📌 فصول خدمة: {srvName}</span>
-                                <span className="text-[10px] text-gray-400">{srvClasses.length} خيار</span>
+                                <span>📌 خدمة: {srvName}</span>
+                                <span className="text-[10px] text-gray-400">{hierarchy.allClasses.length} خيار</span>
                               </div>
-                              {srvClasses.length === 0 ? (
-                                <p className="text-[11px] text-gray-400">لا توجد فصول مسجلة تحت هذه الخدمة بعد.</p>
+
+                              {hierarchy.years.length > 0 ? (
+                                <div className="space-y-1.5">
+                                  {hierarchy.years.map((yr, yIdx) => (
+                                    <div key={yIdx} className="p-2 rounded-lg bg-[#fbfaf7] border space-y-1">
+                                      <div className="text-[10px] font-black text-gray-800">
+                                        {yr.yearName}
+                                      </div>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {yr.selectableOptions.map((optItem) => {
+                                          const checked = selectedServantClasses.includes(optItem.value);
+                                          return (
+                                            <label
+                                              key={optItem.id || optItem.value}
+                                              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border cursor-pointer text-[11px] ${
+                                                checked ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-gray-800'
+                                              }`}
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                className="hidden"
+                                                checked={checked}
+                                                onChange={() => toggleMultiFieldValue('assigned_class', optItem.value)}
+                                              />
+                                              {checked ? '✓ ' : ''}{optItem.label}
+                                            </label>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  ))}
+
+                                  {hierarchy.ungroupedClasses.length > 0 && (
+                                    <div className="p-2 rounded-lg bg-[#fbfaf7] border flex flex-wrap gap-1.5">
+                                      {hierarchy.ungroupedClasses.map((clsItem) => {
+                                        const checked = selectedServantClasses.includes(clsItem.class_name);
+                                        return (
+                                          <label
+                                            key={clsItem.id}
+                                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border cursor-pointer text-[11px] ${
+                                              checked ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-gray-800'
+                                            }`}
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              className="hidden"
+                                              checked={checked}
+                                              onChange={() => toggleMultiFieldValue('assigned_class', clsItem.class_name)}
+                                            />
+                                            {checked ? '✓ ' : ''}{clsItem.class_name}
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : hierarchy.ungroupedClasses.length === 0 ? (
+                                <p className="text-[11px] text-gray-500">
+                                  خدمة عامة / بدون فصول فرعية (تُعتمد الخدمة نفسها).
+                                </p>
                               ) : (
                                 <div className="flex flex-wrap gap-1.5">
-                                  {srvClasses.map((clsItem) => {
-                                    const clsName = clsItem.class_name;
-                                    const checked = selectedServantClasses.includes(clsName);
+                                  {hierarchy.ungroupedClasses.map((clsItem) => {
+                                    const checked = selectedServantClasses.includes(clsItem.class_name);
                                     return (
                                       <label
-                                        key={clsItem.id || clsName}
+                                        key={clsItem.id}
                                         className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border cursor-pointer text-[11px] ${
-                                          checked ? 'bg-blue-700 text-white border-blue-700' : 'bg-gray-50 text-gray-800'
+                                          checked ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-gray-800'
                                         }`}
                                       >
                                         <input
                                           type="checkbox"
                                           className="hidden"
                                           checked={checked}
-                                          onChange={() => toggleMultiFieldValue('assigned_class', clsName)}
+                                          onChange={() => toggleMultiFieldValue('assigned_class', clsItem.class_name)}
                                         />
-                                        {checked ? '✓ ' : ''}{clsName}
+                                        {checked ? '✓ ' : ''}{clsItem.class_name}
                                       </label>
                                     );
                                   })}
@@ -2815,8 +3142,8 @@ export default function AdminDashboard({
                         })}
                       >
                         <option value="">-- اختر الأب (اختياري) --</option>
-                        {parentsList
-                          .filter(p => detectGuardianType(p) !== 'mother')
+                        {parentsWorkersList
+                          .filter(p => p.role === 'parent' && detectGuardianType(p) !== 'mother')
                           .map(p => (
                             <option key={p.id} value={p.id}>
                               {p.full_name} {p.phone ? `(${p.phone})` : ''}
@@ -2836,8 +3163,8 @@ export default function AdminDashboard({
                         })}
                       >
                         <option value="">-- اختر الأم (اختياري) --</option>
-                        {parentsList
-                          .filter(p => detectGuardianType(p) === 'mother' || p.guardian_type === 'mother' || ['الأم', 'أم', 'والدة'].includes(String(p.family_role || '').trim()))
+                        {parentsWorkersList
+                          .filter(p => p.role === 'parent' && (detectGuardianType(p) === 'mother' || p.guardian_type === 'mother' || ['الأم', 'أم', 'والدة'].includes(String(p.family_role || '').trim())))
                           .map(p => (
                             <option key={p.id} value={p.id}>
                               {p.full_name} {p.phone ? `(${p.phone})` : ''}
