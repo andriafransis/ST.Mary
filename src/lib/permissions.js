@@ -1,4 +1,5 @@
 // src/lib/permissions.js
+
 export const SCREEN_ORDER = [
   'admin_panel',
   'priest_panel',
@@ -14,6 +15,9 @@ export const SCREEN_ORDER = [
   'public_page'
 ];
 
+export const ALL_SCREENS = [...SCREEN_ORDER];
+export const ALL_AVAILABLE_SCREENS = [...SCREEN_ORDER];
+
 export const SCREEN_LABELS = {
   admin_panel: '🛠️ لوحة الإدارة',
   priest_panel: '✝ لوحة الأب الكاهن',
@@ -28,6 +32,19 @@ export const SCREEN_LABELS = {
   public_editor: '✏️ تعديل الصفحة العامة',
   public_page: '🌐 صفحة الكنيسة العامة'
 };
+
+export const ROLES = [
+  { key: 'admin', label: '🛡️ سوبر أدمن الكنيسة' },
+  { key: 'priest', label: '✝ أب كاهن' },
+  { key: 'head_servant', label: '⭐ أمين الخدمة' },
+  { key: 'vice_head_servant', label: '🌟 مساعد أمين الخدمة' },
+  { key: 'servant', label: '📖 خادم مرحلة' },
+  { key: 'meeting_servant', label: '🎤 خادم اجتماع' },
+  { key: 'mercy_servant', label: '🤝 خادم إخوة رب' },
+  { key: 'member', label: '👤 مخدوم (شعب)' },
+  { key: 'parent', label: '👨‍👩‍👦 ولي أمر' },
+  { key: 'worker', label: '🛠️ عامل / فراش الكنيسة' }
+];
 
 export const ROLE_DEFAULT_PERMISSIONS = {
   admin: {
@@ -128,6 +145,22 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     }
   }
 };
+
+export const DEFAULT_ROLE_SCREENS = Object.entries(ROLE_DEFAULT_PERMISSIONS).reduce(
+  (acc, [roleKey, cfg]) => {
+    acc[roleKey] = Object.entries(cfg.screens || {}).map(([screen, p]) => ({
+      role: roleKey,
+      screen,
+      is_default: cfg.defaultScreen === screen,
+      can_view: Boolean(p.view),
+      can_create: Boolean(p.create),
+      can_edit: Boolean(p.edit),
+      can_delete: Boolean(p.delete)
+    }));
+    return acc;
+  },
+  {}
+);
 
 export function getDetailedScreenPermissions(user, screenKey, roleScreens = []) {
   const role = user?.role || 'member';
