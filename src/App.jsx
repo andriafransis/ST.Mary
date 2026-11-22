@@ -38,8 +38,35 @@ const ROLE_TEXT = {
   worker: '🛠️ عامل / فراش الكنيسة'
 };
 
-function getPostLoginScreen(user, roleScreens) {
-  const { allowed, defaultScreen } = resolveScreens(user, roleScreens);
+const FEMALE_FIRST_NAMES = new Set([
+  'ايريني', 'إيريني', 'ريني', 'ماري', 'مارينا', 'مريم', 'فيرينا', 'فيرونيا',
+  'دينا', 'سارة', 'ساره', 'نانسي', 'مونيكا', 'ميرا', 'ميرنا', 'بسنت', 'كريستين',
+  'كارين', 'كارولين', 'جيهان', 'هالة', 'هبه', 'هبة', 'منى', 'نهى', 'نورهان',
+  'ياسمين', 'آية', 'اية', 'إيمان', 'ايمان', 'سمر', 'ندى', 'رانيا', 'أميرة', 'اميرة',
+  'داليا', 'شيرين', 'لمياء', 'سلوى', 'وفاء', 'حنان', 'إيناس', 'ايناس', 'تماف', 'دميانة'
+]);
+
+function normalizeGenderValue(u) {
+  const raw = String(u?.gender || '').trim().toLowerCase();
+  if (['أنثى', 'انثي', 'انثى', 'female', 'f', 'woman', 'girl', 'أم', 'ام'].includes(raw)) {
+    return 'أنثى';
+  }
+  if (['ذكر', 'male', 'm', 'man', 'boy', 'أب', 'اب'].includes(raw)) {
+    return 'ذكر';
+  }
+  if (u?.guardian_type === 'mother' || u?.family_role === 'الأم' || u?.family_role === 'أم') {
+    return 'أنثى';
+  }
+  const fullName = String(u?.full_name || '').trim();
+  const firstName = fullName.split(/\s+/)[0] || '';
+  if (firstName && FEMALE_FIRST_NAMES.has(firstName)) {
+    return 'أنثى';
+  }
+  return 'ذكر';
+}
+
+function getPostLoginScreen(user, roleScreens, roleTemplates = []) {
+  const { allowed, defaultScreen } = resolveScreens(user, roleScreens, roleTemplates);
   if (defaultScreen && defaultScreen !== 'public_page' && allowed.has(defaultScreen)) {
     return defaultScreen;
   }
@@ -62,6 +89,7 @@ export default function App() {
 
   const [users, setUsers] = useState([]);
   const [roleScreens, setRoleScreens] = useState([]);
+  const [roleTemplates, setRoleTemplates] = useState([]);
   const [families, setFamilies] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [spiritualNotes, setSpiritualNotes] = useState([]);
@@ -80,9 +108,10 @@ export default function App() {
 
   const fetchData = async () => {
     try {
-      const [u, rs, logoRes, stRes, f, a, n, e, srv, cats, cc, act, mNotes, cs, pm, pps] = await Promise.all([
+      const [u, rs, tplRes, logoRes, stRes, f, a, n, e, srv, cats, cc, act, mNotes, cs, pm, pps] = await Promise.all([
         supabase.from('church_users').select('*').order('created_at', { ascending: true }),
         supabase.from('role_screens').select('*'),
+        supabase.from('church_public_content').select('*').eq('kind', 'role_template').order('created_at', { ascending: true }),
         supabase.from('church_public_content').select('title, body, url').eq('kind', 'logo').limit(1).maybeSingle(),
         supabase.from('church_settings').select('church_name, logo_url').limit(1).maybeSingle(),
         supabase.from('pastoral_families').select('*, children:family_children(*)').order('case_number', { ascending: true }),
@@ -104,6 +133,27 @@ export default function App() {
       if (resolvedName) setChurchName(resolvedName);
       if (logoRes?.data?.body) setChurchTagline(logoRes.data.body);
       if (resolvedLogo) setChurchLogoUrl(resolvedLogo);
+
+      if (Array.isArray(tplRes?.data)) {
+        const parsedTpls = tplRes.data
+          .map(row => {
+            try {
+              const obj = JSON.parse(row.body || '{}');
+              return {
+                dbId: row.id,
+                key: row.title,
+                ...obj,
+                screens: Array.isArray(obj.screens) ? obj.screens : [],
+                actions: obj.actions || {},
+                screen_permissions: obj.screen_permissions || {}
+              };
+            } catch {
+              return null;
+            }
+          })
+          .filter(Boolean);
+        setRoleTemplates(parsedTpls);
+      }
 
       if (u.data) {
         setUsers(u.data);
@@ -177,11 +227,11 @@ export default function App() {
       setExtraScreen('');
       return;
     }
-    const { allowed } = resolveScreens(currentUser, roleScreens);
+    const { allowed } = resolveScreens(currentUser, roleScreens, roleTemplates);
     if (!activeScreen || !allowed.has(activeScreen)) {
-      setActiveScreen(getPostLoginScreen(currentUser, roleScreens));
+      setActiveScreen(getPostLoginScreen(currentUser, roleScreens, roleTemplates));
     }
-  }, [currentUser, roleScreens]);
+  }, [currentUser, roleScreens, roleTemplates]);
 
   const handleLogin = async (username, password) => {
     setLoginError('');
@@ -204,7 +254,7 @@ export default function App() {
       setCurrentUser(user);
       setExtraScreen('');
       setMobileMenuOpen(false);
-      setActiveScreen(getPostLoginScreen(user, roleScreens));
+      setActiveScreen(getPostLoginScreen(user, roleScreens, roleTemplates));
       fetchData();
     } else {
       setLoginError('اسم المستخدم أو كلمة المرور غير صحيحة.');
@@ -241,6 +291,12 @@ export default function App() {
     const resolvedMotherId =
       u.mother_id || (normalizedGuardianType === 'mother' && u.parent_id ? u.parent_id : null);
 
+    const normalizedGender = normalizeGenderValue({
+      ...u,
+      guardian_type: normalizedGuardianType,
+      family_role: resolvedFamilyRole
+    });
+
     return {
       username: u.username.trim().toLowerCase(),
       password: u.password,
@@ -249,6 +305,7 @@ export default function App() {
       second_name: u.second_name || '',
       third_name: u.third_name || '',
       fourth_name: u.fourth_name || '',
+      gender: normalizedGender,
       role: u.role,
       sector: u.sector || '',
       detailed_stage: u.detailed_stage || u.service_stage || 'أولى ابتدائي',
@@ -589,9 +646,6 @@ export default function App() {
     if (!error) setCustomCards(customCards.filter(c => c.id !== id));
   };
 
-  // ==============================================================
-  // 1) شاشة الزائر
-  // ==============================================================
   if (!currentUser) {
     if (authView === 'login') {
       return (
@@ -680,21 +734,18 @@ export default function App() {
     );
   }
 
-  // ==============================================================
-  // 2) شاشة المستخدم بعد تسجيل الدخول
-  // ==============================================================
-  const { allowed } = resolveScreens(currentUser, roleScreens);
-  const fallbackTab = getPostLoginScreen(currentUser, roleScreens);
+  const { allowed } = resolveScreens(currentUser, roleScreens, roleTemplates);
+  const fallbackTab = getPostLoginScreen(currentUser, roleScreens, roleTemplates);
   const currentScr = activeScreen && allowed.has(activeScreen) ? activeScreen : fallbackTab;
 
   const isAdmin = currentUser.role === 'admin';
   const isPriest = currentUser.role === 'priest';
 
-  const publicAccess = getScreenAccess(currentUser, 'public_page', roleScreens);
-  const publicEditorAccess = getScreenAccess(currentUser, 'public_editor', roleScreens);
-  const eduAccess = getScreenAccess(currentUser, 'edu_center', roleScreens);
-  const tripsAccess = getScreenAccess(currentUser, 'trips_office', roleScreens);
-  const deaconsAccess = getScreenAccess(currentUser, 'deacons', roleScreens);
+  const publicAccess = getScreenAccess(currentUser, 'public_page', roleScreens, roleTemplates);
+  const publicEditorAccess = getScreenAccess(currentUser, 'public_editor', roleScreens, roleTemplates);
+  const eduAccess = getScreenAccess(currentUser, 'edu_center', roleScreens, roleTemplates);
+  const tripsAccess = getScreenAccess(currentUser, 'trips_office', roleScreens, roleTemplates);
+  const deaconsAccess = getScreenAccess(currentUser, 'deacons', roleScreens, roleTemplates);
 
   const canEditPublic =
     isAdmin ||
@@ -976,7 +1027,7 @@ export default function App() {
             <AdminDashboard
               users={users} events={churchEvents} services={churchServices}
               caseCategories={caseCategories} customCards={customCards}
-              roleScreens={roleScreens}
+              roleScreens={roleScreens} roleTemplates={roleTemplates}
               currentUserId={currentUser.id} currentUser={currentUser} isSuperAdmin={isAdmin}
               churchName={churchName}
               onRefresh={fetchData}
@@ -1058,7 +1109,7 @@ export default function App() {
         )}
 
         {!extraScreen && currentScr === 'permissions' && (
-          <PermissionsPage users={users} roleScreens={roleScreens} currentUser={currentUser} onRefresh={fetchData} />
+          <PermissionsPage users={users} roleScreens={roleScreens} roleTemplates={roleTemplates} currentUser={currentUser} onRefresh={fetchData} />
         )}
 
         {!extraScreen && currentScr === 'public_editor' && canEditPublic && (

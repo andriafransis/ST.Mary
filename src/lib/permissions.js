@@ -166,9 +166,6 @@ export const DEFAULT_ROLE_SCREENS = Object.entries(ROLE_DEFAULT_PERMISSIONS).red
   {}
 );
 
-/**
- * دمج مجموعة قوالب بوليسي (Policies) للمستخدم الواحد بدون فقدان أي صلاحية
- */
 export function mergeUserPolicies(user, policies = []) {
   const perms = user?.permissions || {};
   const policyKeys = Array.isArray(perms.policy_keys) && perms.policy_keys.length > 0
@@ -176,20 +173,19 @@ export function mergeUserPolicies(user, policies = []) {
     : (perms.template_key ? [perms.template_key] : []);
 
   const matchedPolicies = policyKeys
-    .map(k => policies.find(p => p.key === k))
+    .map((k) => policies.find((p) => p.key === k))
     .filter(Boolean);
 
   const mergedScreens = {};
-  SCREEN_ORDER.forEach(scr => {
+  SCREEN_ORDER.forEach((scr) => {
     mergedScreens[scr] = { ...EMPTY_PERM };
   });
 
   const mergedActions = { ...(perms.actions || {}) };
 
-  matchedPolicies.forEach(tpl => {
-    // 1. دمج الشاشات من مصفوفة screens أو screen_permissions
+  matchedPolicies.forEach((tpl) => {
     const tplScreens = Array.isArray(tpl.screens) ? tpl.screens : [];
-    tplScreens.forEach(scr => {
+    tplScreens.forEach((scr) => {
       if (mergedScreens[scr]) {
         mergedScreens[scr].view = true;
       }
@@ -212,7 +208,6 @@ export function mergeUserPolicies(user, policies = []) {
       });
     }
 
-    // 2. دمج الأكشنات (boolean = OR ، نص غير فارغ له أولوية)
     if (tpl.actions && typeof tpl.actions === 'object') {
       Object.entries(tpl.actions).forEach(([actKey, actVal]) => {
         if (typeof actVal === 'boolean') {
@@ -238,7 +233,7 @@ export function getDetailedScreenPermissions(user, screenKey, roleScreens = [], 
   const base = roleCfg.screens?.[screenKey] || { ...EMPTY_PERM };
 
   const dbRow = Array.isArray(roleScreens)
-    ? roleScreens.find(r => r.role === role && r.screen === screenKey)
+    ? roleScreens.find((r) => r.role === role && r.screen === screenKey)
     : null;
 
   let perms = {
@@ -248,7 +243,6 @@ export function getDetailedScreenPermissions(user, screenKey, roleScreens = [], 
     delete: dbRow ? Boolean(dbRow.can_delete ?? base.delete) : Boolean(base.delete)
   };
 
-  // دمج صلاحيات الجروبات/البوليسيز المرتبطة بالمستخدم
   if (Array.isArray(policies) && policies.length > 0) {
     const { mergedScreens } = mergeUserPolicies(user, policies);
     const polScr = mergedScreens[screenKey];
@@ -266,8 +260,10 @@ export function getDetailedScreenPermissions(user, screenKey, roleScreens = [], 
     perms = { ...perms, create: false, edit: false, delete: false };
   }
 
-  // تخصيص فردي على مستوى المستخدم (إن وُجد)
-  const userScreenOverride = user?.permissions?.screens?.[screenKey] || user?.permissions?.screen_permissions?.[screenKey];
+  const userScreenOverride =
+    user?.permissions?.screens?.[screenKey] ||
+    user?.permissions?.screen_permissions?.[screenKey];
+
   if (userScreenOverride && typeof userScreenOverride === 'object') {
     const nextView = userScreenOverride.view !== undefined ? Boolean(userScreenOverride.view) : perms.view;
     const nextCreate = userScreenOverride.create !== undefined
@@ -301,17 +297,17 @@ export function resolveScreens(user, roleScreens = [], policies = []) {
 
   const role = user.role || 'member';
   const roleCfg = ROLE_DEFAULT_PERMISSIONS[role] || ROLE_DEFAULT_PERMISSIONS.member;
-  const roleDbRows = Array.isArray(roleScreens) ? roleScreens.filter(r => r.role === role) : [];
+  const roleDbRows = Array.isArray(roleScreens) ? roleScreens.filter((r) => r.role === role) : [];
 
   const candidateKeys = new Set([
     ...SCREEN_ORDER,
     ...Object.keys(roleCfg.screens || {}),
-    ...roleDbRows.map(r => r.screen).filter(Boolean),
+    ...roleDbRows.map((r) => r.screen).filter(Boolean),
     ...Object.keys(user?.permissions?.screens || {}),
     ...Object.keys(user?.permissions?.screen_permissions || {})
   ]);
 
-  candidateKeys.forEach(scrKey => {
+  candidateKeys.forEach((scrKey) => {
     const p = getDetailedScreenPermissions(user, scrKey, roleScreens, policies);
     detailedByScreen[scrKey] = p;
     if (p.view) {
@@ -319,7 +315,7 @@ export function resolveScreens(user, roleScreens = [], policies = []) {
     }
   });
 
-  const dbDefaultRow = roleDbRows.find(r => r.is_default === true && allowed.has(r.screen));
+  const dbDefaultRow = roleDbRows.find((r) => r.is_default === true && allowed.has(r.screen));
   const preferredDefault =
     user?.permissions?.default_screen ||
     dbDefaultRow?.screen ||
