@@ -4,12 +4,11 @@ import { logActivity } from '../lib/activityLogger';
 import AdminChurchSettingsAndBurial from './AdminChurchSettingsAndBurial';
 import {
   Moon, Ambulance, MapPin, Package, MessageCircle, Printer,
-  Trash2, Edit3, AlertTriangle, Navigation, Lock, LogIn,
-  UserCheck, Search, CheckSquare, Volume2, VolumeX, HeartHandshake,
-  Calendar, FileText, CheckCircle2, Copy, DollarSign, Award, XCircle,
-  ShieldCheck, Send, Check, BellRing, Users, Plus, X, Calculator,
-  Home, Clock, Settings, UserMinus, UserPlus, UploadCloud, Image, ExternalLink,
-  Share2, Download
+  Trash2, Edit3, AlertTriangle, Lock, LogIn,
+  Search, Volume2, VolumeX, HeartHandshake,
+  DollarSign, BellRing, Users, Plus, X, Calculator,
+  Home, UserMinus, UploadCloud, Image, ExternalLink,
+  Share2, Download, Check
 } from 'lucide-react';
 
 const RELATIONSHIP_OPTIONS = [
@@ -141,7 +140,6 @@ function downloadObituaryCardImage(c) {
   ctx.direction = 'rtl';
   ctx.textAlign = 'center';
 
-  // خلفية رسمية هادئة
   const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
   grad.addColorStop(0, '#2b090d');
   grad.addColorStop(0.35, '#4a0e13');
@@ -150,12 +148,10 @@ function downloadObituaryCardImage(c) {
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // إطار خارجي وداخلي
   ctx.strokeStyle = '#d4af37';
   ctx.lineWidth = 6;
   ctx.strokeRect(32, 32, canvas.width - 64, canvas.height - 64);
 
-  // الصليب العلوي
   ctx.fillStyle = '#f3d27a';
   ctx.font = 'bold 54px sans-serif';
   ctx.fillText('✝', canvas.width / 2, 105);
@@ -167,7 +163,6 @@ function downloadObituaryCardImage(c) {
   ctx.font = 'bold 22px sans-serif';
   ctx.fillText('«أَنَا هُوَ الْقِيَامَةُ وَالْحَيَاةُ. مَنْ آمَنَ بِي وَلَوْ مَاتَ فَسَيَحْيَا» (يو 11: 25)', canvas.width / 2, 225);
 
-  // اسم المنتقل
   ctx.fillStyle = '#4a0e13';
   ctx.font = 'bold 52px sans-serif';
   const nameLines = wrapCanvasText(ctx, c.deceased_name || '', 900);
@@ -177,7 +172,6 @@ function downloadObituaryCardImage(c) {
     y += 64;
   });
 
-  // خط فاصل ذهبي
   ctx.strokeStyle = '#d4af37';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -213,7 +207,6 @@ function downloadObituaryCardImage(c) {
     y += 10;
   });
 
-  // التذييل
   ctx.fillStyle = '#7a1c24';
   ctx.font = 'bold 26px sans-serif';
   ctx.fillText('المسيح يعزي الأسرة وجميع محبيهم • خدمة يوسف الرامي', canvas.width / 2, canvas.height - 72);
@@ -276,9 +269,9 @@ export default function JosephArimatheaManager({
     if (users && users.length > 0) setSystemUsers(users);
   }, [users]);
 
-  // التبويبات
+  // الصفحة الرئيسية متاحة للجميع افتراضياً، والأدمن يفتح على لوحة الإدارة (cases) طبيعي
   const [activeMainTab, setActiveMainTab] = useState('cases');
-  const [adminSubTab, setAdminSubTab] = useState(isAdminUser ? 'setup' : 'cases');
+  const [adminSubTab, setAdminSubTab] = useState('cases');
 
   // البيانات
   const [cases, setCases] = useState([]);
@@ -332,7 +325,6 @@ export default function JosephArimatheaManager({
   const [printMemorialReceipt, setPrintMemorialReceipt] = useState(null);
   const [filterMassDate, setFilterMassDate] = useState(todayISO);
   const [sentNoticeSuccess, setSentNoticeSuccess] = useState(false);
-  const [personSearch, setPersonSearch] = useState('');
 
   // فلاتر حساب الفراشين والعشور
   const [statsWorkerName, setStatsWorkerName] = useState('');
@@ -347,7 +339,6 @@ export default function JosephArimatheaManager({
   const nowTime = new Date().toTimeString().slice(0, 5);
   const defaultRiteInfo = suggestLiturgicalRites(nowTime);
 
-  // نموذج بلاغ الوفاة مع القاعات والفراشين
   const emptyDeathCase = {
     deceased_user_id: '',
     deceased_name: '',
@@ -374,7 +365,6 @@ export default function JosephArimatheaManager({
     assistants: [{ id: '', name: '', phone: '' }],
     assistant_worker_name: '',
     assistant_worker_phone: '',
-    // بنود حجز القاعة
     needs_hall: false,
     hall_id: '',
     hall_name: '',
@@ -389,7 +379,6 @@ export default function JosephArimatheaManager({
     status: 'جديد / طارئ'
   };
 
-  // نموذج طلب الترحيم
   const emptyMemorial = {
     deceased_name: '',
     memorial_type: 'ذكرى الأربعين',
@@ -404,7 +393,6 @@ export default function JosephArimatheaManager({
     instapay_ref: '',
     receipt_image_url: '',
     receipt_serial: '',
-    // حجز قاعة مع الترحيم
     needs_hall: false,
     hall_id: '',
     hall_name: '',
@@ -417,7 +405,6 @@ export default function JosephArimatheaManager({
   const [deathForm, setDeathForm] = useState(emptyDeathCase);
   const [memForm, setMemForm] = useState(emptyMemorial);
 
-  // تحميل البيانات
   const loadData = async () => {
     const [bl, fk, au, hl, st] = await Promise.all([
       supabase.from('burial_locations').select('*').eq('is_active', true).order('location_name', { ascending: true }),
@@ -469,7 +456,8 @@ export default function JosephArimatheaManager({
     loadData();
     if (currentUser?.id) {
       setShowDeathForm(!isStaff && canUserReportDeath(currentUser));
-      setAdminSubTab(currentUser.role === 'admin' ? 'setup' : 'cases');
+      setActiveMainTab('cases');
+      setAdminSubTab('cases');
       setDeathForm(prev => ({
         ...prev,
         family_contact_name: prev.family_contact_name || currentUser.full_name || '',
@@ -483,7 +471,6 @@ export default function JosephArimatheaManager({
     }
   }, [currentUser?.id, isStaff]);
 
-  // دالة بث وحفظ الإشعار للآباء الكهنة ولجنة الكنيسة
   const notifyPriestsAndCouncil = async ({ title, message, type, targetId }) => {
     const alertPayload = {
       id: `${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
@@ -527,7 +514,6 @@ export default function JosephArimatheaManager({
     }
   };
 
-  // استماع الكاهن واللجنة للإشعارات في الوقت الفعلي (Realtime Listener)
   useEffect(() => {
     if (!currentUser?.id || (!isPriest && !isStaff && !isChurchCouncil)) return;
 
@@ -611,7 +597,6 @@ export default function JosephArimatheaManager({
     };
   }, [currentUser?.id, isPriest, isStaff, isChurchCouncil]);
 
-  // إدارة الصوت
   useEffect(() => {
     if (activeTrack?.audio_url && audioRef.current) {
       audioRef.current.load();
@@ -702,7 +687,6 @@ export default function JosephArimatheaManager({
     );
   };
 
-  // رفع صورة إيصال الدفع لـ Supabase Storage
   const handleUploadReceiptImage = async (file) => {
     if (!file) return;
     try {
@@ -710,7 +694,7 @@ export default function JosephArimatheaManager({
       const ext = file.name.split('.').pop();
       const fileName = `instapay_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
 
-      const { data, error } = await supabase.storage.from('receipts').upload(fileName, file);
+      const { error } = await supabase.storage.from('receipts').upload(fileName, file);
       if (error) throw error;
 
       const { data: publicUrlData } = supabase.storage.from('receipts').getPublicUrl(fileName);
@@ -723,7 +707,6 @@ export default function JosephArimatheaManager({
     }
   };
 
-  // حفظ تعديل إعدادات إنستاباي بواسطة الأدمن
   const handleSaveInstapaySettings = async (e) => {
     e.preventDefault();
     if (!isAdminUser) return;
@@ -741,7 +724,6 @@ export default function JosephArimatheaManager({
     }
   };
 
-  // مشاركة نص النعي أو واتساب
   const handleShareObituaryText = async (c) => {
     const text = buildObituaryShareText(c);
     if (typeof navigator !== 'undefined' && navigator.share) {
@@ -769,7 +751,6 @@ export default function JosephArimatheaManager({
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  // شاشة الزائرين غير المسجلين
   if (!isLoggedIn) {
     const openCaskets = caskets.filter(c => c.status === 'متاح');
     return (
@@ -852,21 +833,9 @@ export default function JosephArimatheaManager({
     );
   }
 
-  // طواقم العمل (سائقين وفراشين)
   const josephTeamDrivers = systemUsers.filter(u => u.permissions?.joseph_role === 'driver');
   const josephTeamWorkers = systemUsers.filter(u => u.permissions?.joseph_role === 'worker');
 
-  const handleTimeChange = (newTime) => {
-    const info = suggestLiturgicalRites(newTime);
-    setDeathForm(prev => ({
-      ...prev,
-      death_time: newTime,
-      is_night_death: info.isNight,
-      liturgical_rites: info.rites
-    }));
-  };
-
-  // التحكم بالفراشين المتعددين
   const handleAddAssistant = () => {
     if (deathForm.assistants.length >= 6) return alert('الحد الأقصى 6 فراشين في الخرجة.');
     setDeathForm({
@@ -898,7 +867,6 @@ export default function JosephArimatheaManager({
     setDeathForm({ ...deathForm, assistants: updated });
   };
 
-  // بدء تعديل حالة وفاة موجودة
   const handleStartEditCase = (c) => {
     const parsedAssistants = Array.isArray(c.assistants) && c.assistants.length > 0
       ? c.assistants
@@ -922,7 +890,6 @@ export default function JosephArimatheaManager({
     setShowDeathForm(true);
   };
 
-  // حفظ حالة الوفاة وإظهار كارت النعي والمشاركة فوراً
   const handleSaveCase = async (e) => {
     e.preventDefault();
     if (!canReport) return alert('تقديم بيان حالة الوفاة متاح للبالغين وأولياء الأمور فقط.');
@@ -930,8 +897,8 @@ export default function JosephArimatheaManager({
     if (!deathForm.deceased_name.trim()) return alert('اختر الشخص المنتقل أو اكتب اسمه بالكامل.');
 
     const validAssistants = (deathForm.assistants || []).filter(a => a.name && a.name.trim() !== '');
-
     const oldCase = editingId ? cases.find(c => c.id === editingId) : null;
+
     const payload = {
       ...deathForm,
       reported_by_user_id: oldCase?.reported_by_user_id || currentUser.id,
@@ -1053,7 +1020,6 @@ export default function JosephArimatheaManager({
     return `REC-${d.getFullYear()}${(d.getMonth() + 1).toString().padStart(2, '0')}-${rand}`;
   };
 
-  // بدء تعديل كارت ترحيم موجود
   const handleStartEditMemorial = (item) => {
     setEditingMemorialId(item.id);
     setMemForm({
@@ -1069,7 +1035,6 @@ export default function JosephArimatheaManager({
     setShowMemorialForm(true);
   };
 
-  // حذف كارت ترحيم موجود
   const handleDeleteMemorial = async (item) => {
     if (!isStaff && !isChurchCouncil && !isPriest && item.created_by !== currentUser?.id) {
       return alert('لا تملك صلاحية حذف هذا الكارت.');
@@ -1085,7 +1050,6 @@ export default function JosephArimatheaManager({
     }
   };
 
-  // حفظ كارت الترحيم ومعالجة حقول الـ UUID لتفادي أخطاء قاعدة البيانات تماماً
   const handleSaveMemorial = async (e) => {
     e.preventDefault();
     if (!memForm.deceased_name.trim()) return alert('اكتب اسم المنتقل للترحيم.');
@@ -1191,7 +1155,6 @@ export default function JosephArimatheaManager({
     alert(`✅ تم اعتماد اسم [${item.deceased_name}] ${asMercy ? '(كحالة إخوة رب معفاة)' : ''} ونزل في جدول صلاة الترحيم بالمذبح.`);
   };
 
-  // ===================== تعديل سعة القاعات وأسعارها وإضافتها وحذفها للأدمن =====================
   const handleUpdateHallField = async (hallId, field, value) => {
     if (!isAdminUser) return;
     const { error } = await supabase.from('church_hall_settings').update({ [field]: value }).eq('id', hallId);
@@ -1228,7 +1191,6 @@ export default function JosephArimatheaManager({
     setChurchHalls(churchHalls.filter(h => h.id !== hallId));
   };
 
-  // ===================== تعيين وإلغاء صلاحية السائق أو الفراش مباشرة للأدمن =====================
   const handleAssignRole = async (targetUserId, roleType) => {
     if (!isAdminUser) return;
     const user = systemUsers.find(u => u.id === targetUserId);
@@ -1269,7 +1231,6 @@ export default function JosephArimatheaManager({
         .slice(0, 8)
     : [];
 
-  // حساب خرجات الفراشين
   const workerTrips = cases.filter(c => {
     const inDateRange = (!statsStartDate || c.death_date >= statsStartDate) && (!statsEndDate || c.death_date <= statsEndDate);
     if (!inDateRange) return false;
@@ -1334,7 +1295,6 @@ export default function JosephArimatheaManager({
         <div className="flex flex-wrap items-center gap-2">
           {renderAudioControlIcon()}
 
-          {/* جرس الإشعارات التفاعلي للكاهن والأدمن واللجنة */}
           {(isPriest || isStaff || isChurchCouncil) && (
             <div className="relative">
               <button
@@ -1508,7 +1468,7 @@ export default function JosephArimatheaManager({
         )}
       </div>
 
-      {/* لو الأدمن اختار تبويب الإعدادات الأصلي */}
+      {/* لو الأدمن اختار تبويب الإعدادات صراحة فقط */}
       {isAdminUser && activeMainTab === 'setup' ? (
         <AdminChurchSettingsAndBurial currentUser={currentUser} />
       ) : (
@@ -1699,7 +1659,6 @@ export default function JosephArimatheaManager({
                 </div>
               </div>
 
-              {/* فورم إضافة قاعة جديدة */}
               {isAdminUser && (
                 <form onSubmit={handleAddNewHall} className="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-200 grid sm:grid-cols-4 gap-2.5 items-end">
                   <div>
@@ -1743,7 +1702,6 @@ export default function JosephArimatheaManager({
                 </form>
               )}
 
-              {/* بطاقات تعديل القاعات الحالية */}
               <div className="grid md:grid-cols-2 gap-4">
                 {churchHalls.map(hall => (
                   <div key={hall.id} className="p-4 bg-gray-50 border-2 border-emerald-200 rounded-2xl space-y-3 relative">
@@ -1812,7 +1770,6 @@ export default function JosephArimatheaManager({
                 </p>
               </div>
 
-              {/* شريط البحث عن الأعضاء */}
               <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-200 space-y-3">
                 <label className="block text-xs font-black text-blue-950">🔍 ابحث بالاسم أو التليفون لمنح صلاحية سائق أو فراش:</label>
                 <div className="relative">
@@ -1856,9 +1813,7 @@ export default function JosephArimatheaManager({
                 )}
               </div>
 
-              {/* القوائم الحالية للسائقين والفراشين مع أزرار الحذف */}
               <div className="grid md:grid-cols-2 gap-4">
-                {/* السائقون */}
                 <div className="bg-gray-50 p-4 rounded-2xl border space-y-3">
                   <div className="flex justify-between items-center border-b pb-2">
                     <strong className="text-blue-950 text-xs font-black flex items-center gap-1.5">
@@ -1889,7 +1844,6 @@ export default function JosephArimatheaManager({
                   )}
                 </div>
 
-                {/* الفراشون */}
                 <div className="bg-gray-50 p-4 rounded-2xl border space-y-3">
                   <div className="flex justify-between items-center border-b pb-2">
                     <strong className="text-indigo-950 text-xs font-black flex items-center gap-1.5">
@@ -1968,7 +1922,6 @@ export default function JosephArimatheaManager({
                 </div>
               </div>
 
-              {/* خيار حجز قاعة الكنيسة بعد قداس الأربعين أو السنوية */}
               <div className="bg-purple-50/70 p-3.5 rounded-2xl border border-purple-200 space-y-2">
                 <label className="flex items-center gap-2 text-xs font-black text-purple-950 cursor-pointer">
                   <input
@@ -2042,7 +1995,6 @@ export default function JosephArimatheaManager({
                 </div>
               </div>
 
-              {/* قسم الدفع بـ InstaPay ورفع صورة الإيصال ورقم التليفون المعتمد */}
               <div className="bg-emerald-50 border border-emerald-300 p-4 rounded-2xl space-y-3">
                 <div className="flex flex-wrap justify-between items-center gap-2">
                   <span className="text-emerald-950 font-black text-xs flex items-center gap-1.5">
@@ -2223,7 +2175,6 @@ export default function JosephArimatheaManager({
                     </div>
                   </div>
 
-                  {/* مواعيد التجنيز والتحرك */}
                   <div className="grid sm:grid-cols-3 gap-2.5">
                     <div>
                       <label className="block text-xs text-gray-700 mb-1">تاريخ صلاة التجنيز</label>
@@ -2254,7 +2205,6 @@ export default function JosephArimatheaManager({
                     </div>
                   </div>
 
-                  {/* حجز قاعة العزاء */}
                   <div className="bg-amber-50/90 p-4 rounded-2xl border-2 border-amber-300 space-y-3">
                     <label className="flex items-center gap-2 text-sm font-black text-amber-950 cursor-pointer">
                       <input
@@ -2338,7 +2288,6 @@ export default function JosephArimatheaManager({
                     )}
                   </div>
 
-                  {/* طاقم السيارة: السائق + الفراشين */}
                   {isStaff && (
                     <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-200 space-y-3">
                       <div className="flex flex-wrap justify-between items-center">
