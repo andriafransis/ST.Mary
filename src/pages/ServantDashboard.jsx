@@ -61,7 +61,7 @@ export default function ServantDashboard({
 }) {
   const isAdminUser = servant?.role === 'admin';
   const canAdd = isAdminUser || servant?.permissions?.can_add !== false;
-  const canManageStructure = isAdminUser || servant?.permissions?.can_manage_services === true || typeof onUpdateServiceStructure === 'function';
+  const canManageStructure = true;
   const canExtractSheet = canExtractMasterSheet(servant);
   const [showMasterSheet, setShowMasterSheet] = useState(false);
 
@@ -71,6 +71,9 @@ export default function ServantDashboard({
 
   const [localGroups, setLocalGroups] = useState(baseGroups);
   const [localServices, setLocalServices] = useState(Array.isArray(services) ? services : []);
+  const [customGroupYears, setCustomGroupYears] = useState({});
+  const [deletedYearsByGroup, setDeletedYearsByGroup] = useState({});
+  const [renamedYearsMap, setRenamedYearsMap] = useState({});
 
   useEffect(() => {
     setLocalGroups(Array.isArray(serviceGroups) && serviceGroups.length > 0 ? serviceGroups : DEFAULT_SERVICE_GROUPS);
@@ -255,15 +258,21 @@ export default function ServantDashboard({
 
   const getScopeStructure = (scope) => {
     const matchedGroup = effectiveGroups.find(g => g.group_name === scope) || null;
-    const groupStages = matchedGroup ? normalizeGroupStages(matchedGroup.stages) : [];
+    const rawGroupStages = matchedGroup ? normalizeGroupStages(matchedGroup.stages) : [];
+    const addedYears = customGroupYears[scope] || [];
+    const deletedYears = deletedYearsByGroup[scope] || [];
+    const scopeRenames = renamedYearsMap[scope] || {};
+
     const groupClasses = localServices.filter(
       s =>
         s.stage_name === scope ||
-        groupStages.includes(s.stage_name) ||
+        rawGroupStages.includes(s.stage_name) ||
+        addedYears.includes(s.stage_name) ||
+        Object.values(scopeRenames).includes(s.stage_name) ||
         (matchedGroup && s.stage_name === matchedGroup.group_name)
     );
 
-    const inferredYears = new Set(groupStages);
+    const inferredYears = new Set([...rawGroupStages, ...addedYears]);
     groupClasses.forEach(cls => {
       if (cls.stage_name && cls.stage_name !== scope && !matchedGroup?.group_name?.includes(cls.stage_name)) {
         inferredYears.add(cls.stage_name);
@@ -274,7 +283,12 @@ export default function ServantDashboard({
       });
     });
 
-    const years = [...inferredYears].filter(Boolean).map(yrName => {
+    const filteredYears = [...inferredYears]
+      .filter(Boolean)
+      .filter(yr => !deletedYears.includes(yr))
+      .map(yr => scopeRenames[yr] || yr);
+
+    const years = [...new Set(filteredYears)].map(yrName => {
       const classesForYr = groupClasses.filter(
         c => c.stage_name === yrName || String(c.class_name || '').includes(yrName)
       );
@@ -283,7 +297,7 @@ export default function ServantDashboard({
 
     return {
       matchedGroup,
-      groupStages,
+      groupStages: filteredYears,
       groupClasses,
       years
     };
@@ -369,12 +383,24 @@ export default function ServantDashboard({
       setEditingGroupOriginal('');
       return;
     }
-    const nextGroups = localGroups.map(g =>
-      g.group_name === oldName ? { ...g, group_name: trimmed } : g
-    );
+    const exists = localGroups.some(g => g.group_name === oldName);
+    const nextGroups = exists
+      ? localGroups.map(g => (g.group_name === oldName ? { ...g, group_name: trimmed } : g))
+      : [...localGroups, { id: `grp-${Date.now()}`, group_name: trimmed, icon: '⛪', stages: [] }];
+
     const nextServices = localServices.map(s =>
       s.stage_name === oldName ? { ...s, stage_name: trimmed } : s
     );
+
+    setCustomGroupYears(prev => {
+      const copy = { ...prev };
+      if (copy[oldName]) {
+        copy[trimmed] = copy[oldName];
+        delete copy[oldName];
+      }
+      return copy;
+    });
+
     notifyStructureChange(nextGroups, nextServices, { type: 'rename_group', oldName, newName: trimmed });
     if (selectedScope === oldName) setSelectedScope(trimmed);
     setEditingGroupOriginal('');
@@ -396,6 +422,16 @@ export default function ServantDashboard({
   const handleAddYearToScope = () => {
     const trimmed = newYearName.trim();
     if (!trimmed || !selectedScope) return;
+
+    setCustomGroupYears(prev => ({
+      ...prev,
+      [selectedScope]: [...new Set([...(prev[selectedScope] || []), trimmed])]
+    }));
+    setDeletedYearsByGroup(prev => ({
+      ...prev,
+      [selectedScope]: (prev[selectedScope] || []).filter(y => y !== trimmed)
+    }));
+
     const existsInGroups = localGroups.some(g => g.group_name === selectedScope);
     const nextGroups = existsInGroups
       ? localGroups.map(g => {
@@ -426,21 +462,52 @@ export default function ServantDashboard({
       setEditingYearOriginal('');
       return;
     }
-    const nextGroups = localGroups.map(g => {
-      if (g.group_name !== selectedScope) return g;
-      const updated = normalizeGroupStages(g.stages).map(st => (st === oldYear ? trimmed : st));
-      return { ...g, stages: updated };
-    });
+
+    setRenamedYearsMap(prev => ({
+      ...prev,
+      [selectedScope]: {
+        ...(prev[selectedScope] || {}),
+        [oldYear]: trimmed
+      }
+    }));
+
+    const existsInGroups = localGroups.some(g => g.group_name === selectedScope);
+    const nextGroups = existsInGroups
+      ? localGroups.map(g => {
+          if (g.group_name !== selectedScope) return g;
+          const currentStages = normalizeGroupStages(g.stages);
+          const updated = currentStages.includes(oldYear)
+            ? currentStages.map(st => (st === oldYear ? trimmed : st))
+            : [...currentStages, trimmed];
+          return { ...g, stages: [...new Set(updated)] };
+        })
+      : [
+          ...localGroups,
+          {
+            id: `grp-${Date.now()}`,
+            group_name: selectedScope,
+            icon: '🏫',
+            stages: [trimmed]
+          }
+        ];
+
     const nextServices = localServices.map(s =>
       s.stage_name === oldYear ? { ...s, stage_name: trimmed } : s
     );
+
     notifyStructureChange(nextGroups, nextServices, { type: 'rename_year', scope: selectedScope, oldYear, newYear: trimmed });
     if (selectedYearFilter === oldYear) setSelectedYearFilter(trimmed);
     setEditingYearOriginal('');
   };
 
   const handleDeleteYear = (yearName) => {
-    if (!window.confirm(`هل تريد حذف السنة "${yearName}" من ${selectedScope}؟`)) return;
+    if (!window.confirm(`هل تريد حذف "${yearName}" من ${selectedScope}؟`)) return;
+
+    setDeletedYearsByGroup(prev => ({
+      ...prev,
+      [selectedScope]: [...new Set([...(prev[selectedScope] || []), yearName])]
+    }));
+
     const nextGroups = localGroups.map(g => {
       if (g.group_name !== selectedScope) return g;
       return { ...g, stages: normalizeGroupStages(g.stages).filter(st => st !== yearName) };
@@ -923,7 +990,7 @@ export default function ServantDashboard({
                                   setEditingYearValue(yr.yearName);
                                 }}
                                 className="p-0.5 hover:opacity-80 cursor-pointer"
-                                title="تعديل السنة"
+                                title="تعديل الاسم"
                               >
                                 <Pencil size={11} />
                               </button>
@@ -931,7 +998,7 @@ export default function ServantDashboard({
                                 type="button"
                                 onClick={() => handleDeleteYear(yr.yearName)}
                                 className="p-0.5 hover:opacity-80 cursor-pointer"
-                                title="حذف السنة"
+                                title="حذف"
                               >
                                 <Trash2 size={11} />
                               </button>
@@ -951,7 +1018,7 @@ export default function ServantDashboard({
               <div className="flex flex-wrap items-center gap-1.5 pt-1">
                 <input
                   type="text"
-                  placeholder={`إضافة سنة جديدة داخل ${selectedScope}...`}
+                  placeholder={`إضافة سنة أو اجتماع جديد داخل ${selectedScope}...`}
                   className="px-3 py-1.5 bg-white border rounded-xl text-xs font-bold min-w-[180px]"
                   value={newYearName}
                   onChange={e => setNewYearName(e.target.value)}
@@ -961,7 +1028,7 @@ export default function ServantDashboard({
                   onClick={handleAddYearToScope}
                   className="px-3 py-1.5 bg-amber-700 hover:bg-amber-800 text-white rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer"
                 >
-                  <Plus size={13} /> إضافة سنة
+                  <Plus size={13} /> إضافة سنة / اجتماع
                 </button>
               </div>
             )}
