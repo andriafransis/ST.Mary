@@ -16,7 +16,6 @@ const RELATIONSHIP_OPTIONS = [
   'جد', 'جدة', 'عم / عمة', 'خال / خالة', 'قريب من العائلة', 'حالة رعوية تابعة لي'
 ];
 
-// أغراض حجز القاعات المحددة بوضوح
 const HALL_PURPOSES = [
   { id: 'third_day', label: '🕊️ صلاة الثالث' },
   { id: 'evening_condolence', label: '🕯️ عزاء مسائي (تقبل التعازي)' },
@@ -116,7 +115,7 @@ function buildMemorialShareText(m) {
   const lines = [
     '✝ «طُوبَى لِلَّذِينَ يَمُوتُونَ فِي الرَّبِّ مُنْذُ الآنَ» (رؤ 14: 13)',
     '',
-    `🕯️ *${m.memorial_type || 'ترحيم وتذكار'}*`,
+    `🕯️ *${m.memorial_type || 'ذكرى الأربعين'}*`,
     `للمنتقل / المنتقلة: *${m.deceased_name || ''}*`,
     ''
   ];
@@ -873,7 +872,7 @@ export default function JosephArimatheaManager({
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({
-          title: `${m.memorial_type || 'ترحيم'} — ${m.deceased_name}`,
+          title: `${m.memorial_type || 'ذكرى الأربعين'} — ${m.deceased_name}`,
           text
         });
         return;
@@ -1232,7 +1231,12 @@ export default function JosephArimatheaManager({
 
     if (editingMemorialId) {
       const { id, created_at, ...clean } = payload;
-      const { data, error } = await supabase.from('joseph_memorial_requests').update(clean).eq('id', editingMemorialId).select().single();
+      let { data, error } = await supabase.from('joseph_memorial_requests').update(clean).eq('id', editingMemorialId).select().single();
+      if (error && /foreign key|created_by/i.test(error.message)) {
+        const retry = await supabase.from('joseph_memorial_requests').update({ ...clean, created_by: null }).eq('id', editingMemorialId).select().single();
+        data = retry.data;
+        error = retry.error;
+      }
       if (error) {
         console.error(error);
         return alert('خطأ في تعديل طلب الترحيم: ' + error.message);
@@ -1242,11 +1246,11 @@ export default function JosephArimatheaManager({
         user: currentUser,
         actionType: 'تعديل_طلب_ترحيم',
         targetTable: 'joseph_memorial_requests',
-        targetId: data.id,
-        description: `تعديل ترحيم: ${data.deceased_name} (${data.memorial_type}) • الإيصال: ${serial}`
+        targetId: data?.id || editingMemorialId,
+        description: `تعديل ترحيم: ${payload.deceased_name} (${payload.memorial_type}) • الإيصال: ${serial}`
       });
 
-      const updatedItem = { ...data, mass_time: data.mass_time || memForm.mass_time || '08:00' };
+      const updatedItem = { ...(data || payload), id: editingMemorialId, mass_time: data?.mass_time || memForm.mass_time || '08:00' };
       setMemorialRequests(prev => prev.map(m => (m.id === editingMemorialId ? updatedItem : m)));
       setMemorialCardItem(updatedItem);
       setEditingMemorialId(null);
@@ -1256,7 +1260,12 @@ export default function JosephArimatheaManager({
       return;
     }
 
-    const { data, error } = await supabase.from('joseph_memorial_requests').insert([payload]).select().single();
+    let { data, error } = await supabase.from('joseph_memorial_requests').insert([payload]).select().single();
+    if (error && /foreign key|created_by/i.test(error.message)) {
+      const retry = await supabase.from('joseph_memorial_requests').insert([{ ...payload, created_by: null }]).select().single();
+      data = retry.data;
+      error = retry.error;
+    }
     if (error) {
       console.error(error);
       return alert('خطأ في حفظ طلب الترحيم: ' + error.message);
@@ -1266,18 +1275,22 @@ export default function JosephArimatheaManager({
       user: currentUser,
       actionType: 'تسجيل_طلب_ترحيم',
       targetTable: 'joseph_memorial_requests',
-      targetId: data.id,
-      description: `طلب ترحيم: ${data.deceased_name} (${data.memorial_type}) • الإيصال: ${serial}`
+      targetId: data?.id,
+      description: `طلب ترحيم: ${payload.deceased_name} (${payload.memorial_type}) • الإيصال: ${serial}`
     });
 
     await notifyPriestsAndCouncil({
       title: '🕯️ طلب ترحيم جديد بالقداس الإلهي',
-      message: `المنتقل: ${data.deceased_name} (${data.memorial_type}) • قداس: ${data.mass_date} • سجله: ${currentUser.full_name || currentUser.username}`,
+      message: `المنتقل: ${payload.deceased_name} (${payload.memorial_type}) • قداس: ${payload.mass_date} • سجله: ${currentUser.full_name || currentUser.username}`,
       type: 'memorials',
-      targetId: data.id
+      targetId: data?.id
     });
 
-    const createdItem = { ...(data || payload), mass_time: (data?.mass_time || memForm.mass_time || '08:00') };
+    const createdItem = {
+      ...(data || payload),
+      id: data?.id || `mem_${Date.now()}`,
+      mass_time: data?.mass_time || memForm.mass_time || '08:00'
+    };
     setMemorialRequests(prev => [createdItem, ...prev]);
     setMemorialCardItem(createdItem);
     setPrintMemorialReceipt(createdItem);
@@ -1790,14 +1803,12 @@ export default function JosephArimatheaManager({
                 </div>
 
                 <div className="p-5 grid grid-cols-1 sm:grid-cols-3 items-center gap-3 text-center">
-                  {/* الجنب الأيمن: صورة السيدة العذراء مريم */}
                   <div className="bg-[#fff9eb] border-2 border-amber-400 rounded-2xl p-3 space-y-1 shadow-sm">
                     <div className="text-2xl">👑</div>
                     <div className="font-black text-xs md:text-sm text-[#4a0e13]">السيدة العذراء</div>
                     <div className="text-[11px] font-bold text-amber-900">والدة الإله</div>
                   </div>
 
-                  {/* المنتصف: الصليب والترحيم واسم المنتقل */}
                   <div className="space-y-2 py-2">
                     <div className="text-3xl text-[#7a1c24] font-black">✝</div>
                     <div className="text-xs font-black text-amber-900">
@@ -1808,7 +1819,6 @@ export default function JosephArimatheaManager({
                     </h3>
                   </div>
 
-                  {/* الجنب الأيسر: الصليب والمذبح المقدس */}
                   <div className="bg-[#fff9eb] border-2 border-amber-400 rounded-2xl p-3 space-y-1 shadow-sm">
                     <div className="text-2xl text-[#7a1c24] font-black">✝</div>
                     <div className="font-black text-xs md:text-sm text-[#4a0e13]">صلاة وترحيم</div>
