@@ -23,7 +23,7 @@ const emptyUser = {
   sector: '', detailed_stage: 'أولى ابتدائي', assigned_class: '', family_role: 'ابن/ابنة',
   phone: '', whatsapp_sender_phone: '', can_manage_wa_templates: true,
   dob: '', address: '', job_title: '',
-  parent_id: '', father_id: '', family_tree_id: '', confession_father_id: '',
+  parent_id: '', father_id: '', mother_id: '', family_tree_id: '', confession_father_id: '',
   father_full_name: '', father_phone: '', mother_full_name: '', mother_phone: '',
   is_deacon: false, deacon_rank: 'اغنسطس',
   priest_degree: 'قس', ordination_date: '', promotion_date: '',
@@ -286,7 +286,9 @@ export default function AdminDashboard({
     }
   };
 
-  const parentIdsFromMembers = [...new Set(users.filter(u => u.parent_id).map(u => u.parent_id))];
+  const parentIdsFromMembers = [...new Set(
+    users.flatMap(u => [u.parent_id, u.father_id, u.mother_id].filter(Boolean))
+  )];
   const parentsList = users.filter(u => u.role === 'parent' || parentIdsFromMembers.includes(u.id));
   const priestsList = users.filter(u => u.role === 'priest');
   const servantsList = users.filter(u => ['head_servant', 'vice_head_servant', 'servant', 'meeting_servant', 'mercy_servant'].includes(u.role));
@@ -353,8 +355,9 @@ export default function AdminDashboard({
       dob: u.dob || '',
       address: u.address || '',
       job_title: u.job_title || '',
-      parent_id: u.parent_id || '',
-      father_id: u.father_id || '',
+      parent_id: u.parent_id || u.father_id || '',
+      father_id: u.father_id || u.parent_id || '',
+      mother_id: u.mother_id || '',
       family_tree_id: u.family_tree_id || '',
       confession_father_id: u.confession_father_id || '',
       father_full_name: u.father_full_name || '',
@@ -397,6 +400,9 @@ export default function AdminDashboard({
       formData.fourth_name
     ].map(s => s.trim()).filter(Boolean).join(' ');
 
+    const chosenFatherId = formData.parent_id || formData.father_id || '';
+    const chosenMotherId = formData.mother_id || '';
+
     const payload = {
       ...formData,
       full_name,
@@ -404,8 +410,15 @@ export default function AdminDashboard({
       dob: formData.dob || null,
       ordination_date: formData.ordination_date || null,
       promotion_date: formData.promotion_date || null,
-      parent_id: formData.role === 'member' && formData.parent_id ? formData.parent_id : null,
-      father_id: formData.father_id || null,
+      parent_id: formData.role === 'member' && (chosenFatherId || chosenMotherId)
+        ? (chosenFatherId || chosenMotherId)
+        : null,
+      father_id: formData.role === 'member' && chosenFatherId
+        ? chosenFatherId
+        : null,
+      mother_id: formData.role === 'member' && chosenMotherId
+        ? chosenMotherId
+        : null,
       family_tree_id: formData.family_tree_id || null,
       confession_father_id: formData.confession_father_id || null
     };
@@ -1110,12 +1123,54 @@ export default function AdminDashboard({
               )}
 
               {formData.role === 'member' && (
-                <div>
-                  <label className="block mb-1 text-[#7a1c24]">ربط بحساب ولي الأمر:</label>
-                  <select className="w-full p-2.5 border rounded-xl bg-blue-50/40" value={formData.parent_id || ''} onChange={e => setFormData({ ...formData, parent_id: e.target.value })}>
-                    <option value="">-- اختر ولي الأمر (اختياري) --</option>
-                    {parentsList.map(p => <option key={p.id} value={p.id}>{p.full_name} ({p.phone})</option>)}
-                  </select>
+                <div className="bg-blue-50/40 p-3 rounded-2xl border border-blue-200 space-y-2.5">
+                  <span className="block text-[#7a1c24] font-extrabold">
+                    👨‍👩‍👦 ربط بحساب ولي الأمر (تحديد الأب والأم بشكل منفصل):
+                  </span>
+                  <div className="grid sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="block mb-1 text-[11px] text-sky-950">👨 ولي الأمر (الأب):</label>
+                      <select
+                        className="w-full p-2.5 border rounded-xl bg-white"
+                        value={formData.parent_id || ''}
+                        onChange={e => setFormData({
+                          ...formData,
+                          parent_id: e.target.value,
+                          father_id: e.target.value
+                        })}
+                      >
+                        <option value="">-- اختر الأب (اختياري) --</option>
+                        {parentsList
+                          .filter(p => p.parent_type !== 'mother' && p.family_role !== 'أم')
+                          .map(p => (
+                            <option key={p.id} value={p.id}>
+                              {p.full_name} {p.phone ? `(${p.phone})` : ''}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block mb-1 text-[11px] text-pink-950">👩 ولي الأمر (الأم):</label>
+                      <select
+                        className="w-full p-2.5 border rounded-xl bg-white"
+                        value={formData.mother_id || ''}
+                        onChange={e => setFormData({
+                          ...formData,
+                          mother_id: e.target.value
+                        })}
+                      >
+                        <option value="">-- اختر الأم (اختياري) --</option>
+                        {parentsList
+                          .filter(p => p.parent_type !== 'father' && p.family_role !== 'أب')
+                          .map(p => (
+                            <option key={p.id} value={p.id}>
+                              {p.full_name} {p.phone ? `(${p.phone})` : ''}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  </div>
                 </div>
               )}
 

@@ -137,8 +137,9 @@ export default function App() {
       return;
     }
     const { allowed, defaultScreen } = resolveScreens(currentUser, roleScreens);
+    const startScr = allowed.has('public_page') ? 'public_page' : defaultScreen;
     if (!activeScreen || !allowed.has(activeScreen)) {
-      setActiveScreen(defaultScreen || '');
+      setActiveScreen(startScr || '');
     }
   }, [currentUser, roleScreens]);
 
@@ -162,8 +163,9 @@ export default function App() {
       setCurrentUser(user);
       setExtraScreen('');
       setMobileMenuOpen(false);
-      const { defaultScreen } = resolveScreens(user, roleScreens);
-      setActiveScreen(defaultScreen || '');
+      const { allowed, defaultScreen } = resolveScreens(user, roleScreens);
+      const startScr = allowed.has('public_page') ? 'public_page' : defaultScreen;
+      setActiveScreen(startScr || '');
       fetchData();
     } else {
       setLoginError('اسم المستخدم أو كلمة المرور غير صحيحة.');
@@ -206,6 +208,7 @@ export default function App() {
     children_names: u.children_names || '',
     parent_id: u.parent_id || null,
     father_id: u.father_id || null,
+    mother_id: u.mother_id || null,
     confession_father_id: u.confession_father_id || null,
     confession_father: u.confession_father || '',
     confession_status: u.confession_status || 'مخدوم جديد',
@@ -245,7 +248,7 @@ export default function App() {
     if (!error) setUsers(users.filter(u => u.id !== id));
   };
 
-  // ====== ربط / فك ربط الأبناء بولي الأمر (على نفس عمود parent_id في church_users) ======
+  // ====== ربط / فك ربط الأبناء بولي الأمر ======
   const handleLinkChild = async (childId, shouldLink = true) => {
     const newParentId = shouldLink ? currentUser.id : null;
     const { data, error } = await supabase
@@ -474,7 +477,7 @@ export default function App() {
 
   const allServants = users.filter(u => ['servant', 'head_servant', 'vice_head_servant', 'meeting_servant', 'mercy_servant'].includes(u.role));
   const myChildrenAsParent = users.filter(
-    u => u.parent_id === currentUser.id || u.father_id === currentUser.id
+    u => u.parent_id === currentUser.id || u.father_id === currentUser.id || u.mother_id === currentUser.id
   );
   const priestFamilies = families.filter(f => f.priest_id === currentUser.id);
   const upcomingBirthdays = getUpcomingBirthdays(users, isPriest ? priestFamilies : families);
@@ -492,7 +495,7 @@ export default function App() {
         canEdit={canEditPublic}
         churchName={churchName}
         onOpenEditor={() => {
-          if (!canEditPublic) return alert('التعديل متاح للأدمن أو الكاهن فقط');
+          if (!canEditPublic) return alert('التعديل متاح للأدمن أو الكاهن أو من لديه صلاحية التعديل فقط');
           setExtraScreen('');
           setActiveScreen('public_editor');
         }}
@@ -506,8 +509,9 @@ export default function App() {
     );
   }
 
-  const navScreens = [...SCREEN_ORDER, ...(canEditPublic ? ['public_editor'] : [])].filter(s => {
-    if (s === 'public_editor' && !canEditPublic) return false;
+  // بدون تكرار 'public_editor' لأنها موجودة في SCREEN_ORDER
+  const navScreens = Array.from(new Set(SCREEN_ORDER)).filter(s => {
+    if (s === 'public_editor') return canEditPublic && allowed.has('public_editor');
     if (s === 'trips_office') return canAccessTripsOffice;
     return allowed.has(s);
   });
@@ -525,10 +529,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#f6f4ef] flex flex-col" dir="rtl">
-      {/* هيدر علوي ثابت ومظبوط لجميع الشاشات (موبايل + ديسكتوب) */}
       <header className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#68161d] text-white sticky top-0 z-40 shadow-md print:hidden">
         <div className="max-w-6xl mx-auto px-3 sm:px-5 py-2.5 flex items-center justify-between gap-2">
-          {/* يمين الهيدر: اللوجو الجميل + الاسم */}
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
             {churchLogoUrl ? (
               <img
@@ -559,7 +561,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* يسار الهيدر: الإشعارات + خروج + زر القائمة للموبايل */}
           <div className="flex items-center gap-1.5 shrink-0">
             {!['member', 'parent', 'worker'].includes(currentUser.role) && upcomingBirthdays.length > 0 && (
               <span
@@ -591,7 +592,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* شريط التابات العلوي المدمج */}
         <div className="bg-[#5a1218]/75 border-t border-white/10">
           <div className="max-w-6xl mx-auto px-3 sm:px-5 py-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar lg:flex-wrap">
             {navScreens.map(scr => {
@@ -641,7 +641,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* قائمة الموبايل المنسدلة */}
         {mobileMenuOpen && (
           <div className="lg:hidden bg-[#4a0e13] border-t border-white/15 px-3 py-3 shadow-xl">
             <p className="text-[10px] text-amber-200/80 font-bold mb-2">كل الشاشات المتاحة لحسابك:</p>

@@ -1,10 +1,11 @@
 export const SCREEN_ORDER = [
-  'admin_panel', 'priest_panel', 'servant_panel', 'member_panel', 'parent_panel',
+  'public_page', 'admin_panel', 'priest_panel', 'servant_panel', 'member_panel', 'parent_panel',
   'edu_center', 'joseph_arimathea', 'trips_office', 'approvals', 'deacons', 'certs',
-  'public_page', 'public_editor', 'permissions'
+  'public_editor', 'permissions'
 ];
 
 export const SCREEN_LABELS = {
+  public_page: 'صفحة الكنيسة',
   admin_panel: 'لوحة الإدارة',
   priest_panel: 'شاشة الكاهن',
   servant_panel: 'شاشة الخادم',
@@ -16,7 +17,6 @@ export const SCREEN_LABELS = {
   approvals: 'طلبات الانضمام',
   deacons: 'جدول الشمامسة',
   certs: 'الشهادات والأسرار',
-  public_page: 'صفحة الكنيسة',
   public_editor: 'تعديل صفحة الكنيسة',
   permissions: 'الصلاحيات'
 };
@@ -54,16 +54,16 @@ export const ROLES = [
 ];
 
 export const DEFAULT_ROLE_SCREENS = {
-  admin: { screens: ALL_SCREENS, def: 'admin_panel' },
-  priest: { screens: ['priest_panel', 'trips_office', 'approvals', 'public_page', 'public_editor', 'deacons', 'certs', 'edu_center', 'joseph_arimathea'], def: 'priest_panel' },
-  head_servant: { screens: ['admin_panel', 'trips_office', 'approvals', 'public_page'], def: 'admin_panel' },
-  vice_head_servant: { screens: ['admin_panel', 'approvals', 'public_page'], def: 'admin_panel' },
-  servant: { screens: ['servant_panel', 'public_page'], def: 'servant_panel' },
-  meeting_servant: { screens: ['servant_panel', 'public_page'], def: 'servant_panel' },
-  mercy_servant: { screens: ['servant_panel', 'public_page'], def: 'servant_panel' },
-  member: { screens: ['member_panel', 'public_page'], def: 'member_panel' },
-  worker: { screens: ['member_panel', 'public_page'], def: 'member_panel' },
-  parent: { screens: ['parent_panel', 'public_page'], def: 'parent_panel' }
+  admin: { screens: ALL_SCREENS, def: 'public_page' },
+  priest: { screens: ['public_page', 'priest_panel', 'trips_office', 'approvals', 'public_editor', 'deacons', 'certs', 'edu_center', 'joseph_arimathea'], def: 'public_page' },
+  head_servant: { screens: ['public_page', 'admin_panel', 'trips_office', 'approvals'], def: 'public_page' },
+  vice_head_servant: { screens: ['public_page', 'admin_panel', 'approvals'], def: 'public_page' },
+  servant: { screens: ['public_page', 'servant_panel'], def: 'public_page' },
+  meeting_servant: { screens: ['public_page', 'servant_panel'], def: 'public_page' },
+  mercy_servant: { screens: ['public_page', 'servant_panel'], def: 'public_page' },
+  member: { screens: ['public_page', 'member_panel'], def: 'public_page' },
+  worker: { screens: ['public_page', 'member_panel'], def: 'public_page' },
+  parent: { screens: ['public_page', 'parent_panel'], def: 'public_page' }
 };
 
 const LEGACY_FLAGS = {
@@ -72,7 +72,8 @@ const LEGACY_FLAGS = {
   view_member_panel: 'member_panel',
   view_parent_panel: 'parent_panel',
   view_deacons: 'deacons',
-  view_certs: 'certs'
+  view_certs: 'certs',
+  can_edit_public: 'public_editor'
 };
 
 export function resolveScreens(user, roleScreensRows = []) {
@@ -83,13 +84,13 @@ export function resolveScreens(user, roleScreensRows = []) {
 
   if (user.role === 'admin') {
     ALL_SCREENS.forEach(k => allowed.add(k));
-    def = 'admin_panel';
+    def = 'public_page';
   } else {
     const rows = roleScreensRows.filter(r => r.role === user.role);
     if (rows.length > 0) {
       rows.forEach(r => {
         allowed.add(r.screen);
-        if (r.is_default) def = r.screen;
+        if (!def && r.is_default) def = r.screen;
       });
     } else if (DEFAULT_ROLE_SCREENS[user.role]) {
       DEFAULT_ROLE_SCREENS[user.role].screens.forEach(k => allowed.add(k));
@@ -114,8 +115,17 @@ export function resolveScreens(user, roleScreensRows = []) {
 
   if (user.role !== 'admin') (p.denied_screens || []).forEach(k => allowed.delete(k));
 
-  if (p.default_screen && allowed.has(p.default_screen)) def = p.default_screen;
-  if (!def || !allowed.has(def)) def = SCREEN_ORDER.find(k => allowed.has(k)) || null;
+  if (p.default_screen && allowed.has(p.default_screen)) {
+    def = p.default_screen;
+  } else if (allowed.has('public_page')) {
+    def = 'public_page';
+  }
+
+  if (!def || !allowed.has(def)) {
+    def = allowed.has('public_page')
+      ? 'public_page'
+      : (SCREEN_ORDER.find(k => allowed.has(k)) || null);
+  }
 
   return { allowed, defaultScreen: def };
 }
@@ -130,19 +140,26 @@ export function getScreenAccess(user, screenId, roleScreensRows = []) {
 
   if (sp && typeof sp === 'object') {
     const canView = Boolean(sp.view) && !(p.denied_screens || []).includes(screenId);
+    const canEdit = screenId === 'public_editor'
+      ? (canView && (Boolean(sp.edit) || Boolean(p.can_edit_public)))
+      : (canView && Boolean(sp.edit));
     return {
       view: canView,
       add: canView && Boolean(sp.add),
-      edit: canView && Boolean(sp.edit),
+      edit: canEdit,
       delete: canView && Boolean(sp.delete)
     };
   }
 
   const canView = allowed.has(screenId);
+  const canEdit = screenId === 'public_editor'
+    ? (canView && (Boolean(p.can_edit_public) || Boolean(p.can_edit_members)))
+    : (canView && Boolean(p.can_edit_members));
+
   return {
     view: canView,
     add: canView && Boolean(p.can_add),
-    edit: canView && Boolean(p.can_edit_members),
+    edit: canEdit,
     delete: canView && Boolean(p.can_delete)
   };
 }
