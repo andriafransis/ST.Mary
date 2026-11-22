@@ -8,7 +8,8 @@ import {
   UserCheck, Search, CheckSquare, Volume2, VolumeX, HeartHandshake,
   Calendar, FileText, CheckCircle2, Copy, DollarSign, Award, XCircle,
   ShieldCheck, Send, Check, BellRing, Users, Plus, X, Calculator,
-  Home, Clock, Settings, UserMinus, UserPlus, UploadCloud, Image, ExternalLink
+  Home, Clock, Settings, UserMinus, UserPlus, UploadCloud, Image, ExternalLink,
+  Share2, Download
 } from 'lucide-react';
 
 const RELATIONSHIP_OPTIONS = [
@@ -78,6 +79,152 @@ export function canUserReportDeath(user) {
   return true;
 }
 
+function buildObituaryShareText(c) {
+  const lines = [
+    '✝ «أَنَا هُوَ الْقِيَامَةُ وَالْحَيَاةُ. مَنْ آمَنَ بِي وَلَوْ مَاتَ فَسَيَحْيَا» (يو 11: 25)',
+    '',
+    'انتقل إلى الأمجاد السماوية:',
+    `🕊️ *${c.deceased_name || ''}*`,
+    ''
+  ];
+
+  if (c.funeral_date || c.funeral_time) {
+    lines.push(`⛪ *صلاة التجنيز:* ${c.funeral_date || ''} ${c.funeral_time ? `الساعة ${c.funeral_time}` : ''}`.trim());
+  }
+
+  if (c.death_place_type || c.death_place_details) {
+    lines.push(`🚐 *الخرجة / التحرك:* ${c.death_place_type || ''} ${c.death_place_details ? `— ${c.death_place_details}` : ''}`.trim());
+  }
+
+  if (c.burial_location_name) {
+    lines.push(`📍 *الدفن:* ${c.burial_location_name}`);
+  }
+
+  if (c.needs_hall && c.hall_name) {
+    const hallInfo = [
+      c.hall_purpose || '',
+      c.hall_date || '',
+      c.hall_slot || ''
+    ].filter(Boolean).join(' • ');
+    lines.push(`🕯️ *العزاء / القاعة:* ${c.hall_name}${hallInfo ? ` (${hallInfo})` : ''}`);
+  }
+
+  lines.push('', 'المسيح يعزي الأسرة وجميع محبيهم.');
+  return lines.join('\n');
+}
+
+function wrapCanvasText(ctx, text, maxWidth) {
+  const words = String(text || '').split(' ');
+  const lines = [];
+  let current = '';
+
+  for (const word of words) {
+    const testLine = current ? `${current} ${word}` : word;
+    if (ctx.measureText(testLine).width > maxWidth && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = testLine;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+function downloadObituaryCardImage(c) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1080;
+  canvas.height = 1080;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  ctx.direction = 'rtl';
+  ctx.textAlign = 'center';
+
+  // خلفية رسمية هادئة
+  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  grad.addColorStop(0, '#2b090d');
+  grad.addColorStop(0.35, '#4a0e13');
+  grad.addColorStop(0.35, '#fbf7f0');
+  grad.addColorStop(1, '#f4ede0');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // إطار خارجي وداخلي
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(32, 32, canvas.width - 64, canvas.height - 64);
+
+  // الصليب العلوي
+  ctx.fillStyle = '#f3d27a';
+  ctx.font = 'bold 54px sans-serif';
+  ctx.fillText('✝', canvas.width / 2, 105);
+
+  ctx.font = 'bold 28px sans-serif';
+  ctx.fillText('انتقل إلى الأمجاد السماوية', canvas.width / 2, 165);
+
+  ctx.fillStyle = '#fde68a';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.fillText('«أَنَا هُوَ الْقِيَامَةُ وَالْحَيَاةُ. مَنْ آمَنَ بِي وَلَوْ مَاتَ فَسَيَحْيَا» (يو 11: 25)', canvas.width / 2, 225);
+
+  // اسم المنتقل
+  ctx.fillStyle = '#4a0e13';
+  ctx.font = 'bold 52px sans-serif';
+  const nameLines = wrapCanvasText(ctx, c.deceased_name || '', 900);
+  let y = 445;
+  nameLines.forEach(line => {
+    ctx.fillText(line, canvas.width / 2, y);
+    y += 64;
+  });
+
+  // خط فاصل ذهبي
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(220, y + 6);
+  ctx.lineTo(canvas.width - 220, y + 6);
+  ctx.stroke();
+
+  y += 58;
+
+  const details = [];
+  if (c.funeral_date || c.funeral_time) {
+    details.push(`صلاة التجنيز: ${c.funeral_date || ''} ${c.funeral_time ? `— الساعة ${c.funeral_time}` : ''}`.trim());
+  }
+  if (c.death_place_type || c.death_place_details) {
+    details.push(`الخرجة / التحرك: ${c.death_place_type || ''} ${c.death_place_details ? `(${c.death_place_details})` : ''}`.trim());
+  }
+  if (c.burial_location_name) {
+    details.push(`الدفن: ${c.burial_location_name}`);
+  }
+  if (c.needs_hall && c.hall_name) {
+    const hallExtra = [c.hall_purpose, c.hall_date, c.hall_slot].filter(Boolean).join(' • ');
+    details.push(`العزاء / القاعة: ${c.hall_name}${hallExtra ? ` — ${hallExtra}` : ''}`);
+  }
+
+  ctx.fillStyle = '#1f2937';
+  ctx.font = 'bold 28px sans-serif';
+  details.forEach(item => {
+    const wrapped = wrapCanvasText(ctx, `• ${item}`, 880);
+    wrapped.forEach(line => {
+      ctx.fillText(line, canvas.width / 2, y);
+      y += 42;
+    });
+    y += 10;
+  });
+
+  // التذييل
+  ctx.fillStyle = '#7a1c24';
+  ctx.font = 'bold 26px sans-serif';
+  ctx.fillText('المسيح يعزي الأسرة وجميع محبيهم • خدمة يوسف الرامي', canvas.width / 2, canvas.height - 72);
+
+  const link = document.createElement('a');
+  const safeName = (c.deceased_name || 'obituary').replace(/[^\u0600-\u06FFa-zA-Z0-9_-]+/g, '_');
+  link.download = `نعي_${safeName}.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
 export default function JosephArimatheaManager({
   currentUser,
   users = [],
@@ -130,7 +277,7 @@ export default function JosephArimatheaManager({
   }, [users]);
 
   // التبويبات
-  const [activeMainTab, setActiveMainTab] = useState('cases'); // 'cases' | 'memorials' | 'priest_sheet' | 'workers_stats' | 'halls_settings' | 'instapay_settings' | 'staff_manage'
+  const [activeMainTab, setActiveMainTab] = useState('cases');
   const [adminSubTab, setAdminSubTab] = useState(isAdminUser ? 'setup' : 'cases');
 
   // البيانات
@@ -159,6 +306,10 @@ export default function JosephArimatheaManager({
   // رفع صورة الإيصال ومعاينتها
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const [viewingImage, setViewingImage] = useState(null);
+
+  // كارت النعي والمشاركة بعد تقديم الطلب أو من البطاقة
+  const [obituaryCardCase, setObituaryCardCase] = useState(null);
+  const [copiedObituary, setCopiedObituary] = useState(false);
 
   // إشعارات الكاهن واللجنة اللحظية
   const [notifications, setNotifications] = useState([]);
@@ -590,6 +741,34 @@ export default function JosephArimatheaManager({
     }
   };
 
+  // مشاركة نص النعي أو واتساب
+  const handleShareObituaryText = async (c) => {
+    const text = buildObituaryShareText(c);
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: `انتقل إلى الأمجاد السماوية — ${c.deceased_name}`,
+          text
+        });
+        return;
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedObituary(true);
+      setTimeout(() => setCopiedObituary(false), 3000);
+    } catch (_) {
+      alert(text);
+    }
+  };
+
+  const handleSendObituaryWhatsApp = (c) => {
+    const text = buildObituaryShareText(c);
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
   // شاشة الزائرين غير المسجلين
   if (!isLoggedIn) {
     const openCaskets = caskets.filter(c => c.status === 'متاح');
@@ -677,39 +856,6 @@ export default function JosephArimatheaManager({
   const josephTeamDrivers = systemUsers.filter(u => u.permissions?.joseph_role === 'driver');
   const josephTeamWorkers = systemUsers.filter(u => u.permissions?.joseph_role === 'worker');
 
-  const calcAge = (dob) => {
-    if (!dob) return '';
-    const yrs = Math.floor((Date.now() - new Date(dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000));
-    return yrs > 0 ? `${yrs} سنة` : '';
-  };
-
-  const relatedUsers = systemUsers.filter(u =>
-    u.id !== currentUser?.id &&
-    (u.parent_id === currentUser?.id ||
-      u.id === currentUser?.parent_id ||
-      u.father_id === currentUser?.id ||
-      u.id === currentUser?.father_id ||
-      (currentUser?.second_name && u.second_name === currentUser.second_name && u.third_name === currentUser.third_name))
-  );
-
-  const searchMatches = personSearch.trim()
-    ? systemUsers
-        .filter(u => ((u.full_name || '') + ' ' + (u.phone || '') + ' ' + (u.address || '')).toLowerCase().includes(personSearch.toLowerCase()))
-        .slice(0, 12)
-    : relatedUsers.slice(0, 8);
-
-  const selectDeceasedPerson = (u) => {
-    if (!u) return;
-    setDeathForm(prev => ({
-      ...prev,
-      deceased_user_id: u.id,
-      deceased_name: u.full_name || '',
-      deceased_age: calcAge(u.dob),
-      death_place_details: prev.death_place_details || u.address || ''
-    }));
-    setPersonSearch('');
-  };
-
   const handleTimeChange = (newTime) => {
     const info = suggestLiturgicalRites(newTime);
     setDeathForm(prev => ({
@@ -776,7 +922,7 @@ export default function JosephArimatheaManager({
     setShowDeathForm(true);
   };
 
-  // حفظ حالة الوفاة
+  // حفظ حالة الوفاة وإظهار كارت النعي والمشاركة فوراً
   const handleSaveCase = async (e) => {
     e.preventDefault();
     if (!canReport) return alert('تقديم بيان حالة الوفاة متاح للبالغين وأولياء الأمور فقط.');
@@ -850,6 +996,7 @@ export default function JosephArimatheaManager({
 
     await loadData();
     setSentNoticeSuccess(true);
+    setObituaryCardCase(saved || payload);
     if (isStaff) setShowDeathForm(false);
     setEditingId(null);
     setDeathForm(emptyDeathCase);
@@ -865,6 +1012,9 @@ export default function JosephArimatheaManager({
     if (editingId === c.id) {
       setEditingId(null);
       setDeathForm(emptyDeathCase);
+    }
+    if (obituaryCardCase?.id === c.id) {
+      setObituaryCardCase(null);
     }
     loadData();
   };
@@ -1131,7 +1281,6 @@ export default function JosephArimatheaManager({
 
   const totalWorkerFee = workerTrips.length * Number(feePerTrip || 0);
 
-  const availableCaskets = caskets.filter(ck => ck.status === 'متاح' || ck.id === deathForm.casket_id);
   const approvedMassMemorials = memorialRequests.filter(
     m => m.status === 'مقبول (معتمد للمذبح)' && (!filterMassDate || m.mass_date === filterMassDate)
   );
@@ -1375,8 +1524,120 @@ export default function JosephArimatheaManager({
           )}
 
           {sentNoticeSuccess && (
-            <div className="bg-emerald-50 border-2 border-emerald-400 text-emerald-950 p-4 rounded-2xl font-bold text-sm">
-              ✅ تم توثيق وإرسال بيان حالة الوفاة باسم ({currentUser?.full_name}) للجنة الكنيسة والآباء الكهنة والسائق والفراشين! المسيح يعزيكم.
+            <div className="bg-emerald-50 border-2 border-emerald-400 text-emerald-950 p-4 rounded-2xl font-bold text-sm flex flex-wrap justify-between items-center gap-2 print:hidden">
+              <span>✅ تم توثيق وإرسال بيان حالة الوفاة باسم ({currentUser?.full_name}) للجنة الكنيسة والآباء الكهنة والسائق والفراشين! المسيح يعزيكم.</span>
+              {obituaryCardCase && (
+                <button
+                  type="button"
+                  onClick={() => setObituaryCardCase(obituaryCardCase)}
+                  className="px-3 py-1 bg-[#7a1c24] text-white rounded-xl text-xs font-black cursor-pointer"
+                >
+                  عرض كارت النعي والمشاركة
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* كارت النعي الجاهز للمشاركة والطباعة وتنزيل الصورة */}
+          {obituaryCardCase && (
+            <div className="bg-amber-50/80 border-2 border-amber-400 p-5 rounded-3xl space-y-4 shadow-md print:hidden">
+              <div className="flex flex-wrap justify-between items-center gap-2 border-b border-amber-300 pb-3">
+                <div>
+                  <h4 className="font-black text-[#4a0e13] text-base flex items-center gap-2">
+                    <Share2 size={18} className="text-[#7a1c24]" /> كارت النعي الجاهز للمشاركة (واتساب / فيسبوك / صورة)
+                  </h4>
+                  <p className="text-xs text-gray-600">يمكنك تنزيل الكارت كصورة مباشرة، أو مشاركة النص، أو طباعته.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setObituaryCardCase(null)}
+                  className="px-3 py-1 bg-white border rounded-xl text-xs font-bold text-gray-700 cursor-pointer"
+                >
+                  ✕ إغلاق الكارت
+                </button>
+              </div>
+
+              <div className="max-w-xl mx-auto bg-gradient-to-b from-[#4a0e13] via-[#fbf7f0] to-[#f4ede0] border-2 border-amber-500 rounded-3xl overflow-hidden shadow">
+                <div className="bg-[#2b090d] text-amber-200 p-4 text-center space-y-1">
+                  <div className="text-2xl text-amber-300">✝</div>
+                  <div className="font-black text-base">انتقل إلى الأمجاد السماوية</div>
+                  <p className="text-xs text-amber-100/90">
+                    «أَنَا هُوَ الْقِيَامَةُ وَالْحَيَاةُ. مَنْ آمَنَ بِي وَلَوْ مَاتَ فَسَيَحْيَا» (يو 11: 25)
+                  </p>
+                </div>
+
+                <div className="p-5 text-center space-y-3 text-gray-900">
+                  <h3 className="text-xl md:text-2xl font-black text-[#4a0e13] border-b border-amber-300 pb-2">
+                    {obituaryCardCase.deceased_name}
+                  </h3>
+
+                  <div className="space-y-1.5 text-xs md:text-sm font-bold text-right">
+                    {(obituaryCardCase.funeral_date || obituaryCardCase.funeral_time) && (
+                      <p>
+                        ⛪ <strong>صلاة التجنيز:</strong> {obituaryCardCase.funeral_date || ''}{' '}
+                        {obituaryCardCase.funeral_time ? `— الساعة ${obituaryCardCase.funeral_time}` : ''}
+                      </p>
+                    )}
+                    {(obituaryCardCase.death_place_type || obituaryCardCase.death_place_details) && (
+                      <p>
+                        🚐 <strong>الخرجة / التحرك:</strong> {obituaryCardCase.death_place_type || ''}{' '}
+                        {obituaryCardCase.death_place_details ? `(${obituaryCardCase.death_place_details})` : ''}
+                      </p>
+                    )}
+                    {obituaryCardCase.burial_location_name && (
+                      <p>
+                        📍 <strong>الدفن:</strong> {obituaryCardCase.burial_location_name}
+                      </p>
+                    )}
+                    {obituaryCardCase.needs_hall && obituaryCardCase.hall_name && (
+                      <p>
+                        🕯️ <strong>العزاء / القاعة:</strong> {obituaryCardCase.hall_name}{' '}
+                        {[obituaryCardCase.hall_purpose, obituaryCardCase.hall_date, obituaryCardCase.hall_slot].filter(Boolean).length > 0 && (
+                          <span className="text-gray-700">
+                            ({[obituaryCardCase.hall_purpose, obituaryCardCase.hall_date, obituaryCardCase.hall_slot].filter(Boolean).join(' • ')})
+                          </span>
+                        )}
+                      </p>
+                    )}
+                  </div>
+
+                  <p className="text-xs font-black text-[#7a1c24] pt-2 border-t border-amber-300">
+                    المسيح يعزي الأسرة وجميع محبيهم • خدمة يوسف الرامي
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap justify-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => downloadObituaryCardImage(obituaryCardCase)}
+                  className="px-4 py-2 bg-[#7a1c24] hover:bg-[#5b141a] text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow"
+                >
+                  <Download size={15} /> تنزيل الكارت كصورة (PNG)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSendObituaryWhatsApp(obituaryCardCase)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow"
+                >
+                  <MessageCircle size={15} /> شير على واتساب
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleShareObituaryText(obituaryCardCase)}
+                  className="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow"
+                >
+                  {copiedObituary ? <Check size={15} /> : <Share2 size={15} />}
+                  {copiedObituary ? 'تم نسخ نص النعي للفيسبوك!' : 'شير / نسخ لفيسبوك'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setPrintCase(obituaryCardCase); setTimeout(() => window.print(), 100); }}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow"
+                >
+                  <Printer size={15} /> طباعة الكارت
+                </button>
+              </div>
             </div>
           )}
 
@@ -1962,6 +2223,37 @@ export default function JosephArimatheaManager({
                     </div>
                   </div>
 
+                  {/* مواعيد التجنيز والتحرك */}
+                  <div className="grid sm:grid-cols-3 gap-2.5">
+                    <div>
+                      <label className="block text-xs text-gray-700 mb-1">تاريخ صلاة التجنيز</label>
+                      <input
+                        type="date"
+                        className="w-full p-2.5 border rounded-xl bg-white text-xs"
+                        value={deathForm.funeral_date}
+                        onChange={e => setDeathForm({ ...deathForm, funeral_date: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-700 mb-1">ساعة صلاة التجنيز</label>
+                      <input
+                        type="time"
+                        className="w-full p-2.5 border rounded-xl bg-white text-xs"
+                        value={deathForm.funeral_time}
+                        onChange={e => setDeathForm({ ...deathForm, funeral_time: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-700 mb-1">مكان التحرك / الخرجة</label>
+                      <input
+                        placeholder="البيت / المستشفى / العنوان..."
+                        className="w-full p-2.5 border rounded-xl bg-white text-xs"
+                        value={deathForm.death_place_details}
+                        onChange={e => setDeathForm({ ...deathForm, death_place_details: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
                   {/* حجز قاعة العزاء */}
                   <div className="bg-amber-50/90 p-4 rounded-2xl border-2 border-amber-300 space-y-3">
                     <label className="flex items-center gap-2 text-sm font-black text-amber-950 cursor-pointer">
@@ -2141,7 +2433,7 @@ export default function JosephArimatheaManager({
                   </label>
 
                   <button type="submit" className="w-full py-3 bg-[#7a1c24] text-white rounded-xl font-black text-xs cursor-pointer shadow">
-                    {editingId ? 'حفظ التعديلات ✅' : 'تأكيد وإرسال البيان وحجز القاعة والسيارة 🚨'}
+                    {editingId ? 'حفظ التعديلات ✅' : 'تأكيد وإرسال البيان وإخراج كارت النعي 🚨'}
                   </button>
                 </form>
               )}
@@ -2168,67 +2460,79 @@ export default function JosephArimatheaManager({
                           </div>
                           <p className="text-xs text-gray-500 mt-1">تاريخ الوفاة: {c.death_date} • مكان الدفن: {c.burial_location_name}</p>
                         </div>
-                        {isStaff && (
-                          <div className="flex flex-wrap gap-2">
-                            {canEditCases && (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => handleStartEditCase(c)}
-                                  className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-950 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
-                                >
-                                  <Edit3 size={13} /> تعديل
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteCase(c)}
-                                  className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
-                                >
-                                  <Trash2 size={13} /> حذف
-                                </button>
-                              </>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => sendDriverWhatsApp(c)}
-                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
-                            >
-                              <MessageCircle size={13} /> واتساب السائق
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => { setPrintCase(c); setTimeout(() => window.print(), 100); }}
-                              className="px-3 py-1.5 bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
-                            >
-                              <Printer size={13} /> طباعة أمر الدفن والقاعة
-                            </button>
-                          </div>
-                        )}
-                      </div>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setObituaryCardCase(c)}
+                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-amber-950 rounded-xl text-xs font-black flex items-center gap-1 cursor-pointer"
+                          >
+                            <Share2 size={13} /> كارت النعي / شير
+                          </button>
 
-                      <div className="grid sm:grid-cols-2 gap-2 text-xs">
-                        <div className="bg-blue-50 p-3 rounded-2xl border border-blue-200">
-                          <strong className="text-blue-950 block mb-1">🚐 السائق:</strong>
-                          <p>{c.driver_name || 'قيد التحديد'} {c.driver_phone && `(${c.driver_phone})`}</p>
-                        </div>
-
-                        <div className="bg-indigo-50 p-3 rounded-2xl border border-indigo-200">
-                          <strong className="text-indigo-950 block mb-1">
-                            👤 الفراشون المشاركون ({assistantsList.length} فراش):
-                          </strong>
-                          {assistantsList.length === 0 ? (
-                            <p className="text-gray-400">لم يُحدد فراشون</p>
-                          ) : (
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {assistantsList.map((a, i) => (
-                                <span key={i} className="px-2 py-0.5 bg-white border border-indigo-200 rounded-lg text-indigo-950 font-bold">
-                                  {i + 1}) {a.name} {a.phone && `(${a.phone})`}
-                                </span>
-                              ))}
-                            </div>
+                          {isStaff && (
+                            <>
+                              {canEditCases && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEditCase(c)}
+                                    className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-950 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Edit3 size={13} /> تعديل
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteCase(c)}
+                                    className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Trash2 size={13} /> حذف
+                                  </button>
+                                </>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => sendDriverWhatsApp(c)}
+                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                              >
+                                <MessageCircle size={13} /> واتساب السائق
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => { setPrintCase(c); setTimeout(() => window.print(), 100); }}
+                                className="px-3 py-1.5 bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                              >
+                                <Printer size={13} /> طباعة أمر الدفن والقاعة
+                              </button>
+                            </>
                           )}
                         </div>
                       </div>
+
+                      {isStaff && (
+                        <div className="grid sm:grid-cols-2 gap-2 text-xs">
+                          <div className="bg-blue-50 p-3 rounded-2xl border border-blue-200">
+                            <strong className="text-blue-950 block mb-1">🚐 السائق:</strong>
+                            <p>{c.driver_name || 'قيد التحديد'} {c.driver_phone && `(${c.driver_phone})`}</p>
+                          </div>
+
+                          <div className="bg-indigo-50 p-3 rounded-2xl border border-indigo-200">
+                            <strong className="text-indigo-950 block mb-1">
+                              👤 الفراشون المشاركون ({assistantsList.length} فراش):
+                            </strong>
+                            {assistantsList.length === 0 ? (
+                              <p className="text-gray-400">لم يُحدد فراشون</p>
+                            ) : (
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {assistantsList.map((a, i) => (
+                                  <span key={i} className="px-2 py-0.5 bg-white border border-indigo-200 rounded-lg text-indigo-950 font-bold">
+                                    {i + 1}) {a.name} {a.phone && `(${a.phone})`}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
