@@ -38,7 +38,6 @@ const ROLE_TEXT = {
   worker: '🛠️ عامل / فراش الكنيسة'
 };
 
-// تحديد الشاشة الافتراضية بعد تسجيل الدخول بحيث تفتح التابات واللوحة الرئيسية ولا تُجبر على صفحة الكنيسة العامة
 function getPostLoginScreen(user, roleScreens) {
   const { allowed, defaultScreen } = resolveScreens(user, roleScreens);
   if (defaultScreen && defaultScreen !== 'public_page' && allowed.has(defaultScreen)) {
@@ -75,6 +74,7 @@ export default function App() {
   const [confessionSlots, setConfessionSlots] = useState([]);
   const [priestMasses, setPriestMasses] = useState([]);
   const [priestPublicEvents, setPriestPublicEvents] = useState([]);
+  const [childLinkRequests, setChildLinkRequests] = useState([]);
 
   const todayISO = new Date().toISOString().split('T')[0];
 
@@ -126,6 +126,36 @@ export default function App() {
       if (cs.data) setConfessionSlots(cs.data);
       if (pm.data) setPriestMasses(pm.data);
       if (pps.data) setPriestPublicEvents(pps.data);
+
+      try {
+        const { data: linkReqs } = await supabase
+          .from('church_notifications')
+          .select('*')
+          .eq('type', 'child_link_request')
+          .order('created_at', { ascending: false });
+        if (linkReqs) {
+          const parsed = linkReqs.map(r => {
+            let meta = {};
+            try {
+              meta = r.message ? JSON.parse(r.message) : {};
+            } catch {
+              meta = {};
+            }
+            return {
+              id: r.id,
+              parent_id: r.user_id,
+              child_id: meta.child_id || r.reference_id,
+              child_name: meta.child_name || '',
+              guardian_type: meta.guardian_type || 'father',
+              status: meta.status || (r.is_read ? 'handled' : 'pending'),
+              created_at: r.created_at
+            };
+          });
+          setChildLinkRequests(parsed);
+        }
+      } catch {
+        // تجاهل لو الجدول غير متاح
+      }
     } catch (err) {
       console.error('Database fetch error:', err);
     }
@@ -141,7 +171,6 @@ export default function App() {
     return () => stopSession();
   }, [currentUser?.id]);
 
-  // ضبط الشاشة الافتراضية على لوحة التابات والاختيارات بدون إجبار الدخول على صفحة الكنيسة العامة
   useEffect(() => {
     if (!currentUser) {
       setActiveScreen('');
@@ -193,7 +222,6 @@ export default function App() {
   };
 
   const buildUserPayload = (u) => {
-    // توحيد نوع ولي الأمر: 'father' (الأب) أو 'mother' (الأم)
     const normalizedGuardianType =
       u.guardian_type === 'father' || u.guardian_type === 'الأب' || u.guardian_type === 'أب'
         ? 'father'
@@ -270,7 +298,6 @@ export default function App() {
     };
   };
 
-  // تسجيل اشتراك جديد من صفحة الدخول مع تحديد ولي الأمر (الأب / الأم)
   const handleRegisterFromLogin = async (newUserData) => {
     setLoginError('');
     setRegisterMessage('');
@@ -351,6 +378,134 @@ export default function App() {
       return true;
     }
     return false;
+  };
+
+  // ====== إرسال طلب ربط من الابن إلى الأب أو الأم (نوتيفيكيشين لولي الأمر ليقبله) ======
+  const handleRequestChildLink = async ({ childId, parentId, guardianType = 'father' }) => {
+    if (!childId || !parentId) return false;
+    const childObj = users.find(u => u.id === childId);
+    const parentObj = users.find(u => u.id === parentId);
+    const childName = childObj?.full_name || currentUser?.full_name || 'ابن';
+    const roleArabic = guardianType === 'mother' ? 'الأم' : 'الأب';
+
+    const metaPayload = {
+      child_id: childId,
+      child_name: childName,
+      guardian_type: guardianType,
+      status: 'pending'
+    };
+
+    let insertedRow = null;
+    try {
+      const { data } = await supabase
+        .from('church_notifications')
+        .insert([{
+          user_id: parentId,
+          title: `👨‍👩‍👦 طلب ربط ابن (${roleArabic})`,
+          message: JSON.stringify(metaPayload),
+          type: 'child_link_request',
+          reference_id: childId,
+          is_read: false
+        }])
+        .select()
+        .single();
+      insertedRow = data;
+    } catch {
+      // تجاهل لو الجدول غير متاح
+    }
+
+    try {
+      const channel = supabase.channel('church-parent-child-link');
+      await channel.subscribe();
+      await channel.send({
+        type: 'broadcast',
+        event: 'child_link_request',
+        payload: {
+          id: insertedRow?.id || `req_${Date.now()}_${childId}`,
+          parent_id: parentId,
+          child_id: childId,
+          child_name: childName,
+          guardian_type: guardianType,
+          status: 'pending',
+          created_at: new Date().toISOString()
+        }
+      });
+      supabase.removeChannel(channel);
+    } catch {
+      // تجاهل أخطاء البث المباشر
+    }
+
+    setChildLinkRequests(prev => [
+      {
+        id: insertedRow?.id || `req_${Date.now()}_${childId}`,
+        parent_id: parentId,
+        child_id: childId,
+        child_name: childName,
+        guardian_type: guardianType,
+        status: 'pending',
+        created_at: new Date().toISOString()
+      },
+      ...prev
+    ]);
+
+    alert(`✅ تم إرسال طلب الربط إلى (${parentObj?.full_name || roleArabic})، وسيظهر له إشعار للموافقة عليه.`);
+    return true;
+  };
+
+  // ====== قبول أو رفض طلب ربط الابن من جانب ولي الأمر ======
+  const handleApproveChildLinkRequest = async (request) => {
+    if (!request?.child_id) return false;
+    const ok = await handleLinkChild(request.child_id, true, request.guardian_type || (currentUser?.guardian_type === 'mother' ? 'mother' : 'father'));
+    if (!ok) return false;
+
+    setChildLinkRequests(prev =>
+      prev.map(r => (r.id === request.id ? { ...r, status: 'approved' } : r))
+    );
+
+    if (request.id && !String(request.id).startsWith('req_')) {
+      try {
+        await supabase
+          .from('church_notifications')
+          .update({
+            is_read: true,
+            message: JSON.stringify({
+              child_id: request.child_id,
+              child_name: request.child_name,
+              guardian_type: request.guardian_type,
+              status: 'approved'
+            })
+          })
+          .eq('id', request.id);
+      } catch {
+        // تجاهل
+      }
+    }
+    return true;
+  };
+
+  const handleRejectChildLinkRequest = async (request) => {
+    if (!request?.id) return;
+    setChildLinkRequests(prev =>
+      prev.map(r => (r.id === request.id ? { ...r, status: 'rejected' } : r))
+    );
+    if (!String(request.id).startsWith('req_')) {
+      try {
+        await supabase
+          .from('church_notifications')
+          .update({
+            is_read: true,
+            message: JSON.stringify({
+              child_id: request.child_id,
+              child_name: request.child_name,
+              guardian_type: request.guardian_type,
+              status: 'rejected'
+            })
+          })
+          .eq('id', request.id);
+      } catch {
+        // تجاهل
+      }
+    }
   };
 
   // ====== Servant actions ======
@@ -526,9 +681,9 @@ export default function App() {
   }
 
   // ==============================================================
-  // 2) شاشة المستخدم بعد تسجيل الدخول (التابات أمامه والاختيار بيده)
+  // 2) شاشة المستخدم بعد تسجيل الدخول
   // ==============================================================
-  const { allowed, defaultScreen } = resolveScreens(currentUser, roleScreens);
+  const { allowed } = resolveScreens(currentUser, roleScreens);
   const fallbackTab = getPostLoginScreen(currentUser, roleScreens);
   const currentScr = activeScreen && allowed.has(activeScreen) ? activeScreen : fallbackTab;
 
@@ -570,6 +725,9 @@ export default function App() {
       u.father_id === currentUser.id ||
       u.mother_id === currentUser.id
   );
+  const myPendingChildRequests = childLinkRequests.filter(
+    r => r.parent_id === currentUser.id && r.status === 'pending'
+  );
   const priestFamilies = families.filter(f => f.priest_id === currentUser.id);
   const upcomingBirthdays = getUpcomingBirthdays(users, isPriest ? priestFamilies : families);
   const pendingCount = users.filter(u => u.status === 'pending').length;
@@ -579,7 +737,6 @@ export default function App() {
     ...memberActivities.map(a => ({ id: a.id, member_id: a.member_id, event_date: a.activity_date, event_type: a.activity_type, present: a.attended }))
   ];
 
-  // يدخل صفحة الكنيسة فقط عندما يختارها المستخدم صراحةً من التابات
   if (!extraScreen && currentScr === 'public_page') {
     return (
       <PublicPage
@@ -601,7 +758,6 @@ export default function App() {
     );
   }
 
-  // ترتيب التابات بحيث تظهر التابات أولاً ويختار منها المستخدم ما يشاء
   const navScreens = Array.from(new Set(SCREEN_ORDER)).filter(s => {
     if (s === 'edu_center' || s === 'joseph_arimathea') return false;
     if (s === 'public_editor') return canEditPublic;
@@ -660,6 +816,17 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {myPendingChildRequests.length > 0 && (
+              <button
+                type="button"
+                onClick={() => selectScreen('parent_panel')}
+                title="طلبات ربط أبناء تنتظر موافقتك"
+                className="px-2.5 py-1.5 bg-amber-400 text-[#4a0e13] rounded-xl text-[11px] font-black flex items-center gap-1 shadow-xs cursor-pointer"
+              >
+                <Bell size={13} /> طلب ربط ({myPendingChildRequests.length})
+              </button>
+            )}
+
             {!['member', 'parent', 'worker'].includes(currentUser.role) && upcomingBirthdays.length > 0 && (
               <span
                 title="أعياد ميلاد قادمة"
@@ -708,6 +875,9 @@ export default function App() {
                   <span>{SCREEN_LABELS[scr] || scr}</span>
                   {scr === 'approvals' && pendingCount > 0 && (
                     <span className="px-1.5 py-0.5 bg-red-600 text-white rounded-full text-[10px] font-black">{pendingCount}</span>
+                  )}
+                  {scr === 'parent_panel' && myPendingChildRequests.length > 0 && (
+                    <span className="px-1.5 py-0.5 bg-emerald-600 text-white rounded-full text-[10px] font-black">{myPendingChildRequests.length}</span>
                   )}
                 </button>
               );
@@ -815,6 +985,7 @@ export default function App() {
               onAddService={handleAddService} onUpdateService={handleUpdateService} onDeleteService={handleDeleteService}
               onAddCategory={handleAddCategory} onUpdateCategory={handleUpdateCategory} onDeleteCategory={handleDeleteCategory}
               onAddCustomCard={handleAddCustomCard} onDeleteCustomCard={handleDeleteCustomCard}
+              onRequestChildLink={handleRequestChildLink}
             />
           </div>
         )}
@@ -841,6 +1012,7 @@ export default function App() {
             birthdays={upcomingBirthdays}
             onAddMember={handleAddMemberByServant} onSaveActivity={handleSaveActivity} onSaveMemberNote={handleSaveMemberNote}
             onUpdateMember={handleUpdateUser}
+            onRequestChildLink={handleRequestChildLink}
           />
         )}
 
@@ -855,6 +1027,8 @@ export default function App() {
             priestPublicEvents={priestPublicEvents}
             priestMasses={priestMasses}
             priests={users.filter(u => u.role === 'priest')}
+            allUsers={users}
+            onRequestChildLink={handleRequestChildLink}
             onMemberUpdated={(updated) => {
               setCurrentUser(updated);
               setUsers(users.map(u => (u.id === updated.id ? updated : u)));
@@ -871,7 +1045,10 @@ export default function App() {
             spiritualNotes={spiritualNotes}
             events={churchEvents}
             services={churchServices}
+            linkRequests={myPendingChildRequests}
             onLinkChild={handleLinkChild}
+            onApproveLinkRequest={handleApproveChildLinkRequest}
+            onRejectLinkRequest={handleRejectChildLinkRequest}
             onUpdateParent={handleUpdateUser}
           />
         )}
