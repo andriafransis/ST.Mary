@@ -45,7 +45,8 @@ export default function ServantDashboard({
   servant, users = [], services = [], serviceGroups = [], activities = [], memberNotes = [], birthdays = [],
   onAddMember, onSaveActivity, onSaveMemberNote, onRefresh
 }) {
-  const canAdd = servant?.permissions?.can_add !== false;
+  const isAdminUser = servant?.role === 'admin';
+  const canAdd = isAdminUser || servant?.permissions?.can_add !== false;
   const canExtractSheet = canExtractMasterSheet(servant);
   const [showMasterSheet, setShowMasterSheet] = useState(false);
 
@@ -60,7 +61,6 @@ export default function ServantDashboard({
     .filter(Boolean);
   const extraServices = Array.isArray(servant?.permissions?.extra_services) ? servant.permissions.extra_services : [];
 
-  // جميع الخدمات والمراحل المتاحة في الكنيسة (التي يضيفها الأدمن في الخدمات أو الفصول أو المراحل)
   const allChurchServicesList = [...new Set([
     ...effectiveGroups.map(g => g.group_name).filter(Boolean),
     ...effectiveGroups.flatMap(g => normalizeGroupStages(g.stages)),
@@ -69,18 +69,6 @@ export default function ServantDashboard({
     ...STAGE_OPTIONS
   ])];
 
-  // الخدمات والفصول المربوطة مباشرة بهذا الخادم
-  const servantBoundTargets = [...new Set([
-    ...(assignedClass ? splitCommaClasses(assignedClass) : []),
-    ...baseStages,
-    ...extraServices
-  ])].filter(Boolean);
-
-  // القائمة الافتراضية المعروضة: خدمات الكنيسة المضافة (إن لم يكن مقيداً بقائمة فرعية ضيقة أو لعرض الكل المضاف من الأدمن)
-  const availableServicesList = allChurchServicesList.length > 0
-    ? allChurchServicesList
-    : (servantBoundTargets.length > 0 ? servantBoundTargets : ['أولى ابتدائي']);
-
   function splitCommaClasses(val) {
     return String(val || '')
       .split(/[,،]/)
@@ -88,7 +76,25 @@ export default function ServantDashboard({
       .filter(Boolean);
   }
 
-  const initialDefaultScope = servantBoundTargets[0] || availableServicesList[0] || 'أولى ابتدائي';
+  // بالنسبة للسوبر أدمن: كل خدمات الكنيسة متاحة له (ولو حدد extra_services أو assigned_class يظهرها أيضاً)، أما الخادم فيُربط بخدماته
+  const rawBoundTargets = [...new Set([
+    ...(assignedClass ? splitCommaClasses(assignedClass) : []),
+    ...baseStages,
+    ...extraServices
+  ])].filter(Boolean);
+
+  const servantBoundTargets = isAdminUser
+    ? (extraServices.length > 0 || assignedClass ? rawBoundTargets : allChurchServicesList)
+    : rawBoundTargets;
+
+  const availableServicesList = allChurchServicesList.length > 0
+    ? allChurchServicesList
+    : (servantBoundTargets.length > 0 ? servantBoundTargets : ['أولى ابتدائي']);
+
+  const initialDefaultScope = isAdminUser
+    ? (availableServicesList[0] || 'أولى ابتدائي')
+    : (servantBoundTargets[0] || availableServicesList[0] || 'أولى ابتدائي');
+
   const [selectedScope, setSelectedScope] = useState(initialDefaultScope);
   const [showAllChurchServices, setShowAllChurchServices] = useState(true);
 
@@ -141,11 +147,10 @@ export default function ServantDashboard({
 
   useEffect(() => {
     if (!availableServicesList.includes(selectedScope) && availableServicesList.length > 0) {
-      setSelectedScope(servantBoundTargets[0] || availableServicesList[0]);
+      setSelectedScope(initialDefaultScope);
     }
   }, [serviceGroups, services, servant]);
 
-  // التحقق هل هذا الخادم/النطاق مخصص لخدمة بعينها أو متعدد الخدمات
   const isBoundToSpecificService = (scope) => {
     if (!scope) return false;
     if (servantBoundTargets.includes(scope)) return true;
@@ -175,7 +180,6 @@ export default function ServantDashboard({
 
     if (!matchesServiceOrClass) return false;
 
-    // فلترة النوع (بنين / بنات) في إعدادي وثانوي أو عند اختيار بنين/بنات
     if (genderFilter === 'بنين') {
       return isMaleMember(m) || mClass.includes('بنين');
     }
@@ -183,9 +187,8 @@ export default function ServantDashboard({
       return isFemaleMember(m) || mClass.includes('بنات');
     }
 
-    // لو الخادم محدد له بنين أو بنات في صلاحياته في إعدادي/ثانوي
     const boundGender = servant?.permissions?.service_gender_scope;
-    if (isPrepOrSecondaryScope(scope) && boundGender && boundGender !== 'الكل') {
+    if (!isAdminUser && isPrepOrSecondaryScope(scope) && boundGender && boundGender !== 'الكل') {
       if (boundGender === 'بنين') return isMaleMember(m) || mClass.includes('بنين');
       if (boundGender === 'بنات') return isFemaleMember(m) || mClass.includes('بنات');
     }
@@ -301,7 +304,7 @@ export default function ServantDashboard({
           >
             ← رجوع لشاشة الخدمة
           </button>
-          <span className="text-xs font-black text-[#7a1c24]">📋 شيت التسلسل والافتقاد (أمين الخدمة)</span>
+          <span className="text-xs font-black text-[#7a1c24]">📋 شيت التسلسل والافتقاد</span>
         </div>
         <MasterCongregationSheet
           users={users}
@@ -319,7 +322,7 @@ export default function ServantDashboard({
       {canExtractSheet && (
         <div className="bg-teal-50/70 border border-teal-200 p-3.5 rounded-2xl flex flex-wrap justify-between items-center gap-2 text-xs">
           <div className="font-bold text-teal-950">
-            📋 بصفتك <strong>أمين الخدمة</strong>، يمكنك سحب شيت التسلسل والافتقاد والترحيم وتصديره أو طباعته.
+            📋 {isAdminUser ? 'بصفتك سوبر أدمن' : 'بصفتك أمين الخدمة'}، يمكنك سحب شيت التسلسل والافتقاد والترحيم وتصديره أو طباعته.
           </div>
           <button
             type="button"
@@ -382,7 +385,7 @@ export default function ServantDashboard({
               >
                 <div>
                   <span className={`text-[10px] font-bold block mb-0.5 ${isSelected ? 'text-amber-200' : 'text-gray-400'}`}>
-                    {isBound ? '⭐ خدمة مخصصة لك' : '⛪ خدمة بالكنيسة'}
+                    {isAdminUser ? '🛡️ متاح للسوبر أدمن' : (isBound ? '⭐ خدمة مخصصة لك' : '⛪ خدمة بالكنيسة')}
                   </span>
                   <strong className="text-sm sm:text-base font-black block">{srv}</strong>
                 </div>
@@ -394,7 +397,6 @@ export default function ServantDashboard({
           })}
         </div>
 
-        {/* تخصيص النوع (بنين / بنات / الكل) للخدمة المختارة خصوصاً في إعدادي وثانوي */}
         <div className="pt-2 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-xs">
           <span className="font-bold text-gray-700">
             تخصيص الفئة داخل <strong className="text-[#7a1c24]">{selectedScope}</strong> (مفيد في إعدادي وثانوي):
@@ -423,7 +425,7 @@ export default function ServantDashboard({
               📖 {selectedScope} {selectedGenderFilter !== 'الكل' ? `(${selectedGenderFilter})` : ''}
             </h2>
             <div className="flex flex-wrap items-center gap-2 mt-1">
-              <span className="text-gray-500 font-bold">الخادم: {servant.full_name}</span>
+              <span className="text-gray-500 font-bold">المسؤول: {servant.full_name}</span>
               <span className="px-2.5 py-0.5 bg-gray-100 text-gray-800 rounded-full font-bold text-[11px]">
                 المخدومين: {scopeMembers.length}
               </span>
