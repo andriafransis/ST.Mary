@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Layers, Plus, Trash2, Users } from 'lucide-react';
+import { Layers, Plus, Trash2, Users, Clock } from 'lucide-react';
 
 export const DEFAULT_SERVICE_GROUPS = [
-  { group_name: 'خدمة حضانة وطفولة', icon: '🧸', stages: ['حضانة'], sort_order: 1 },
-  { group_name: 'خدمة ابتدائي', icon: '🎒', stages: ['أولى ابتدائي', 'ثانية ابتدائي', 'ثالثة ابتدائي', 'رابعة ابتدائي', 'خامسة ابتدائي', 'سادسة ابتدائي'], sort_order: 2 },
-  { group_name: 'خدمة إعدادي', icon: '📘', stages: ['أولى إعدادي', 'ثانية إعدادي', 'ثالثة إعدادي'], sort_order: 3 },
-  { group_name: 'خدمة ثانوي', icon: '🎓', stages: ['أولى ثانوي', 'ثانية ثانوي', 'ثالثة ثانوي'], sort_order: 4 },
-  { group_name: 'خدمة جامعة وخريجين', icon: '🏛️', stages: ['جامعة وخريجين'], sort_order: 5 },
-  { group_name: 'خدمات واجتماعات خاصة', icon: '🤝', stages: ['حرفيين ومهنيين', 'أصحاب معاشات', 'اجتماع الأرامل', 'إخوة الرب', 'اجتماع الصدى', 'شمامسة وألحان'], sort_order: 6 }
+  { group_name: 'خدمة حضانة وطفولة', icon: '🧸', gender_target: 'عام', service_day: 'الجمعة', start_time: '09:00', end_time: '11:30', stages: ['حضانة'], sort_order: 1 },
+  { group_name: 'خدمة ابتدائي', icon: '🎒', gender_target: 'عام', service_day: 'الجمعة', start_time: '09:00', end_time: '12:00', stages: ['أولى ابتدائي', 'ثانية ابتدائي', 'ثالثة ابتدائي', 'رابعة ابتدائي', 'خامسة ابتدائي', 'سادسة ابتدائي'], sort_order: 2 },
+  { group_name: 'خدمة إعدادي بنين', icon: '📘', gender_target: 'بنين', service_day: 'الجمعة', start_time: '16:00', end_time: '18:00', stages: ['أولى إعدادي', 'ثانية إعدادي', 'ثالثة إعدادي'], sort_order: 3 },
+  { group_name: 'خدمة إعدادي بنات', icon: '📗', gender_target: 'بنات', service_day: 'الجمعة', start_time: '16:00', end_time: '18:00', stages: ['أولى إعدادي', 'ثانية إعدادي', 'ثالثة إعدادي'], sort_order: 4 },
+  { group_name: 'خدمة ثانوي بنين', icon: '🎓', gender_target: 'بنين', service_day: 'الجمعة', start_time: '18:00', end_time: '20:00', stages: ['أولى ثانوي', 'ثانية ثانوي', 'ثالثة ثانوي'], sort_order: 5 },
+  { group_name: 'خدمة ثانوي بنات', icon: '🎓', gender_target: 'بنات', service_day: 'الجمعة', start_time: '18:00', end_time: '20:00', stages: ['أولى ثانوي', 'ثانية ثانوي', 'ثالثة ثانوي'], sort_order: 6 },
+  { group_name: 'خدمة جامعة', icon: '🏛️', gender_target: 'عام', service_day: 'الخميس', start_time: '19:00', end_time: '21:00', stages: ['جامعة'], sort_order: 7 },
+  { group_name: 'خدمة خريجين', icon: '💼', gender_target: 'عام', service_day: 'الخميس', start_time: '19:30', end_time: '21:30', stages: ['خريجين'], sort_order: 8 }
 ];
 
 export const normalizeGroupStages = (raw) => {
@@ -17,11 +19,25 @@ export const normalizeGroupStages = (raw) => {
   return [];
 };
 
+export const formatGroupSchedule = (grp) => {
+  if (!grp) return '';
+  const parts = [];
+  if (grp.service_day) parts.push(grp.service_day);
+  if (grp.start_time && grp.end_time) parts.push(`من ${grp.start_time} إلى ${grp.end_time}`);
+  else if (grp.start_time) parts.push(`الساعة ${grp.start_time}`);
+  return parts.join(' • ');
+};
+
 export function resolveUserServiceGroups(user, services = [], groupsList = DEFAULT_SERVICE_GROUPS) {
   if (!user) return [];
   const activeGroups = (groupsList && groupsList.length > 0) ? groupsList : DEFAULT_SERVICE_GROUPS;
-  const dynamicGroupNames = [...new Set(services.map(s => s.stage_name).filter(Boolean))];
-  const allGroupNames = [...new Set([...activeGroups.map(g => g.group_name || g.groupName), ...dynamicGroupNames])];
+  const activeGroupNames = activeGroups.map(g => g.group_name || g.groupName).filter(Boolean);
+
+  // إضافة أي خدمة موجودة في جدول الفصول وليست مطابقة لأي جروب بالاسم
+  const extraStageNames = [...new Set(services.map(s => s.stage_name).filter(Boolean))]
+    .filter(st => !activeGroupNames.some(gn => gn === st || gn.includes(st) || st.includes(gn)));
+
+  const allGroupNames = [...new Set([...activeGroupNames, ...extraStageNames])];
 
   if (user.role === 'admin' || user.role === 'priest') {
     return allGroupNames;
@@ -40,28 +56,27 @@ export function resolveUserServiceGroups(user, services = [], groupsList = DEFAU
 
   userTokens.forEach(tok => {
     allGroupNames.forEach(gName => {
-      if (tok === gName || gName.includes(tok) || tok.includes(gName)) {
-        matched.add(gName);
-      }
+      if (tok === gName) matched.add(gName);
     });
 
     activeGroups.forEach(grp => {
       const gName = grp.group_name || grp.groupName;
       const stages = normalizeGroupStages(grp.stages);
-      if (stages.some(st => tok.includes(st) || st.includes(tok))) {
+      // لو المستخدم محددله جروب معين (مثل إعدادي بنين) أو مرحلة فرعية داخل الجروب
+      if (tok === gName) {
+        matched.add(gName);
+      } else if (stages.some(st => tok === st)) {
+        // مراعاة بنين / بنات إن وُجدت
+        if (grp.gender_target === 'بنين' && user.gender === 'أنثى') return;
+        if (grp.gender_target === 'بنات' && user.gender === 'ذكر') return;
         matched.add(gName);
       }
     });
 
     services.forEach(srv => {
       if (srv.class_name === tok && srv.stage_name) {
-        matched.add(srv.stage_name);
-        activeGroups.forEach(grp => {
-          const gName = grp.group_name || grp.groupName;
-          if (gName.includes(srv.stage_name) || srv.stage_name.includes(gName.replace('خدمة ', ''))) {
-            matched.add(gName);
-          }
-        });
+        const linkedGrp = activeGroupNames.find(gn => gn === srv.stage_name || gn.includes(srv.stage_name));
+        matched.add(linkedGrp || srv.stage_name);
       }
     });
   });
@@ -148,15 +163,16 @@ export default function ServiceGroupFeed({ currentUser, services = [], groups = 
   if (myGroups.length === 0) return null;
 
   const activePosts = posts.filter(p => p.group_name === selectedGroup);
+  const activeGrpObj = effectiveGroups.find(g => (g.group_name || g.groupName) === selectedGroup);
 
   return (
     <div className="bg-white rounded-3xl border-2 border-amber-200 p-4 md:p-5 space-y-4 shadow-sm" dir="rtl">
       <div className="flex flex-wrap justify-between items-center gap-2 border-b pb-3">
         <div>
           <h3 className="text-sm md:text-base font-black text-[#7a1c24] flex items-center gap-2">
-            <Layers size={18} /> كروت جروبات الخدمة الخاصة بك (يظهر لأبناء وخدام كل خدمة فقط)
+            <Layers size={18} /> كروت الخدمات العامة (كل خدمة تظهر لأفرادها بمواعيدها ومنشوراتها)
           </h3>
-          <p className="text-[11px] text-gray-500">كل كارت هنا خاص بأفراد الخدمة المسجلين فيها فقط</p>
+          <p className="text-[11px] text-gray-500">كل كارت هنا خاص بأبناء وخدام الخدمة المسجلين فيها فقط</p>
         </div>
       </div>
 
@@ -165,6 +181,7 @@ export default function ServiceGroupFeed({ currentUser, services = [], groups = 
           const grpObj = effectiveGroups.find(g => (g.group_name || g.groupName) === gName);
           const count = posts.filter(p => p.group_name === gName).length;
           const isSelected = selectedGroup === gName;
+          const sched = formatGroupSchedule(grpObj);
           return (
             <button
               key={gName}
@@ -182,7 +199,14 @@ export default function ServiceGroupFeed({ currentUser, services = [], groups = 
                   {count} منشور
                 </span>
               </div>
-              <strong className="text-xs font-black block">{gName}</strong>
+              <div>
+                <strong className="text-xs font-black block">{gName}</strong>
+                {sched && (
+                  <span className={`text-[10px] block mt-0.5 ${isSelected ? 'text-amber-200' : 'text-gray-500'}`}>
+                    ⏰ {sched}
+                  </span>
+                )}
+              </div>
             </button>
           );
         })}
@@ -190,15 +214,20 @@ export default function ServiceGroupFeed({ currentUser, services = [], groups = 
 
       {selectedGroup && (
         <div className="bg-[#fbfaf7] border rounded-2xl p-4 space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <strong className="text-sm text-[#7a1c24] flex items-center gap-1.5">
               <Users size={16} /> كارت: {selectedGroup}
             </strong>
+            {formatGroupSchedule(activeGrpObj) && (
+              <span className="px-2.5 py-1 bg-amber-100 text-amber-950 rounded-xl text-[11px] font-bold flex items-center gap-1">
+                <Clock size={12} /> {formatGroupSchedule(activeGrpObj)}
+              </span>
+            )}
           </div>
 
           {canPost && (
             <form onSubmit={handlePublish} className="bg-white p-3 rounded-2xl border space-y-2 text-xs font-bold">
-              <span className="text-[#7a1c24] block">+ نشر إعلان أو موعد داخل كارت ({selectedGroup}):</span>
+              <span className="text-[#7a1c24] block">+ نشر إعلان أو تنبيه داخل كارت ({selectedGroup}):</span>
               <div className="grid sm:grid-cols-3 gap-2">
                 <select className="p-2 border rounded-xl bg-white" value={form.post_type} onChange={e => setForm({ ...form, post_type: e.target.value })}>
                   <option value="إعلان للخدمة">📢 إعلان للخدمة</option>

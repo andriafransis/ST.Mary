@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { uploadChurchMedia } from '../lib/mediaUpload';
@@ -58,8 +57,22 @@ const emptyEvent = {
 };
 
 const emptyService = {
-  stage_name: 'ابتدائي', class_name: '', meeting_time: '',
+  stage_name: '', class_name: '', meeting_time: '',
   room_name: '', head_servant_name: '', vice_head_name: '', priest_id: ''
+};
+
+const emptyGroup = {
+  group_name: '',
+  icon: '🏫',
+  gender_target: 'بنين وبنات معاً',
+  has_classes: true,
+  head_servant_name: '',
+  servants_names: '',
+  service_day: 'الجمعة',
+  start_time: '09:00',
+  end_time: '12:00',
+  stagesText: '',
+  sort_order: 1
 };
 
 const ROLE_LABELS = {
@@ -135,9 +148,8 @@ export default function AdminDashboard({
   const [srvForm, setSrvForm] = useState(emptyService);
   const [editingSrvId, setEditingSrvId] = useState(null);
 
-  // إدارة جروبات ومراحل الخدمة من الأدمن (إضافة، تعديل، حذف)
   const [dbServiceGroups, setDbServiceGroups] = useState([]);
-  const [grpForm, setGrpForm] = useState({ group_name: '', icon: '📌', stagesText: '', sort_order: 1 });
+  const [grpForm, setGrpForm] = useState(emptyGroup);
   const [editingGrpId, setEditingGrpId] = useState(null);
 
   const [catForm, setCatForm] = useState({ name: '', icon: '📂' });
@@ -198,11 +210,18 @@ export default function AdminDashboard({
     const stagesArr = normalizeGroupStages(grpForm.stagesText);
     const payload = {
       group_name: grpForm.group_name.trim(),
-      icon: grpForm.icon.trim() || '📌',
+      icon: grpForm.icon.trim() || '🏫',
+      gender_target: grpForm.gender_target || 'بنين وبنات معاً',
+      has_classes: Boolean(grpForm.has_classes),
+      head_servant_name: grpForm.head_servant_name.trim(),
+      servants_names: grpForm.servants_names.trim(),
+      service_day: grpForm.service_day.trim(),
+      start_time: grpForm.start_time || '',
+      end_time: grpForm.end_time || '',
       stages: stagesArr,
       sort_order: Number(grpForm.sort_order || dbServiceGroups.length + 1)
     };
-    if (!payload.group_name) return alert('اكتب اسم الجروب / الخدمة');
+    if (!payload.group_name) return alert('اكتب اسم الخدمة العامة');
 
     if (editingGrpId) {
       const { data, error } = await supabase.from('service_groups').update(payload).eq('id', editingGrpId).select().single();
@@ -210,15 +229,18 @@ export default function AdminDashboard({
       if (data) {
         setDbServiceGroups(dbServiceGroups.map(g => (g.id === editingGrpId ? data : g)).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)));
         setEditingGrpId(null);
-        setGrpForm({ group_name: '', icon: '📌', stagesText: '', sort_order: dbServiceGroups.length + 1 });
+        setGrpForm({ ...emptyGroup, sort_order: dbServiceGroups.length + 1 });
       }
     } else {
       const { data, error } = await supabase.from('service_groups').insert([payload]).select().single();
-      if (error) return alert('خطأ في الإضافة (تأكد من تشغيل SQL إنشاء جدول service_groups): ' + error.message);
+      if (error) return alert('خطأ في الإضافة (تأكد من تشغيل SQL جدول service_groups): ' + error.message);
       if (data) {
         const cleanExisting = dbServiceGroups.filter(g => g.id);
         setDbServiceGroups([...cleanExisting, data].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)));
-        setGrpForm({ group_name: '', icon: '📌', stagesText: '', sort_order: cleanExisting.length + 2 });
+        if (data.has_classes !== false) {
+          setSrvForm(prev => ({ ...prev, stage_name: data.group_name }));
+        }
+        setGrpForm({ ...emptyGroup, sort_order: cleanExisting.length + 2 });
       }
     }
   };
@@ -226,7 +248,7 @@ export default function AdminDashboard({
   const handleDeleteServiceGroup = async (grp) => {
     if (!requireAdminGuard()) return;
     if (!grp.id) return alert('قم بتشغيل كود SQL جدول service_groups أولاً حتى يتم الحفظ والحذف في الداتابيز.');
-    if (!confirm(`حذف جروب "${grp.group_name}"؟`)) return;
+    if (!confirm(`حذف الخدمة "${grp.group_name}"؟`)) return;
     const { error } = await supabase.from('service_groups').delete().eq('id', grp.id);
     if (!error) setDbServiceGroups(dbServiceGroups.filter(g => g.id !== grp.id));
   };
@@ -549,7 +571,7 @@ export default function AdminDashboard({
       { id: 'roles_permissions', icon: '🔐', title: 'المركز الموحد للصلاحيات والأدوار', desc: 'إنشاء قوالب صلاحيات (الشعب، الكاهن، الخادم، المخدوم...) وتحديد مين يشوف ومين يعدل لكل شاشة ولكل فرد', count: `${roleTemplatesCount} قالب • موحّد`, color: 'border-emerald-300 bg-emerald-50/30' },
       { id: 'page_designer', icon: '🎨', title: 'تصميم وتعديل الصفحة الرئيسية والصفحات', desc: 'ترتيب الأقسام، إضافة ونشر الأخبار والقداسات والرحلات والفيديوهات والكهنة وروابط يوتيوب وفيسبوك', count: 'تحكم كامل', color: 'border-pink-300 bg-pink-50/30' },
       { id: 'events', icon: '⛪', title: 'مواعيد القداسات والاجتماعات', desc: 'إضافة وتعديل مواعيد القداسات، العشيات، والاجتماعات العامة', count: `${events.length} موعد`, color: 'border-amber-200 bg-white' },
-      { id: 'services', icon: '🏫', title: 'الفصول والخدمات والجروبات', desc: 'إضافة وتعديل وحذف جروبات الخدمات والفصول + كروت الخدمة الخاصة بكل خدمة', count: `${dbServiceGroups.length} جروب • ${services.length} فصل`, color: 'border-blue-200 bg-white' },
+      { id: 'services', icon: '🏫', title: 'الخدمات العامة والفصول والجروبات', desc: 'إضافة وتعديل الخدمة (بنين/بنات، أمين وخدام، بميعاد، بفصول أو بدون) وربط الفصول بها', count: `${dbServiceGroups.length} خدمة • ${services.length} فصل`, color: 'border-blue-200 bg-white' },
       { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل، المواد، الأسعار، حضور الطلاب والمدرسين، وشيت المحاسبة', count: 'إدارة الدروس', color: 'border-indigo-200 bg-white' },
       { id: 'joseph_arimathea', icon: '🕊️', title: 'خدمة يوسف الرامي', desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، خط سير السائق، ومتابعة المرافقين', count: 'خدمة المنتقلين', color: 'border-slate-300 bg-white' },
       { id: 'burial_and_caskets', icon: '⚰️', title: 'أماكن الدفن والصناديق وألحان يوسف الرامي', desc: 'جدول أماكن الدفن بالترقيم المتسلسل ورسوم الانتقال + مخزون الصناديق + ألحان يوسف الرامي وسلايدر الصوت', count: 'جداول وألحان', color: 'border-cyan-200 bg-white' },
@@ -606,8 +628,10 @@ export default function AdminDashboard({
   }
 
   const effectiveGroups = dbServiceGroups.length > 0 ? dbServiceGroups : DEFAULT_SERVICE_GROUPS;
+  const groupsWithClasses = effectiveGroups.filter(g => g.has_classes !== false);
   const allGroupStagesFlat = [...new Set([
     ...STAGE_OPTIONS,
+    ...effectiveGroups.map(g => g.group_name).filter(Boolean),
     ...effectiveGroups.flatMap(g => normalizeGroupStages(g.stages)),
     ...services.map(s => s.stage_name).filter(Boolean)
   ])];
@@ -794,52 +818,152 @@ export default function AdminDashboard({
 
       {activeCard === 'services' && (
         <div className="space-y-4 text-xs">
-          {renderTopBack('🏫 الفصول والخدمات وجروبات الخدمة')}
+          {renderTopBack('🏫 الخدمات العامة والفصول التابعة لها')}
 
-          {/* إدارة جروبات ومراحل الخدمة من الأدمن (إضافة وتعديل وحذف) */}
+          {/* ① أولاً: إضافة وتعديل وحذف الخدمة العامة */}
           {isAdmin && (
-            <div className="bg-amber-50/40 p-4 rounded-3xl border-2 border-amber-200 space-y-3 font-bold">
+            <div className="bg-amber-50/50 p-4 rounded-3xl border-2 border-amber-300 space-y-3 font-bold shadow-sm">
               <h3 className="text-sm font-black flex items-center gap-1.5 text-[#7a1c24]">
-                <Layers size={16} /> {editingGrpId ? '✏️ تعديل جروب خدمة' : '➕ إضافة وتعديل وحذف جروبات الخدمة والمراحل'}
+                <Layers size={16} /> {editingGrpId ? '✏️ تعديل الخدمة العامة' : '① أولاً: إضافة خدمة عامة (تحديد: لها فصول أم لا • بنين/بنات • الأمين والخدام • الميعاد)'}
               </h3>
-              <form onSubmit={handleSaveServiceGroup} className="space-y-2.5">
+              <form onSubmit={handleSaveServiceGroup} className="space-y-3">
                 <div className="grid md:grid-cols-4 gap-2">
                   <input
                     required
-                    placeholder="اسم الجروب (مثال: خدمة ابتدائي / كشافة) *"
+                    placeholder="اسم الخدمة العامة (مثال: خدمة ابتدائي / إعدادي / اجتماع الصلاة) *"
                     className="md:col-span-2 p-2.5 border rounded-xl bg-white"
                     value={grpForm.group_name}
                     onChange={e => setGrpForm({ ...grpForm, group_name: e.target.value })}
                   />
-                  <input
-                    placeholder="الأيقونة (🎒 أو 🕊️)"
-                    className="p-2.5 border rounded-xl bg-white text-center"
-                    value={grpForm.icon}
-                    onChange={e => setGrpForm({ ...grpForm, icon: e.target.value })}
-                  />
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="الترتيب"
-                    className="p-2.5 border rounded-xl bg-white text-center"
-                    value={grpForm.sort_order}
-                    onChange={e => setGrpForm({ ...grpForm, sort_order: e.target.value })}
-                  />
+                  <select
+                    className="p-2.5 border rounded-xl bg-white"
+                    value={grpForm.gender_target || 'بنين وبنات معاً'}
+                    onChange={e => setGrpForm({ ...grpForm, gender_target: e.target.value })}
+                  >
+                    <option value="بنين وبنات معاً">👥 بنين وبنات معاً (مشترك)</option>
+                    <option value="متقسمة بنين وبنات">🔀 متقسمة (بنين وبنات منفصلين)</option>
+                    <option value="بنين فقط">♂️ بنين فقط</option>
+                    <option value="بنات فقط">♀️ بنات فقط</option>
+                  </select>
+                  <select
+                    className="p-2.5 border rounded-xl bg-white"
+                    value={grpForm.has_classes ? 'yes' : 'no'}
+                    onChange={e => setGrpForm({ ...grpForm, has_classes: e.target.value === 'yes' })}
+                  >
+                    <option value="yes">📚 لها فصول بداخلها</option>
+                    <option value="no">🕊️ خدمة عامة (بدون فصول)</option>
+                  </select>
                 </div>
+
+                <div className="grid md:grid-cols-2 gap-2 bg-white p-2.5 rounded-2xl border">
+                  <div>
+                    <label className="block text-[10px] text-gray-600 mb-1">⭐ أمين الخدمة (اختيار أو كتابة الاسم):</label>
+                    <div className="flex gap-1.5">
+                      <select
+                        className="p-2 border rounded-xl bg-gray-50 text-[11px] max-w-40"
+                        value=""
+                        onChange={e => { if (e.target.value) setGrpForm({ ...grpForm, head_servant_name: e.target.value }); }}
+                      >
+                        <option value="">-- اختر أمين --</option>
+                        {servantsList.map(sv => <option key={sv.id} value={sv.full_name}>{sv.full_name}</option>)}
+                      </select>
+                      <input
+                        placeholder="اسم أمين الخدمة..."
+                        className="flex-1 p-2 border rounded-xl bg-white"
+                        value={grpForm.head_servant_name || ''}
+                        onChange={e => setGrpForm({ ...grpForm, head_servant_name: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-600 mb-1">👥 الخدام بالخدمة (اختيار متعدد أو كتابة الأسماء):</label>
+                    <div className="flex gap-1.5">
+                      <select
+                        className="p-2 border rounded-xl bg-gray-50 text-[11px] max-w-40"
+                        value=""
+                        onChange={e => {
+                          const v = e.target.value;
+                          if (!v) return;
+                          const cur = splitList(grpForm.servants_names);
+                          if (!cur.includes(v)) setGrpForm({ ...grpForm, servants_names: [...cur, v].join(', ') });
+                        }}
+                      >
+                        <option value="">+ إضافة خادم --</option>
+                        {servantsList.map(sv => <option key={sv.id} value={sv.full_name}>{sv.full_name}</option>)}
+                      </select>
+                      <input
+                        placeholder="أسماء الخدام (مفصولة بفاصلة)..."
+                        className="flex-1 p-2 border rounded-xl bg-white"
+                        value={grpForm.servants_names || ''}
+                        onChange={e => setGrpForm({ ...grpForm, servants_names: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-gray-600 mb-0.5">يوم الخدمة</label>
+                    <input
+                      placeholder="مثال: الجمعة"
+                      className="w-full p-2 border rounded-xl bg-white"
+                      value={grpForm.service_day || ''}
+                      onChange={e => setGrpForm({ ...grpForm, service_day: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-600 mb-0.5">من الساعة</label>
+                    <input
+                      type="time"
+                      className="w-full p-2 border rounded-xl bg-white"
+                      value={grpForm.start_time || ''}
+                      onChange={e => setGrpForm({ ...grpForm, start_time: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-600 mb-0.5">إلى الساعة</label>
+                    <input
+                      type="time"
+                      className="w-full p-2 border rounded-xl bg-white"
+                      value={grpForm.end_time || ''}
+                      onChange={e => setGrpForm({ ...grpForm, end_time: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-600 mb-0.5">الأيقونة</label>
+                    <input
+                      placeholder="🏫"
+                      className="w-full p-2 border rounded-xl bg-white text-center"
+                      value={grpForm.icon}
+                      onChange={e => setGrpForm({ ...grpForm, icon: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-600 mb-0.5">الترتيب</label>
+                    <input
+                      type="number"
+                      min="1"
+                      className="w-full p-2 border rounded-xl bg-white text-center"
+                      value={grpForm.sort_order}
+                      onChange={e => setGrpForm({ ...grpForm, sort_order: e.target.value })}
+                    />
+                  </div>
+                </div>
+
                 <div className="flex flex-wrap gap-2">
                   <input
-                    placeholder="اكتب المراحل/الاجتماعات جوه الجروب مفصولة بفاصلة (مثال: أولى ابتدائي, ثانية ابتدائي)"
+                    placeholder="الأقسام/الصفوف الفرعية داخل الخدمة (اختياري، مثل: أولى إعدادي, ثانية إعدادي)"
                     className="flex-1 min-w-55 p-2.5 border rounded-xl bg-white font-normal"
                     value={grpForm.stagesText}
                     onChange={e => setGrpForm({ ...grpForm, stagesText: e.target.value })}
                   />
                   <button type="submit" className="px-5 py-2.5 bg-[#7a1c24] text-white rounded-xl cursor-pointer shadow">
-                    {editingGrpId ? 'حفظ التعديل' : '+ إضافة الجروب'}
+                    {editingGrpId ? 'حفظ تعديل الخدمة' : '+ إضافة الخدمة العامة'}
                   </button>
                   {editingGrpId && (
                     <button
                       type="button"
-                      onClick={() => { setEditingGrpId(null); setGrpForm({ group_name: '', icon: '📌', stagesText: '', sort_order: effectiveGroups.length + 1 }); }}
+                      onClick={() => { setEditingGrpId(null); setGrpForm({ ...emptyGroup, sort_order: effectiveGroups.length + 1 }); }}
                       className="px-4 py-2 border rounded-xl bg-white"
                     >
                       إلغاء
@@ -847,35 +971,135 @@ export default function AdminDashboard({
                   )}
                 </div>
               </form>
+            </div>
+          )}
 
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
-                {effectiveGroups.map((grp, idx) => {
-                  const stagesArr = normalizeGroupStages(grp.stages);
-                  return (
-                    <div key={grp.id || idx} className="bg-white p-3 rounded-2xl border flex justify-between items-start gap-2">
-                      <div className="min-w-0">
-                        <strong className="text-sm text-gray-900 block">
-                          {grp.icon || '📌'} {grp.group_name}
-                        </strong>
-                        <p className="text-[11px] text-gray-600 font-normal mt-1 leading-relaxed">
-                          {stagesArr.length > 0 ? stagesArr.join(' • ') : 'بدون مراحل فرعية'}
-                        </p>
+          {/* ② ثانياً: إضافة فصل وربطه بإحدى الخدمات العامة اللي لها فصول */}
+          {isAdmin && (
+            <form
+              id="add-class-form"
+              onSubmit={e => {
+                e.preventDefault();
+                if (!requireAdminGuard()) return;
+                const chosenServiceName = srvForm.stage_name || groupsWithClasses[0]?.group_name || '';
+                if (!chosenServiceName) return alert('أضف أولاً خدمة عامة لها فصول ثم اخترها هنا');
+                const payload = { ...srvForm, stage_name: chosenServiceName, priest_id: srvForm.priest_id || null };
+                if (editingSrvId) { onUpdateService({ ...payload, id: editingSrvId }); setEditingSrvId(null); }
+                else { onAddService(payload); }
+                setSrvForm({ ...emptyService, stage_name: chosenServiceName });
+              }}
+              className="bg-white p-4 rounded-3xl border space-y-3 font-bold shadow-sm"
+            >
+              <h3 className="text-sm font-extrabold flex items-center gap-1 text-[#7a1c24]">
+                <BookOpen size={16} /> {editingSrvId ? '✏️ تعديل الفصل' : '② ثانياً: إضافة فصل جديد وربطه بالخدمة التابع لها'}
+              </h3>
+              <div className="grid md:grid-cols-3 gap-2">
+                <select
+                  required
+                  className="p-2.5 border rounded-xl bg-amber-50/50"
+                  value={srvForm.stage_name || groupsWithClasses[0]?.group_name || ''}
+                  onChange={e => setSrvForm({ ...srvForm, stage_name: e.target.value })}
+                >
+                  <option value="">-- اختر الخدمة التابع لها الفصل * --</option>
+                  {groupsWithClasses.map((g, i) => (
+                    <option key={g.id || i} value={g.group_name}>
+                      {g.icon || '🏫'} {g.group_name} ({g.gender_target || 'عام'})
+                    </option>
+                  ))}
+                </select>
+                <input required placeholder="اسم الفصل (مثال: أولى بنين / فصل مارجرجس) *" className="p-2.5 border rounded-xl" value={srvForm.class_name} onChange={e => setSrvForm({ ...srvForm, class_name: e.target.value })} />
+                <select className="p-2.5 border rounded-xl bg-amber-50/40" value={srvForm.priest_id || ''} onChange={e => setSrvForm({ ...srvForm, priest_id: e.target.value })}>
+                  <option value="">-- الأب الكاهن المشرف (الكل) --</option>
+                  {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+                </select>
+              </div>
+              <div className="grid md:grid-cols-4 gap-2">
+                <input placeholder="أمين الفصل / الخدمة" className="p-2.5 border rounded-xl" value={srvForm.head_servant_name} onChange={e => setSrvForm({ ...srvForm, head_servant_name: e.target.value })} />
+                <input placeholder="مساعد أمين الخدمة / خدام الفصل" className="p-2.5 border rounded-xl" value={srvForm.vice_head_name} onChange={e => setSrvForm({ ...srvForm, vice_head_name: e.target.value })} />
+                <input placeholder="ميعاد وقاعة الفصل" className="p-2.5 border rounded-xl" value={srvForm.meeting_time} onChange={e => setSrvForm({ ...srvForm, meeting_time: e.target.value })} />
+                <div className="flex gap-2">
+                  <button type="submit" className="flex-1 bg-[#7a1c24] text-white rounded-xl p-2.5 shadow cursor-pointer">{editingSrvId ? 'حفظ التعديل' : 'حفظ الفصل للخدمة'}</button>
+                  {editingSrvId && <button type="button" onClick={() => { setEditingSrvId(null); setSrvForm(emptyService); }} className="px-3 border rounded-xl">إلغاء</button>}
+                </div>
+              </div>
+            </form>
+          )}
+
+          {/* ③ عرض كل خدمة عامة مع تقسيمها ومواعيدها وأمينها وخدامها والفصول المربوطة بها */}
+          <div className="grid md:grid-cols-2 gap-3">
+            {effectiveGroups.map((grp, idx) => {
+              const stagesArr = normalizeGroupStages(grp.stages);
+              const classesInThisService = services.filter(
+                s => s.stage_name === grp.group_name || grp.group_name.includes(s.stage_name)
+              );
+
+              return (
+                <div key={grp.id || idx} className="bg-white p-4 rounded-3xl border-2 border-gray-200 space-y-3 shadow-2xs">
+                  <div className="flex flex-wrap justify-between items-start gap-2 border-b pb-2.5">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xl">{grp.icon || '🏫'}</span>
+                        <strong className="text-sm text-[#7a1c24]">{grp.group_name}</strong>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-900">
+                          {grp.gender_target || 'بنين وبنات معاً'}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${grp.has_classes !== false ? 'bg-emerald-50 text-emerald-900' : 'bg-gray-100 text-gray-700'}`}>
+                          {grp.has_classes !== false ? '📚 لها فصول' : '🕊️ بدون فصول'}
+                        </span>
                       </div>
-                      <div className="flex gap-1 shrink-0">
+                      {(grp.service_day || grp.start_time) && (
+                        <p className="text-[11px] text-amber-900 font-bold">
+                          ⏰ {grp.service_day} {grp.start_time && `من ${grp.start_time}`} {grp.end_time && `إلى ${grp.end_time}`}
+                        </p>
+                      )}
+                      {grp.head_servant_name && (
+                        <p className="text-[11px] text-gray-800">⭐ <strong>الأمين:</strong> {grp.head_servant_name}</p>
+                      )}
+                      {grp.servants_names && (
+                        <p className="text-[11px] text-gray-600">👥 <strong>الخدام:</strong> {grp.servants_names}</p>
+                      )}
+                      {stagesArr.length > 0 && (
+                        <p className="text-[11px] text-gray-500">الأقسام: {stagesArr.join(' • ')}</p>
+                      )}
+                    </div>
+
+                    {isAdmin && (
+                      <div className="flex flex-wrap gap-1">
+                        {grp.has_classes !== false && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingSrvId(null);
+                              setSrvForm({ ...emptyService, stage_name: grp.group_name, head_servant_name: grp.head_servant_name || '' });
+                              document.getElementById('add-class-form')?.scrollIntoView({ behavior: 'smooth' });
+                            }}
+                            className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 rounded-lg font-bold cursor-pointer"
+                          >
+                            + إضافة فصل
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => {
-                            if (!grp.id) return alert('قم بتشغيل كود SQL إنشاء جدول service_groups أولاً.');
+                            if (!grp.id) return alert('قم بتشغيل SQL جدول service_groups أولاً.');
                             setEditingGrpId(grp.id);
                             setGrpForm({
                               group_name: grp.group_name,
-                              icon: grp.icon || '📌',
+                              icon: grp.icon || '🏫',
+                              gender_target: grp.gender_target || 'بنين وبنات معاً',
+                              has_classes: grp.has_classes !== false,
+                              head_servant_name: grp.head_servant_name || '',
+                              servants_names: grp.servants_names || '',
+                              service_day: grp.service_day || '',
+                              start_time: grp.start_time || '',
+                              end_time: grp.end_time || '',
                               stagesText: stagesArr.join(', '),
                               sort_order: grp.sort_order || idx + 1
                             });
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
                           }}
                           className="p-1.5 bg-gray-100 hover:bg-amber-100 rounded-lg cursor-pointer"
-                          title="تعديل"
+                          title="تعديل الخدمة"
                         >
                           <Edit3 size={13} />
                         </button>
@@ -883,63 +1107,45 @@ export default function AdminDashboard({
                           type="button"
                           onClick={() => handleDeleteServiceGroup(grp)}
                           className="p-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg cursor-pointer"
-                          title="حذف"
+                          title="حذف الخدمة"
                         >
                           <Trash2 size={13} />
                         </button>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {isAdmin && (
-            <form onSubmit={e => { e.preventDefault(); if (!requireAdminGuard()) return; const payload = { ...srvForm, priest_id: srvForm.priest_id || null }; if (editingSrvId) { onUpdateService({ ...payload, id: editingSrvId }); setEditingSrvId(null); } else { onAddService(payload); } setSrvForm(emptyService); }} className="bg-white p-4 rounded-3xl border space-y-3 font-bold shadow-sm">
-              <h3 className="text-sm font-extrabold flex items-center gap-1 text-[#7a1c24]"><BookOpen size={16} /> {editingSrvId ? 'تعديل الفصل / الخدمة' : 'إضافة فصل أو خدمة جديدة بالكنيسة'}</h3>
-              <div className="grid md:grid-cols-3 gap-2">
-                <select className="p-2.5 border rounded-xl" value={srvForm.stage_name} onChange={e => setSrvForm({ ...srvForm, stage_name: e.target.value })}>
-                  {effectiveGroups.map((g, i) => <option key={i} value={g.group_name}>{g.group_name}</option>)}
-                  <option value="حضانة">حضانة</option><option value="ابتدائي">ابتدائي</option><option value="إعدادي">إعدادي</option><option value="ثانوي">ثانوي</option><option value="جامعة وخريجين">جامعة وخريجين</option><option value="اجتماعات عامة">اجتماعات عامة</option><option value="إخوة الرب">إخوة الرب</option><option value="شمامسة وألحان">مدرسة الشمامسة والألحان</option>
-                </select>
-                <input required placeholder="اسم الفصل *" className="p-2.5 border rounded-xl" value={srvForm.class_name} onChange={e => setSrvForm({ ...srvForm, class_name: e.target.value })} />
-                <select className="p-2.5 border rounded-xl bg-amber-50/40" value={srvForm.priest_id || ''} onChange={e => setSrvForm({ ...srvForm, priest_id: e.target.value })}>
-                  <option value="">-- الأب الكاهن المشرف (الكل) --</option>
-                  {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-                </select>
-              </div>
-              <div className="grid md:grid-cols-4 gap-2">
-                <input placeholder="أمين الخدمة" className="p-2.5 border rounded-xl" value={srvForm.head_servant_name} onChange={e => setSrvForm({ ...srvForm, head_servant_name: e.target.value })} />
-                <input placeholder="مساعد أمين الخدمة" className="p-2.5 border rounded-xl" value={srvForm.vice_head_name} onChange={e => setSrvForm({ ...srvForm, vice_head_name: e.target.value })} />
-                <input placeholder="الميعاد والقاعة" className="p-2.5 border rounded-xl" value={srvForm.meeting_time} onChange={e => setSrvForm({ ...srvForm, meeting_time: e.target.value })} />
-                <div className="flex gap-2">
-                  <button type="submit" className="flex-1 bg-[#7a1c24] text-white rounded-xl p-2.5 shadow cursor-pointer">{editingSrvId ? 'حفظ التعديل' : 'حفظ الفصل'}</button>
-                  {editingSrvId && <button type="button" onClick={() => { setEditingSrvId(null); setSrvForm(emptyService); }} className="px-3 border rounded-xl">إلغاء</button>}
-                </div>
-              </div>
-            </form>
-          )}
-          <div className="grid md:grid-cols-2 gap-3">
-            {services.map(srv => {
-              const pObj = priestsList.find(p => p.id === srv.priest_id);
-              return (
-                <div key={srv.id} className="bg-white p-4 rounded-2xl border flex justify-between items-start shadow-2xs gap-2">
-                  <div>
-                    <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-800 font-bold text-[10px]">{srv.stage_name}</span>
-                    {pObj && <span className="mr-2 px-2 py-0.5 rounded bg-amber-100 text-amber-950 font-bold text-[10px]">✝ {pObj.full_name}</span>}
-                    <strong className="text-sm text-gray-900 block mt-1">{srv.class_name}</strong>
-                    <p className="text-gray-500 mt-1">
-                      {srv.head_servant_name && `⭐ الأمين: ${srv.head_servant_name} `}
-                      {srv.vice_head_name && `• المساعد: ${srv.vice_head_name} `}
-                      {srv.meeting_time && `• ⏰ ${srv.meeting_time}`}
-                    </p>
+                    )}
                   </div>
-                  {isAdmin && (
-                    <div className="flex gap-1.5">
-                      <button onClick={() => { setEditingSrvId(srv.id); setSrvForm({ ...emptyService, ...srv }); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-xl font-bold flex items-center gap-1 cursor-pointer"><Edit3 size={13} /> تعديل</button>
-                      <button onClick={() => onDeleteService(srv.id)} className="px-2.5 py-1.5 bg-red-50 text-red-700 rounded-xl font-bold flex items-center gap-1 cursor-pointer"><Trash2 size={13} /> حذف</button>
-                    </div>
+
+                  {grp.has_classes !== false ? (
+                    classesInThisService.length === 0 ? (
+                      <p className="text-[11px] text-gray-400">لا توجد فصول مضافة داخل هذه الخدمة بعد.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {classesInThisService.map(srv => {
+                          const pObj = priestsList.find(p => p.id === srv.priest_id);
+                          return (
+                            <div key={srv.id} className="p-2.5 bg-[#fbfaf7] rounded-2xl border flex justify-between items-center gap-2">
+                              <div>
+                                <strong className="text-xs text-gray-900 block">{srv.class_name}</strong>
+                                <span className="text-[11px] text-gray-500">
+                                  {pObj && `✝ ${pObj.full_name} • `}
+                                  {srv.head_servant_name && `⭐ الأمين: ${srv.head_servant_name} `}
+                                  {srv.vice_head_name && `• المساعد/الخدام: ${srv.vice_head_name} `}
+                                  {srv.meeting_time && `• ⏰ ${srv.meeting_time}`}
+                                </span>
+                              </div>
+                              {isAdmin && (
+                                <div className="flex gap-1 shrink-0">
+                                  <button onClick={() => { setEditingSrvId(srv.id); setSrvForm({ ...emptyService, ...srv }); document.getElementById('add-class-form')?.scrollIntoView({ behavior: 'smooth' }); }} className="p-1.5 bg-white border rounded-lg cursor-pointer"><Edit3 size={12} /></button>
+                                  <button onClick={() => onDeleteService(srv.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer"><Trash2 size={12} /></button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )
+                  ) : (
+                    <p className="text-[11px] text-gray-500">خدمة عامة مباشرة بدون فصول فرعية.</p>
                   )}
                 </div>
               );
@@ -1347,7 +1553,7 @@ export default function AdminDashboard({
                 <>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block mb-1">المرحلة / الصف الدراسي</label>
+                      <label className="block mb-1">المرحلة / الخدمة</label>
                       <select className="w-full p-2.5 border rounded-xl bg-amber-50/40" value={formData.detailed_stage} onChange={e => setFormData({ ...formData, detailed_stage: e.target.value })}>
                         {allGroupStagesFlat.map((st, i) => <option key={i} value={st}>{st}</option>)}
                       </select>
@@ -1374,14 +1580,14 @@ export default function AdminDashboard({
                 <div className="bg-emerald-50/50 p-3 rounded-2xl border border-emerald-200 space-y-3">
                   <div>
                     <label className="block mb-1.5 text-[#7a1c24] font-extrabold">
-                      📖 جروبات ومراحل الخدمة للخادم (تقدر تضيف وتعدل الجروبات من تاب الفصول والخدمات):
+                      📖 جروبات ومراحل الخدمة للخادم (تقدر تضيف وتعدل الجروبات من تاب الخدمات العامة):
                     </label>
                     <div className="space-y-2 max-h-56 overflow-y-auto bg-white p-2.5 rounded-xl border">
                       {effectiveGroups.map((grp, gIdx) => {
                         const gName = grp.group_name;
                         const stagesArr = normalizeGroupStages(grp.stages);
                         const allGroupSelected = stagesArr.length > 0
-                          ? stagesArr.every(st => selectedServantStages.includes(st))
+                          ? stagesArr.every(st => selectedServantStages.includes(st)) && selectedServantStages.includes(gName)
                           : selectedServantStages.includes(gName);
 
                         return (
