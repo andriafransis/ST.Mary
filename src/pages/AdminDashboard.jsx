@@ -12,7 +12,7 @@ import PermissionsPage from './PermissionsPage';
 import {
   UserPlus, Edit3, Trash2, CalendarPlus, BookOpen,
   Search, RefreshCw, FolderEdit, Sparkles, ArrowRight,
-  Users, Settings, Save, Upload, ShieldCheck, Lock, Layers, X
+  Users, Settings, Save, Upload, ShieldCheck, Lock, Layers, X, UserCheck
 } from 'lucide-react';
 
 // توحيد وتنسيق رتب الشمامسة لضمان التطابق الكامل بين الداتابيز والشاشات
@@ -179,6 +179,10 @@ export default function AdminDashboard({
   const [grpForm, setGrpForm] = useState(emptyGroup);
   const [editingGrpId, setEditingGrpId] = useState(null);
 
+  // ربط سريع لمستخدمين محددين بكل خدمة أو اجتماع
+  const [quickAssignByGroup, setQuickAssignByGroup] = useState({});
+  const [assigningGroupKey, setAssigningGroupKey] = useState('');
+
   const [catForm, setCatForm] = useState({ name: '', icon: '📂' });
   const [editingCat, setEditingCat] = useState(null);
 
@@ -230,7 +234,7 @@ export default function AdminDashboard({
   useEffect(() => {
     loadRoleTemplates();
     loadServiceGroups();
-  }, [serviceGroups]);
+  }, []);
 
   const handleSaveServiceGroup = async (e) => {
     e.preventDefault();
@@ -283,6 +287,54 @@ export default function AdminDashboard({
     if (!error) {
       setDbServiceGroups(dbServiceGroups.filter(g => g.id !== grp.id));
       if (onRefresh) await onRefresh();
+    }
+  };
+
+  // ربط أو فك ربط مستخدم بخدمة/اجتماع محدد مباشرة
+  const handleToggleUserServiceAssignment = async (targetUserId, serviceName, shouldAssign = true, groupKey = '') => {
+    if (!requireAdminGuard()) return;
+    const targetUser = users.find(u => u.id === targetUserId);
+    if (!targetUser || !serviceName) return;
+
+    const currentStages = splitList(targetUser.detailed_stage || targetUser.service_stage);
+    const nextStages = shouldAssign
+      ? [...new Set([...currentStages, serviceName])]
+      : currentStages.filter(st => st !== serviceName);
+
+    const nextStageString = nextStages.join(', ');
+    const currentExtraServices = Array.isArray(targetUser.permissions?.extra_services)
+      ? targetUser.permissions.extra_services
+      : [];
+    const nextExtraServices = shouldAssign
+      ? [...new Set([...currentExtraServices, serviceName])]
+      : currentExtraServices.filter(st => st !== serviceName);
+
+    const updatedPayload = {
+      ...targetUser,
+      detailed_stage: nextStageString,
+      service_stage: nextStageString || targetUser.service_stage || '',
+      permissions: {
+        ...(targetUser.permissions || {}),
+        extra_services: nextExtraServices
+      }
+    };
+
+    setAssigningGroupKey(groupKey);
+    try {
+      if (onUpdateUser) {
+        await onUpdateUser(updatedPayload);
+      } else {
+        const { id, created_at, ...clean } = updatedPayload;
+        const { error } = await supabase.from('church_users').update({
+          detailed_stage: clean.detailed_stage,
+          service_stage: clean.service_stage,
+          permissions: clean.permissions
+        }).eq('id', id);
+        if (error) return alert('خطأ في ربط المستخدم بالخدمة: ' + error.message);
+        if (onRefresh) await onRefresh();
+      }
+    } finally {
+      setAssigningGroupKey('');
     }
   };
 
@@ -391,6 +443,7 @@ export default function AdminDashboard({
   const deaconsList = users.filter(u => u.is_deacon);
   const membersList = users.filter(u => u.role === 'member');
   const parentsWorkersList = users.filter(u => u.role === 'parent' || u.role === 'worker' || parentIdsFromMembers.includes(u.id));
+  const assignableUsersList = users.filter(u => ['member', ...SERVANT_ROLES].includes(u.role));
 
   const getUsersBySubTab = () => {
     if (userSubTab === 'priests') return priestsList;
@@ -615,7 +668,7 @@ export default function AdminDashboard({
       { id: 'roles_permissions', icon: '🔐', title: 'المركز الموحد للصلاحيات والأدوار', desc: 'إنشاء قوالب صلاحيات (الشعب، الكاهن، الخادم، المخدوم...) وتحديد مين يشوف ومين يعدل لكل شاشة ولكل فرد', count: `${roleTemplatesCount} قالب • موحّد`, color: 'border-emerald-300 bg-emerald-50/30' },
       { id: 'page_designer', icon: '🎨', title: 'تصميم وتعديل الصفحة الرئيسية والصفحات', desc: 'ترتيب الأقسام، إضافة ونشر الأخبار والقداسات والرحلات والفيديوهات والكهنة وروابط يوتيوب وفيسبوك', count: 'تحكم كامل', color: 'border-pink-300 bg-pink-50/30' },
       { id: 'events', icon: '⛪', title: 'مواعيد القداسات والاجتماعات', desc: 'إضافة وتعديل مواعيد القداسات، العشيات، والاجتماعات العامة', count: `${events.length} موعد`, color: 'border-amber-200 bg-white' },
-      { id: 'services', icon: '🏫', title: 'الخدمات والاجتماعات والفصول', desc: 'إضافة خدمة بفصول أو اجتماع عام بدون فصول، تحديد (عام/بنين/بنات/مقسمة)، الأمين والخدام، والمواعيد', count: `${dbServiceGroups.length} خدمة • ${services.length} فصل`, color: 'border-blue-200 bg-white' },
+      { id: 'services', icon: '🏫', title: 'الخدمات والاجتماعات والفصول', desc: 'إضافة خدمة بفصول أو اجتماع عام بدون فصول، تحديد (عام/بنين/بنات/مقسمة)، الأمين والخدام، وربط المستخدمين بالخدمات', count: `${dbServiceGroups.length} خدمة • ${services.length} فصل`, color: 'border-blue-200 bg-white' },
       { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل، المواد، الأسعار، حضور الطلاب والمدرسين، وشيت المحاسبة', count: 'إدارة الدروس', color: 'border-indigo-200 bg-white' },
       { id: 'joseph_arimathea', icon: '🕊️', title: 'خدمة يوسف الرامي', desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، خط سير السائق، ومتابعة المرافقين', count: 'خدمة المنتقلين', color: 'border-slate-300 bg-white' },
       { id: 'burial_and_caskets', icon: '⚰️', title: 'أماكن الدفن والصناديق وألحان يوسف الرامي', desc: 'جدول أماكن الدفن بالترقيم المتسلسل ورسوم الانتقال + مخزون الصناديق + ألحان يوسف الرامي وسلايدر الصوت', count: 'جداول وألحان', color: 'border-cyan-200 bg-white' },
@@ -1123,13 +1176,25 @@ export default function AdminDashboard({
 
           <div className="grid md:grid-cols-2 gap-3">
             {effectiveGroups.map((grp, idx) => {
+              const groupKey = String(grp.id || grp.group_name || idx);
               const stagesArr = normalizeGroupStages(grp.stages);
+              const subScopeOptions = [...new Set([grp.group_name, ...stagesArr].filter(Boolean))];
+              const selectedQuickScope = quickAssignByGroup[groupKey]?.scope || grp.group_name;
+              const selectedQuickUserId = quickAssignByGroup[groupKey]?.userId || '';
+
+              const linkedUsersForGroup = assignableUsersList.filter(u => {
+                const uStages = splitList(`${u.detailed_stage || ''} ${u.service_stage || ''}`);
+                const uExtra = Array.isArray(u.permissions?.extra_services) ? u.permissions.extra_services : [];
+                const combined = [...uStages, ...uExtra];
+                return subScopeOptions.some(opt => combined.includes(opt) || combined.some(item => item.includes(opt)));
+              });
+
               const classesInThisService = services.filter(
                 s => s.stage_name === grp.group_name || grp.group_name.includes(s.stage_name)
               );
 
               return (
-                <div key={grp.id || idx} className="bg-white p-4 rounded-3xl border-2 border-gray-200 space-y-3 shadow-2xs">
+                <div key={groupKey} className="bg-white p-4 rounded-3xl border-2 border-gray-200 space-y-3 shadow-2xs">
                   <div className="flex flex-wrap justify-between items-start gap-2 border-b pb-2.5">
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -1209,6 +1274,115 @@ export default function AdminDashboard({
                       </div>
                     )}
                   </div>
+
+                  {/* ربط مستخدمين محددين بهذه الخدمة أو بأحد أقسامها مباشرة */}
+                  {isAdmin && (
+                    <div className="bg-emerald-50/50 p-2.5 rounded-2xl border border-emerald-200 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-black text-emerald-950 flex items-center gap-1">
+                          <UserCheck size={13} /> ربط خدام أو مخدومين بـ ({grp.group_name}):
+                        </span>
+                        <span className="text-[10px] font-bold text-emerald-800">
+                          {linkedUsersForGroup.length} مرتبط
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1.5">
+                        {subScopeOptions.length > 1 && (
+                          <select
+                            className="p-1.5 border rounded-xl bg-white text-[11px] font-bold"
+                            value={selectedQuickScope}
+                            onChange={e => setQuickAssignByGroup(prev => ({
+                              ...prev,
+                              [groupKey]: { ...(prev[groupKey] || {}), scope: e.target.value }
+                            }))}
+                          >
+                            {subScopeOptions.map((opt, oIdx) => (
+                              <option key={oIdx} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                        )}
+
+                        <select
+                          className="flex-1 min-w-40 p-1.5 border rounded-xl bg-white text-[11px] font-bold"
+                          value={selectedQuickUserId}
+                          onChange={e => setQuickAssignByGroup(prev => ({
+                            ...prev,
+                            [groupKey]: {
+                              scope: prev[groupKey]?.scope || grp.group_name,
+                              userId: e.target.value
+                            }
+                          }))}
+                        >
+                          <option value="">-- اختر خادم أو مخدوم لربطه --</option>
+                          {assignableUsersList.map(u => (
+                            <option key={u.id} value={u.id}>
+                              {u.full_name} ({ROLE_LABELS[u.role] || u.role})
+                            </option>
+                          ))}
+                        </select>
+
+                        <button
+                          type="button"
+                          disabled={!selectedQuickUserId || assigningGroupKey === groupKey}
+                          onClick={async () => {
+                            if (!selectedQuickUserId) return;
+                            await handleToggleUserServiceAssignment(selectedQuickUserId, selectedQuickScope, true, groupKey);
+                            setQuickAssignByGroup(prev => ({
+                              ...prev,
+                              [groupKey]: { ...(prev[groupKey] || {}), userId: '' }
+                            }));
+                          }}
+                          className="px-3 py-1.5 bg-[#7a1c24] disabled:bg-gray-300 text-white rounded-xl text-[11px] font-black cursor-pointer"
+                        >
+                          {assigningGroupKey === groupKey ? 'جاري الربط...' : '+ ربط بالخدمة'}
+                        </button>
+                      </div>
+
+                      {linkedUsersForGroup.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {linkedUsersForGroup.map(u => {
+                            const matchingScopes = subScopeOptions.filter(opt => {
+                              const uStages = splitList(`${u.detailed_stage || ''} ${u.service_stage || ''}`);
+                              const uExtra = Array.isArray(u.permissions?.extra_services) ? u.permissions.extra_services : [];
+                              const combined = [...uStages, ...uExtra];
+                              return combined.includes(opt) || combined.some(item => item.includes(opt));
+                            });
+                            const scopeToRemove = matchingScopes[0] || grp.group_name;
+
+                            return (
+                              <span
+                                key={u.id}
+                                className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-emerald-300 text-emerald-950 rounded-xl text-[10px] font-bold shadow-2xs"
+                              >
+                                <span>{u.full_name}</span>
+                                <span className="text-gray-400">({matchingScopes.join('، ') || grp.group_name})</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPermTargetUserId(u.id);
+                                    setActiveCard('roles_permissions');
+                                  }}
+                                  className="text-indigo-700 hover:underline mr-0.5 cursor-pointer"
+                                  title="تعديل صلاحيات هذا المستخدم"
+                                >
+                                  صلاحيات
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleUserServiceAssignment(u.id, scopeToRemove, false, groupKey)}
+                                  className="text-red-700 hover:text-red-900 cursor-pointer"
+                                  title="إلغاء ربط هذه الخدمة"
+                                >
+                                  <X size={11} />
+                                </button>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {grp.has_classes !== false ? (
                     classesInThisService.length === 0 ? (
