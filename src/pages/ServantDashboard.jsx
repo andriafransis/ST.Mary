@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Phone, Search, UserPlus, Calendar, MessageSquareText, Layers, MessageCircle, AlertTriangle, Users, MapPin, X, FileSpreadsheet, ArrowRight, BookOpen } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 import BirthdayBanner from '../components/BirthdayBanner';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
 import { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/ServiceGroupFeed';
@@ -154,6 +155,28 @@ export default function ServantDashboard({
       setSelectedClassFilter('');
     }
   }, [serviceGroups, services, servant]);
+
+  useEffect(() => {
+    if (!supabase || typeof supabase.channel !== 'function' || typeof onRefresh !== 'function') return;
+    const channel = supabase
+      .channel('servant-dashboard-live-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'service_groups' }, () => {
+        onRefresh();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'services' }, () => {
+        onRefresh();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'church_users' }, () => {
+        onRefresh();
+      })
+      .subscribe();
+
+    return () => {
+      if (typeof supabase.removeChannel === 'function') {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [onRefresh]);
 
   const getScopeStructure = (scope) => {
     const matchedGroup = effectiveGroups.find(g => g.group_name === scope) || null;
@@ -332,16 +355,18 @@ export default function ServantDashboard({
       return;
     }
 
-    onAddMember({
-      ...newMember,
-      full_name,
-      father_full_name,
-      mother_full_name,
-      service_stage: newMember.detailed_stage,
-      username: newMember.username ? newMember.username.trim().toLowerCase() : ('m_' + Date.now()),
-      password: newMember.password || '123',
-      dob: newMember.dob || null
-    });
+    if (typeof onAddMember === 'function') {
+      onAddMember({
+        ...newMember,
+        full_name,
+        father_full_name,
+        mother_full_name,
+        service_stage: newMember.detailed_stage,
+        username: newMember.username ? newMember.username.trim().toLowerCase() : ('m_' + Date.now()),
+        password: newMember.password || '123',
+        dob: newMember.dob || null
+      });
+    }
 
     setShowAddModal(false);
     setNewMember(emptyMember);
@@ -350,7 +375,9 @@ export default function ServantDashboard({
   const handleNoteSubmit = (e) => {
     e.preventDefault();
     if (!newNoteText.trim()) return;
-    onSaveMemberNote({ member_id: noteMember.id, author_id: servant.id, note_text: newNoteText, behavior_tag: newNoteTag });
+    if (typeof onSaveMemberNote === 'function') {
+      onSaveMemberNote({ member_id: noteMember.id, author_id: servant?.id, note_text: newNoteText, behavior_tag: newNoteTag });
+    }
     setNewNoteText('');
     setNoteModal(false);
   };
@@ -465,7 +492,6 @@ export default function ServantDashboard({
           })}
         </div>
 
-        {/* تسلسل متدرج داخل الخدمة المختارة: الخدمة ← السنوات الدراسية ← الفصول */}
         {(currentScopeStructure.years.length > 0 || currentScopeStructure.groupClasses.length > 0 || currentScopeStructure.matchedGroup) && (
           <div className="bg-[#fbfaf7] p-3 rounded-2xl border border-amber-200/80 space-y-2.5 text-xs">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -622,7 +648,7 @@ export default function ServantDashboard({
               {selectedGenderFilter !== 'الكل' ? ` (${selectedGenderFilter})` : ''}
             </h2>
             <div className="flex flex-wrap items-center gap-2 mt-1">
-              <span className="text-gray-500 font-bold">المسؤول: {servant.full_name}</span>
+              <span className="text-gray-500 font-bold">المسؤول: {servant?.full_name || ''}</span>
               <span className="px-2.5 py-0.5 bg-gray-100 text-gray-800 rounded-full font-bold text-[11px]">
                 المخدومين: {scopeMembers.length}
               </span>
@@ -924,7 +950,7 @@ export default function ServantDashboard({
               <h3 className="font-extrabold text-sm text-[#7a1c24]">تسجيل حضور أو نشاط لـ: {selectedMember.full_name}</h3>
               <button type="button" onClick={() => setActModal(false)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer"><X size={16} /></button>
             </div>
-            <form onSubmit={e => { e.preventDefault(); onSaveActivity(selectedMember.id, actForm); setActModal(false); }} className="space-y-3">
+            <form onSubmit={e => { e.preventDefault(); if (typeof onSaveActivity === 'function') onSaveActivity(selectedMember.id, actForm); setActModal(false); }} className="space-y-3">
               <select className="w-full p-2.5 border rounded-xl bg-white" value={actForm.activity_type} onChange={e => setActForm({ ...actForm, activity_type: e.target.value })}>
                 <option value="مدارس أحد">مدارس أحد</option>
                 <option value="قداس">قداس إلهي</option>
