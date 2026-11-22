@@ -96,6 +96,7 @@ export default function App() {
   const [spiritualNotes, setSpiritualNotes] = useState([]);
   const [churchEvents, setChurchEvents] = useState([]);
   const [churchServices, setChurchServices] = useState([]);
+  const [serviceGroups, setServiceGroups] = useState([]);
   const [caseCategories, setCaseCategories] = useState([]);
   const [customCards, setCustomCards] = useState([]);
   const [memberActivities, setMemberActivities] = useState([]);
@@ -109,7 +110,7 @@ export default function App() {
 
   const fetchData = async () => {
     try {
-      const [u, rs, tplRes, logoRes, stRes, f, a, n, e, srv, cats, cc, act, mNotes, cs, pm, pps] = await Promise.all([
+      const [u, rs, tplRes, logoRes, stRes, f, a, n, e, srv, grpRes, cats, cc, act, mNotes, cs, pm, pps] = await Promise.all([
         supabase.from('church_users').select('*').order('created_at', { ascending: true }),
         supabase.from('role_screens').select('*'),
         supabase.from('church_public_content').select('*').eq('kind', 'role_template').order('created_at', { ascending: true }),
@@ -120,6 +121,7 @@ export default function App() {
         supabase.from('spiritual_notes').select('*'),
         supabase.from('church_events').select('*').order('created_at', { ascending: false }),
         supabase.from('church_services').select('*').order('created_at', { ascending: false }),
+        supabase.from('service_groups').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true }),
         supabase.from('case_categories').select('*').order('sort_order', { ascending: true }),
         supabase.from('priest_custom_cards').select('*').order('created_at', { ascending: false }),
         supabase.from('member_activities').select('*').order('activity_date', { ascending: false }),
@@ -170,6 +172,7 @@ export default function App() {
       if (n.data) setSpiritualNotes(n.data);
       if (e.data) setChurchEvents(e.data);
       if (srv.data) setChurchServices(srv.data);
+      if (!grpRes?.error && Array.isArray(grpRes?.data)) setServiceGroups(grpRes.data);
       if (cats.data) setCaseCategories(cats.data);
       if (cc.data) setCustomCards(cc.data);
       if (act.data) setMemberActivities(act.data);
@@ -1041,7 +1044,7 @@ export default function App() {
             <div className="space-y-4">
               <BirthdayBanner birthdays={upcomingBirthdays} />
               <AdminDashboard
-                users={users} events={churchEvents} services={churchServices}
+                users={users} events={churchEvents} services={churchServices} serviceGroups={serviceGroups}
                 caseCategories={caseCategories} customCards={customCards}
                 roleScreens={roleScreens} roleTemplates={roleTemplates}
                 currentUserId={currentUser.id} currentUser={currentUser} isSuperAdmin={isAdmin}
@@ -1074,12 +1077,13 @@ export default function App() {
 
           {!extraScreen && currentScr === 'servant_panel' && (
             <ServantDashboard
-              servant={currentUser} users={users} services={churchServices}
+              servant={currentUser} users={users} services={churchServices} serviceGroups={serviceGroups}
               activities={memberActivities} memberNotes={memberNotes}
               birthdays={upcomingBirthdays}
               onAddMember={handleAddMemberByServant} onSaveActivity={handleSaveActivity} onSaveMemberNote={handleSaveMemberNote}
               onUpdateMember={handleUpdateUser}
               onRequestChildLink={handleRequestChildLink}
+              onRefresh={fetchData}
             />
           )}
 
