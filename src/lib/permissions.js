@@ -6,6 +6,8 @@ export const SCREEN_ORDER = [
   'servant_panel',
   'member_panel',
   'parent_panel',
+  'edu_center',
+  'joseph_arimathea',
   'approvals',
   'permissions',
   'trips_office',
@@ -24,6 +26,8 @@ export const SCREEN_LABELS = {
   servant_panel: '📖 لوحة الخادم',
   member_panel: '👤 فقرة المخدوم',
   parent_panel: '👨‍👩‍👦 متابعة ولي الأمر',
+  edu_center: '🎓 المركز التعليمي',
+  joseph_arimathea: '🕊️ خدمة يوسف الرامي',
   approvals: '✅ طلبات الانضمام',
   permissions: '🔐 إدارة الصلاحيات',
   trips_office: '🚌 مكتب الرحلات',
@@ -46,23 +50,17 @@ export const ROLES = [
   { key: 'worker', label: '🛠️ عامل / فراش الكنيسة' }
 ];
 
+const EMPTY_PERM = { view: false, create: false, edit: false, delete: false };
+
 export const ROLE_DEFAULT_PERMISSIONS = {
   admin: {
     defaultScreen: 'admin_panel',
-    screens: {
-      admin_panel: { view: true, create: true, edit: true, delete: true },
-      priest_panel: { view: true, create: true, edit: true, delete: true },
-      servant_panel: { view: true, create: true, edit: true, delete: true },
-      member_panel: { view: true, create: true, edit: true, delete: true },
-      parent_panel: { view: true, create: true, edit: true, delete: true },
-      approvals: { view: true, create: true, edit: true, delete: true },
-      permissions: { view: true, create: true, edit: true, delete: true },
-      trips_office: { view: true, create: true, edit: true, delete: true },
-      deacons: { view: true, create: true, edit: true, delete: true },
-      certs: { view: true, create: true, edit: true, delete: true },
-      public_editor: { view: true, create: true, edit: true, delete: true },
-      public_page: { view: true, create: false, edit: false, delete: false }
-    }
+    screens: SCREEN_ORDER.reduce((acc, s) => {
+      acc[s] = s === 'public_page'
+        ? { view: true, create: false, edit: false, delete: false }
+        : { view: true, create: true, edit: true, delete: true };
+      return acc;
+    }, {})
   },
   priest: {
     defaultScreen: 'priest_panel',
@@ -70,6 +68,8 @@ export const ROLE_DEFAULT_PERMISSIONS = {
       priest_panel: { view: true, create: true, edit: true, delete: true },
       servant_panel: { view: true, create: true, edit: true, delete: false },
       member_panel: { view: true, create: false, edit: false, delete: false },
+      edu_center: { view: true, create: true, edit: true, delete: false },
+      joseph_arimathea: { view: true, create: true, edit: true, delete: false },
       approvals: { view: true, create: false, edit: true, delete: false },
       trips_office: { view: true, create: true, edit: true, delete: false },
       deacons: { view: true, create: true, edit: true, delete: false },
@@ -83,6 +83,7 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     screens: {
       servant_panel: { view: true, create: true, edit: true, delete: false },
       member_panel: { view: true, create: false, edit: false, delete: false },
+      edu_center: { view: true, create: true, edit: true, delete: false },
       approvals: { view: true, create: false, edit: true, delete: false },
       trips_office: { view: true, create: true, edit: false, delete: false },
       deacons: { view: true, create: false, edit: false, delete: false },
@@ -94,6 +95,7 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     screens: {
       servant_panel: { view: true, create: true, edit: true, delete: false },
       member_panel: { view: true, create: false, edit: false, delete: false },
+      edu_center: { view: true, create: true, edit: false, delete: false },
       trips_office: { view: true, create: true, edit: false, delete: false },
       deacons: { view: true, create: false, edit: false, delete: false },
       public_page: { view: true, create: false, edit: false, delete: false }
@@ -104,6 +106,7 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     screens: {
       servant_panel: { view: true, create: true, edit: true, delete: false },
       member_panel: { view: true, create: false, edit: false, delete: false },
+      edu_center: { view: true, create: false, edit: false, delete: false },
       trips_office: { view: true, create: false, edit: false, delete: false },
       public_page: { view: true, create: false, edit: false, delete: false }
     }
@@ -126,6 +129,7 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     defaultScreen: 'member_panel',
     screens: {
       member_panel: { view: true, create: false, edit: false, delete: false },
+      edu_center: { view: true, create: false, edit: false, delete: false },
       trips_office: { view: true, create: false, edit: false, delete: false },
       public_page: { view: true, create: false, edit: false, delete: false }
     }
@@ -133,7 +137,7 @@ export const ROLE_DEFAULT_PERMISSIONS = {
   parent: {
     defaultScreen: 'parent_panel',
     screens: {
-      parent_panel: { view: true, create: true, edit: false, delete: false },
+      parent_panel: { view: true, create: false, edit: false, delete: false },
       public_page: { view: true, create: false, edit: false, delete: false }
     }
   },
@@ -162,44 +166,132 @@ export const DEFAULT_ROLE_SCREENS = Object.entries(ROLE_DEFAULT_PERMISSIONS).red
   {}
 );
 
-export function getDetailedScreenPermissions(user, screenKey, roleScreens = []) {
+/**
+ * دمج مجموعة قوالب بوليسي (Policies) للمستخدم الواحد بدون فقدان أي صلاحية
+ */
+export function mergeUserPolicies(user, policies = []) {
+  const perms = user?.permissions || {};
+  const policyKeys = Array.isArray(perms.policy_keys) && perms.policy_keys.length > 0
+    ? perms.policy_keys
+    : (perms.template_key ? [perms.template_key] : []);
+
+  const matchedPolicies = policyKeys
+    .map(k => policies.find(p => p.key === k))
+    .filter(Boolean);
+
+  const mergedScreens = {};
+  SCREEN_ORDER.forEach(scr => {
+    mergedScreens[scr] = { ...EMPTY_PERM };
+  });
+
+  const mergedActions = { ...(perms.actions || {}) };
+
+  matchedPolicies.forEach(tpl => {
+    // 1. دمج الشاشات من مصفوفة screens أو screen_permissions
+    const tplScreens = Array.isArray(tpl.screens) ? tpl.screens : [];
+    tplScreens.forEach(scr => {
+      if (mergedScreens[scr]) {
+        mergedScreens[scr].view = true;
+      }
+    });
+
+    if (tpl.screen_permissions && typeof tpl.screen_permissions === 'object') {
+      Object.entries(tpl.screen_permissions).forEach(([scr, sp]) => {
+        if (!mergedScreens[scr]) mergedScreens[scr] = { ...EMPTY_PERM };
+        const canView = Boolean(sp?.view);
+        const canCreate = canView && Boolean(sp?.create ?? sp?.add);
+        const canEdit = canView && Boolean(sp?.edit);
+        const canDelete = canView && Boolean(sp?.delete);
+
+        mergedScreens[scr] = {
+          view: mergedScreens[scr].view || canView,
+          create: mergedScreens[scr].create || canCreate,
+          edit: mergedScreens[scr].edit || canEdit,
+          delete: mergedScreens[scr].delete || canDelete
+        };
+      });
+    }
+
+    // 2. دمج الأكشنات (boolean = OR ، نص غير فارغ له أولوية)
+    if (tpl.actions && typeof tpl.actions === 'object') {
+      Object.entries(tpl.actions).forEach(([actKey, actVal]) => {
+        if (typeof actVal === 'boolean') {
+          mergedActions[actKey] = Boolean(mergedActions[actKey]) || actVal;
+        } else if (typeof actVal === 'string' && actVal.trim() !== '') {
+          mergedActions[actKey] = actVal;
+        }
+      });
+    }
+  });
+
+  return {
+    policyKeys,
+    matchedPolicies,
+    mergedScreens,
+    mergedActions
+  };
+}
+
+export function getDetailedScreenPermissions(user, screenKey, roleScreens = [], policies = []) {
   const role = user?.role || 'member';
   const roleCfg = ROLE_DEFAULT_PERMISSIONS[role] || ROLE_DEFAULT_PERMISSIONS.member;
-  const base = roleCfg.screens?.[screenKey] || { view: false, create: false, edit: false, delete: false };
+  const base = roleCfg.screens?.[screenKey] || { ...EMPTY_PERM };
 
   const dbRow = Array.isArray(roleScreens)
     ? roleScreens.find(r => r.role === role && r.screen === screenKey)
     : null;
 
   let perms = {
-    view: dbRow ? (dbRow.can_view ?? base.view) : base.view,
-    create: dbRow ? (dbRow.can_create ?? false) : base.create,
-    edit: dbRow ? (dbRow.can_edit ?? false) : base.edit,
-    delete: dbRow ? (dbRow.can_delete ?? false) : base.delete
+    view: dbRow ? Boolean(dbRow.can_view ?? base.view) : Boolean(base.view),
+    create: dbRow ? Boolean(dbRow.can_create ?? base.create) : Boolean(base.create),
+    edit: dbRow ? Boolean(dbRow.can_edit ?? base.edit) : Boolean(base.edit),
+    delete: dbRow ? Boolean(dbRow.can_delete ?? base.delete) : Boolean(base.delete)
   };
+
+  // دمج صلاحيات الجروبات/البوليسيز المرتبطة بالمستخدم
+  if (Array.isArray(policies) && policies.length > 0) {
+    const { mergedScreens } = mergeUserPolicies(user, policies);
+    const polScr = mergedScreens[screenKey];
+    if (polScr) {
+      perms = {
+        view: perms.view || polScr.view,
+        create: perms.create || polScr.create,
+        edit: perms.edit || polScr.edit,
+        delete: perms.delete || polScr.delete
+      };
+    }
+  }
 
   if (user?.permissions?.read_only === true) {
     perms = { ...perms, create: false, edit: false, delete: false };
   }
 
-  const userScreenOverride = user?.permissions?.screens?.[screenKey];
+  // تخصيص فردي على مستوى المستخدم (إن وُجد)
+  const userScreenOverride = user?.permissions?.screens?.[screenKey] || user?.permissions?.screen_permissions?.[screenKey];
   if (userScreenOverride && typeof userScreenOverride === 'object') {
+    const nextView = userScreenOverride.view !== undefined ? Boolean(userScreenOverride.view) : perms.view;
+    const nextCreate = userScreenOverride.create !== undefined
+      ? Boolean(userScreenOverride.create)
+      : (userScreenOverride.add !== undefined ? Boolean(userScreenOverride.add) : perms.create);
+    const nextEdit = userScreenOverride.edit !== undefined ? Boolean(userScreenOverride.edit) : perms.edit;
+    const nextDelete = userScreenOverride.delete !== undefined ? Boolean(userScreenOverride.delete) : perms.delete;
+
     perms = {
-      view: userScreenOverride.view !== undefined ? Boolean(userScreenOverride.view) : perms.view,
-      create: userScreenOverride.create !== undefined ? Boolean(userScreenOverride.create) : perms.create,
-      edit: userScreenOverride.edit !== undefined ? Boolean(userScreenOverride.edit) : perms.edit,
-      delete: userScreenOverride.delete !== undefined ? Boolean(userScreenOverride.delete) : perms.delete
+      view: nextView,
+      create: nextView && nextCreate,
+      edit: nextView && nextEdit,
+      delete: nextView && nextDelete
     };
   }
 
   if (!perms.view) {
-    return { view: false, create: false, edit: false, delete: false };
+    return { ...EMPTY_PERM };
   }
 
   return perms;
 }
 
-export function resolveScreens(user, roleScreens = []) {
+export function resolveScreens(user, roleScreens = [], policies = []) {
   const allowed = new Set();
   const detailedByScreen = {};
 
@@ -215,26 +307,17 @@ export function resolveScreens(user, roleScreens = []) {
     ...SCREEN_ORDER,
     ...Object.keys(roleCfg.screens || {}),
     ...roleDbRows.map(r => r.screen).filter(Boolean),
-    ...Object.keys(user?.permissions?.screens || {})
+    ...Object.keys(user?.permissions?.screens || {}),
+    ...Object.keys(user?.permissions?.screen_permissions || {})
   ]);
 
   candidateKeys.forEach(scrKey => {
-    const p = getDetailedScreenPermissions(user, scrKey, roleScreens);
+    const p = getDetailedScreenPermissions(user, scrKey, roleScreens, policies);
     detailedByScreen[scrKey] = p;
     if (p.view) {
       allowed.add(scrKey);
     }
   });
-
-  if (Array.isArray(user?.permissions?.allowed_screens)) {
-    const customSet = new Set(user.permissions.allowed_screens);
-    Array.from(allowed).forEach(k => {
-      if (!customSet.has(k) && k !== 'public_page') {
-        allowed.delete(k);
-        if (detailedByScreen[k]) detailedByScreen[k].view = false;
-      }
-    });
-  }
 
   const dbDefaultRow = roleDbRows.find(r => r.is_default === true && allowed.has(r.screen));
   const preferredDefault =
@@ -250,6 +333,6 @@ export function resolveScreens(user, roleScreens = []) {
   return { allowed, defaultScreen, detailedByScreen };
 }
 
-export function getScreenAccess(user, screenKey, roleScreens = []) {
-  return getDetailedScreenPermissions(user, screenKey, roleScreens);
+export function getScreenAccess(user, screenKey, roleScreens = [], policies = []) {
+  return getDetailedScreenPermissions(user, screenKey, roleScreens, policies);
 }
