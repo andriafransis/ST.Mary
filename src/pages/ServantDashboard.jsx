@@ -1,5 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Phone, Search, UserPlus, Calendar, MessageSquareText, Layers, MessageCircle, AlertTriangle, Users, MapPin, X, FileSpreadsheet, ArrowRight, BookOpen } from 'lucide-react';
+import {
+  Phone, Search, UserPlus, Calendar, MessageSquareText, Layers,
+  MessageCircle, AlertTriangle, Users, MapPin, X, FileSpreadsheet,
+  ArrowRight, BookOpen, Plus, Pencil, Trash2, Check
+} from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BirthdayBanner from '../components/BirthdayBanner';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
@@ -16,6 +20,15 @@ const STAGE_OPTIONS = [
   'اجتماع الأرامل',
   'إخوة الرب',
   'اجتماع الصدى'
+];
+
+const CORE_SERVICE_GROUPS = [
+  'خدمة حضانة وطفولة',
+  'خدمة ابتدائي',
+  'خدمة إعدادي',
+  'خدمة ثانوي',
+  'خدمة جامعة وخريجين',
+  'خدمات واجتماعات خاصة'
 ];
 
 const GENDER_SCOPES = ['الكل', 'بنين', 'بنات'];
@@ -44,16 +57,38 @@ const isPrepOrSecondaryScope = (scope = '') => {
 
 export default function ServantDashboard({
   servant, users = [], services = [], serviceGroups = [], activities = [], memberNotes = [], birthdays = [],
-  onAddMember, onSaveActivity, onSaveMemberNote, onRefresh
+  onAddMember, onSaveActivity, onSaveMemberNote, onRefresh, onUpdateServiceStructure
 }) {
   const isAdminUser = servant?.role === 'admin';
   const canAdd = isAdminUser || servant?.permissions?.can_add !== false;
+  const canManageStructure = isAdminUser || servant?.permissions?.can_manage_services === true || typeof onUpdateServiceStructure === 'function';
   const canExtractSheet = canExtractMasterSheet(servant);
   const [showMasterSheet, setShowMasterSheet] = useState(false);
 
-  const effectiveGroups = Array.isArray(serviceGroups) && serviceGroups.length > 0
+  const baseGroups = Array.isArray(serviceGroups) && serviceGroups.length > 0
     ? serviceGroups
     : DEFAULT_SERVICE_GROUPS;
+
+  const [localGroups, setLocalGroups] = useState(baseGroups);
+  const [localServices, setLocalServices] = useState(Array.isArray(services) ? services : []);
+
+  useEffect(() => {
+    setLocalGroups(Array.isArray(serviceGroups) && serviceGroups.length > 0 ? serviceGroups : DEFAULT_SERVICE_GROUPS);
+  }, [serviceGroups]);
+
+  useEffect(() => {
+    setLocalServices(Array.isArray(services) ? services : []);
+  }, [services]);
+
+  const effectiveGroups = [...new Map([
+    ...CORE_SERVICE_GROUPS.map((name, idx) => {
+      const existing = localGroups.find(g => g.group_name === name);
+      if (existing) return [name, existing];
+      const fallback = DEFAULT_SERVICE_GROUPS.find(g => g.group_name === name);
+      return [name, fallback || { id: `core-${idx}`, group_name: name, stages: [] }];
+    }),
+    ...localGroups.map(g => [g.group_name, g])
+  ]).values()];
 
   const assignedClass = (servant?.assigned_class || '').trim();
   const baseStages = (servant?.service_stage || servant?.detailed_stage || '')
@@ -62,14 +97,6 @@ export default function ServantDashboard({
     .filter(Boolean);
   const extraServices = Array.isArray(servant?.permissions?.extra_services) ? servant.permissions.extra_services : [];
 
-  const allChurchServicesList = [...new Set([
-    ...effectiveGroups.map(g => g.group_name).filter(Boolean),
-    ...effectiveGroups.flatMap(g => normalizeGroupStages(g.stages)),
-    ...services.map(s => s.stage_name).filter(Boolean),
-    ...services.map(s => s.class_name).filter(Boolean),
-    ...STAGE_OPTIONS
-  ])];
-
   function splitCommaClasses(val) {
     return String(val || '')
       .split(/[,،]/)
@@ -77,29 +104,65 @@ export default function ServantDashboard({
       .filter(Boolean);
   }
 
-  // بالنسبة للسوبر أدمن: كل خدمات الكنيسة متاحة له (ولو حدد extra_services أو assigned_class يظهرها أيضاً)، أما الخادم فيُربط بخدماته
   const rawBoundTargets = [...new Set([
     ...(assignedClass ? splitCommaClasses(assignedClass) : []),
     ...baseStages,
     ...extraServices
   ])].filter(Boolean);
 
-  const servantBoundTargets = isAdminUser
-    ? (extraServices.length > 0 || assignedClass ? rawBoundTargets : allChurchServicesList)
-    : rawBoundTargets;
+  const mainServiceNames = effectiveGroups.map(g => g.group_name).filter(Boolean);
 
-  const availableServicesList = allChurchServicesList.length > 0
-    ? allChurchServicesList
-    : (servantBoundTargets.length > 0 ? servantBoundTargets : ['أولى ابتدائي']);
+  const resolveParentGroupName = (targetName) => {
+    if (!targetName) return mainServiceNames[0] || 'خدمة حضانة وطفولة';
+    const directGroup = effectiveGroups.find(g => g.group_name === targetName);
+    if (directGroup) return directGroup.group_name;
+
+    const groupByStage = effectiveGroups.find(g => normalizeGroupStages(g.stages).includes(targetName));
+    if (groupByStage) return groupByStage.group_name;
+
+    const classObj = localServices.find(s => s.class_name === targetName || s.stage_name === targetName);
+    if (classObj) {
+      const grp = effectiveGroups.find(
+        g => g.group_name === classObj.stage_name || normalizeGroupStages(g.stages).includes(classObj.stage_name)
+      );
+      if (grp) return grp.group_name;
+    }
+
+    if (targetName.includes('حضانة') || targetName.includes('طفولة')) return 'خدمة حضانة وطفولة';
+    if (targetName.includes('ابتدائي')) return 'خدمة ابتدائي';
+    if (targetName.includes('إعدادي') || targetName.includes('اعدادي')) return 'خدمة إعدادي';
+    if (targetName.includes('ثانوي')) return 'خدمة ثانوي';
+    if (targetName.includes('جامعة') || targetName.includes('خريجين')) return 'خدمة جامعة وخريجين';
+    return 'خدمات واجتماعات خاصة';
+  };
+
+  const servantBoundMainGroups = isAdminUser
+    ? mainServiceNames
+    : [...new Set(rawBoundTargets.map(resolveParentGroupName))];
+
+  const availableServicesList = mainServiceNames.length > 0
+    ? mainServiceNames
+    : ['خدمة حضانة وطفولة', 'خدمة ابتدائي', 'خدمة إعدادي', 'خدمة ثانوي', 'خدمة جامعة وخريجين', 'خدمات واجتماعات خاصة'];
 
   const initialDefaultScope = isAdminUser
-    ? (availableServicesList[0] || 'أولى ابتدائي')
-    : (servantBoundTargets[0] || availableServicesList[0] || 'أولى ابتدائي');
+    ? (availableServicesList[0] || 'خدمة حضانة وطفولة')
+    : (servantBoundMainGroups[0] || availableServicesList[0] || 'خدمة حضانة وطفولة');
 
   const [selectedScope, setSelectedScope] = useState(initialDefaultScope);
   const [selectedYearFilter, setSelectedYearFilter] = useState('');
   const [selectedClassFilter, setSelectedClassFilter] = useState('');
   const [showAllChurchServices, setShowAllChurchServices] = useState(true);
+  const [editMode, setEditMode] = useState(false);
+
+  const [newGroupName, setNewGroupName] = useState('');
+  const [editingGroupOriginal, setEditingGroupOriginal] = useState('');
+  const [editingGroupValue, setEditingGroupValue] = useState('');
+
+  const [newYearName, setNewYearName] = useState('');
+  const [editingYearOriginal, setEditingYearOriginal] = useState('');
+  const [editingYearValue, setEditingYearValue] = useState('');
+
+  const [newClassName, setNewClassName] = useState('');
 
   const defaultGenderScope = (() => {
     const saved = servant?.permissions?.service_gender_scope;
@@ -154,7 +217,7 @@ export default function ServantDashboard({
       setSelectedYearFilter('');
       setSelectedClassFilter('');
     }
-  }, [serviceGroups, services, servant]);
+  }, [localGroups, localServices, servant]);
 
   useEffect(() => {
     if (!supabase || typeof supabase.channel !== 'function' || typeof onRefresh !== 'function') return;
@@ -178,10 +241,22 @@ export default function ServantDashboard({
     };
   }, [onRefresh]);
 
+  const notifyStructureChange = (nextGroups, nextServices, actionMeta) => {
+    setLocalGroups(nextGroups);
+    setLocalServices(nextServices);
+    if (typeof onUpdateServiceStructure === 'function') {
+      onUpdateServiceStructure({
+        serviceGroups: nextGroups,
+        services: nextServices,
+        ...actionMeta
+      });
+    }
+  };
+
   const getScopeStructure = (scope) => {
     const matchedGroup = effectiveGroups.find(g => g.group_name === scope) || null;
     const groupStages = matchedGroup ? normalizeGroupStages(matchedGroup.stages) : [];
-    const groupClasses = services.filter(
+    const groupClasses = localServices.filter(
       s =>
         s.stage_name === scope ||
         groupStages.includes(s.stage_name) ||
@@ -216,13 +291,8 @@ export default function ServantDashboard({
 
   const isBoundToSpecificService = (scope) => {
     if (!scope) return false;
-    if (servantBoundTargets.includes(scope)) return true;
-    const matchedGroup = effectiveGroups.find(g => g.group_name === scope);
-    if (matchedGroup) {
-      const subStages = normalizeGroupStages(matchedGroup.stages);
-      return subStages.some(st => servantBoundTargets.includes(st)) || servantBoundTargets.includes(matchedGroup.group_name);
-    }
-    return false;
+    if (servantBoundMainGroups.includes(scope)) return true;
+    return rawBoundTargets.some(t => resolveParentGroupName(t) === scope);
   };
 
   const memberMatchesScope = (m, scope, genderFilter = 'الكل', yearFilter = '', classFilter = '') => {
@@ -271,9 +341,145 @@ export default function ServantDashboard({
     return true;
   };
 
+  const handleAddMainService = () => {
+    const trimmed = newGroupName.trim();
+    if (!trimmed) return;
+    if (localGroups.some(g => g.group_name === trimmed)) {
+      setSelectedScope(trimmed);
+      setNewGroupName('');
+      return;
+    }
+    const created = {
+      id: `grp-${Date.now()}`,
+      group_name: trimmed,
+      icon: '⛪',
+      stages: []
+    };
+    const nextGroups = [...localGroups, created];
+    notifyStructureChange(nextGroups, localServices, { type: 'add_group', group: created });
+    setSelectedScope(trimmed);
+    setSelectedYearFilter('');
+    setSelectedClassFilter('');
+    setNewGroupName('');
+  };
+
+  const handleSaveGroupRename = (oldName) => {
+    const trimmed = editingGroupValue.trim();
+    if (!trimmed || trimmed === oldName) {
+      setEditingGroupOriginal('');
+      return;
+    }
+    const nextGroups = localGroups.map(g =>
+      g.group_name === oldName ? { ...g, group_name: trimmed } : g
+    );
+    const nextServices = localServices.map(s =>
+      s.stage_name === oldName ? { ...s, stage_name: trimmed } : s
+    );
+    notifyStructureChange(nextGroups, nextServices, { type: 'rename_group', oldName, newName: trimmed });
+    if (selectedScope === oldName) setSelectedScope(trimmed);
+    setEditingGroupOriginal('');
+  };
+
+  const handleDeleteGroup = (groupName) => {
+    if (!window.confirm(`هل أنت متأكد من حذف الخدمة "${groupName}"؟`)) return;
+    const nextGroups = localGroups.filter(g => g.group_name !== groupName);
+    const nextServices = localServices.filter(s => s.stage_name !== groupName);
+    notifyStructureChange(nextGroups, nextServices, { type: 'delete_group', groupName });
+    if (selectedScope === groupName) {
+      const fallback = nextGroups[0]?.group_name || CORE_SERVICE_GROUPS[0];
+      setSelectedScope(fallback);
+      setSelectedYearFilter('');
+      setSelectedClassFilter('');
+    }
+  };
+
+  const handleAddYearToScope = () => {
+    const trimmed = newYearName.trim();
+    if (!trimmed || !selectedScope) return;
+    const existsInGroups = localGroups.some(g => g.group_name === selectedScope);
+    const nextGroups = existsInGroups
+      ? localGroups.map(g => {
+          if (g.group_name !== selectedScope) return g;
+          const currentStages = normalizeGroupStages(g.stages);
+          if (currentStages.includes(trimmed)) return g;
+          return { ...g, stages: [...currentStages, trimmed] };
+        })
+      : [
+          ...localGroups,
+          {
+            id: `grp-${Date.now()}`,
+            group_name: selectedScope,
+            icon: '🏫',
+            stages: [trimmed]
+          }
+        ];
+
+    notifyStructureChange(nextGroups, localServices, { type: 'add_year', scope: selectedScope, yearName: trimmed });
+    setSelectedYearFilter(trimmed);
+    setSelectedClassFilter('');
+    setNewYearName('');
+  };
+
+  const handleSaveYearRename = (oldYear) => {
+    const trimmed = editingYearValue.trim();
+    if (!trimmed || trimmed === oldYear) {
+      setEditingYearOriginal('');
+      return;
+    }
+    const nextGroups = localGroups.map(g => {
+      if (g.group_name !== selectedScope) return g;
+      const updated = normalizeGroupStages(g.stages).map(st => (st === oldYear ? trimmed : st));
+      return { ...g, stages: updated };
+    });
+    const nextServices = localServices.map(s =>
+      s.stage_name === oldYear ? { ...s, stage_name: trimmed } : s
+    );
+    notifyStructureChange(nextGroups, nextServices, { type: 'rename_year', scope: selectedScope, oldYear, newYear: trimmed });
+    if (selectedYearFilter === oldYear) setSelectedYearFilter(trimmed);
+    setEditingYearOriginal('');
+  };
+
+  const handleDeleteYear = (yearName) => {
+    if (!window.confirm(`هل تريد حذف السنة "${yearName}" من ${selectedScope}؟`)) return;
+    const nextGroups = localGroups.map(g => {
+      if (g.group_name !== selectedScope) return g;
+      return { ...g, stages: normalizeGroupStages(g.stages).filter(st => st !== yearName) };
+    });
+    const nextServices = localServices.filter(s => s.stage_name !== yearName);
+    notifyStructureChange(nextGroups, nextServices, { type: 'delete_year', scope: selectedScope, yearName });
+    if (selectedYearFilter === yearName) {
+      setSelectedYearFilter('');
+      setSelectedClassFilter('');
+    }
+  };
+
+  const handleAddClassToCurrentLevel = () => {
+    const trimmed = newClassName.trim();
+    if (!trimmed) return;
+    const targetStage = selectedYearFilter || selectedScope;
+    const createdClass = {
+      id: `cls-${Date.now()}`,
+      stage_name: targetStage,
+      class_name: trimmed
+    };
+    const nextServices = [...localServices, createdClass];
+    notifyStructureChange(localGroups, nextServices, { type: 'add_class', classItem: createdClass });
+    setSelectedClassFilter(trimmed);
+    setNewClassName('');
+  };
+
+  const handleDeleteClass = (classItem) => {
+    if (!window.confirm(`هل تريد حذف الفصل "${classItem.class_name}"؟`)) return;
+    const nextServices = localServices.filter(s => s.id !== classItem.id);
+    notifyStructureChange(localGroups, nextServices, { type: 'delete_class', classItem });
+    if (selectedClassFilter === classItem.class_name) {
+      setSelectedClassFilter('');
+    }
+  };
+
   const displayedServiceTabs = showAllChurchServices
     ? availableServicesList
-    : (servantBoundTargets.length > 0 ? servantBoundTargets : availableServicesList);
+    : (servantBoundMainGroups.length > 0 ? servantBoundMainGroups : availableServicesList);
 
   const allMembers = users.filter(u => u.role === 'member');
   const scopeMembers = allMembers.filter(m =>
@@ -324,7 +530,7 @@ export default function ServantDashboard({
 
   const openAddMemberModal = () => {
     if (!canAdd) return alert('🔒 غير مسموح لك بإضافة مخدومين حسب صلاحياتك الحالية.');
-    const matchingClass = services.find(
+    const matchingClass = localServices.find(
       s =>
         s.class_name === (selectedClassFilter || selectedScope) ||
         s.stage_name === (selectedYearFilter || selectedScope)
@@ -423,12 +629,12 @@ export default function ServantDashboard({
         </div>
       )}
 
-      <div className="space-y-2.5 bg-white p-4 rounded-3xl border border-gray-200 shadow-2xs">
+      <div className="space-y-3 bg-white p-4 rounded-3xl border border-gray-200 shadow-2xs">
         <div className="flex flex-wrap justify-between items-center gap-2 px-1">
           <div className="flex items-center gap-1.5 text-xs font-black text-gray-800">
-            <Layers size={15} className="text-[#7a1c24]" /> الخدمات والفصول المتاحة (اختر خدمة لعرض بياناتها فقط):
+            <Layers size={15} className="text-[#7a1c24]" /> الخدمات الرئيسية (اضغط على الخدمة لفتح سنواتها وفصولها بالداخل):
           </div>
-          <div className="flex items-center gap-1.5 text-[11px] font-bold">
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold">
             <button
               type="button"
               onClick={() => setShowAllChurchServices(true)}
@@ -436,186 +642,393 @@ export default function ServantDashboard({
             >
               كل خدمات الكنيسة ({availableServicesList.length})
             </button>
-            {servantBoundTargets.length > 0 && (
+            {servantBoundMainGroups.length > 0 && (
               <button
                 type="button"
                 onClick={() => {
                   setShowAllChurchServices(false);
-                  if (!servantBoundTargets.includes(selectedScope)) {
-                    setSelectedScope(servantBoundTargets[0]);
+                  if (!servantBoundMainGroups.includes(selectedScope)) {
+                    setSelectedScope(servantBoundMainGroups[0]);
                     setSelectedYearFilter('');
                     setSelectedClassFilter('');
                   }
                 }}
                 className={`px-3 py-1 rounded-xl cursor-pointer transition ${!showAllChurchServices ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700'}`}
               >
-                خدماتي المربوطة ({servantBoundTargets.length})
+                خدماتي المربوطة ({servantBoundMainGroups.length})
+              </button>
+            )}
+            {canManageStructure && (
+              <button
+                type="button"
+                onClick={() => setEditMode(prev => !prev)}
+                className={`px-3 py-1 rounded-xl cursor-pointer transition flex items-center gap-1 ${
+                  editMode ? 'bg-amber-700 text-white' : 'bg-amber-50 text-amber-900 border border-amber-200'
+                }`}
+              >
+                <Pencil size={12} /> {editMode ? 'إنهاء التعديل' : 'إضافة / تعديل / حذف'}
               </button>
             )}
           </div>
         </div>
 
+        {editMode && canManageStructure && (
+          <div className="bg-amber-50/70 p-3 rounded-2xl border border-amber-200 flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-black text-amber-950">إضافة خدمة رئيسية جديدة:</span>
+            <input
+              type="text"
+              placeholder="مثال: خدمة الشباب أو خدمة أسر..."
+              className="px-3 py-1.5 bg-white border rounded-xl text-xs font-bold flex-1 min-w-[180px]"
+              value={newGroupName}
+              onChange={e => setNewGroupName(e.target.value)}
+            />
+            <button
+              type="button"
+              onClick={handleAddMainService}
+              className="px-3.5 py-1.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center gap-1 cursor-pointer"
+            >
+              <Plus size={14} /> إضافة خدمة
+            </button>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
           {displayedServiceTabs.map((srv, idx) => {
             const count = allMembers.filter(m => memberMatchesScope(m, srv, selectedGenderFilter)).length;
+            const srvStructure = getScopeStructure(srv);
             const isSelected = selectedScope === srv;
             const isBound = isBoundToSpecificService(srv);
+
             return (
-              <button
+              <div
                 key={idx}
-                type="button"
-                onClick={() => {
-                  setSelectedScope(srv);
-                  setSelectedYearFilter('');
-                  setSelectedClassFilter('');
-                  setSearchQuery('');
-                  if (srv.includes('بنات')) setSelectedGenderFilter('بنات');
-                  else if (srv.includes('بنين')) setSelectedGenderFilter('بنين');
-                }}
-                className={`p-3.5 rounded-3xl border text-right cursor-pointer transition shadow-2xs flex justify-between items-center gap-3 ${
+                className={`p-3.5 rounded-3xl border transition shadow-2xs flex flex-col justify-between gap-2 ${
                   isSelected
                     ? 'bg-linear-to-l from-[#5c1319] to-[#7a1c24] text-white border-[#7a1c24]'
                     : 'bg-[#fbfaf7] text-gray-900 hover:bg-red-50/40 border-gray-200'
                 }`}
               >
-                <div>
-                  <span className={`text-[10px] font-bold block mb-0.5 ${isSelected ? 'text-amber-200' : 'text-gray-400'}`}>
-                    {isAdminUser ? '🛡️ متاح للسوبر أدمن' : (isBound ? '⭐ خدمة مخصصة لك' : '⛪ خدمة بالكنيسة')}
-                  </span>
-                  <strong className="text-sm sm:text-base font-black block">{srv}</strong>
-                </div>
-                <div className={`px-3 py-1 rounded-2xl text-xs font-black shrink-0 ${isSelected ? 'bg-white/20 text-white' : 'bg-red-50 text-[#7a1c24]'}`}>
-                  {count} مخدوم
-                </div>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedScope(srv);
+                    setSelectedYearFilter('');
+                    setSelectedClassFilter('');
+                    setSearchQuery('');
+                    if (srv.includes('بنات')) setSelectedGenderFilter('بنات');
+                    else if (srv.includes('بنين')) setSelectedGenderFilter('بنين');
+                  }}
+                  className="w-full text-right cursor-pointer flex justify-between items-start gap-2"
+                >
+                  <div>
+                    <span className={`text-[10px] font-bold block mb-0.5 ${isSelected ? 'text-amber-200' : 'text-gray-400'}`}>
+                      {isAdminUser ? '🛡️ متاح للسوبر أدمن' : (isBound ? '⭐ خدمة مخصصة لك' : '⛪ خدمة بالكنيسة')}
+                    </span>
+                    <strong className="text-sm sm:text-base font-black block">{srv}</strong>
+                    <span className={`text-[10px] font-bold block mt-1 ${isSelected ? 'text-white/85' : 'text-gray-500'}`}>
+                      {srvStructure.years.length} سنوات/مراحل • {srvStructure.groupClasses.length} فصول
+                    </span>
+                  </div>
+                  <div className={`px-3 py-1 rounded-2xl text-xs font-black shrink-0 ${isSelected ? 'bg-white/20 text-white' : 'bg-red-50 text-[#7a1c24]'}`}>
+                    {count} مخدوم
+                  </div>
+                </button>
+
+                {editMode && canManageStructure && (
+                  <div className="pt-2 border-t border-black/10 flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
+                    {editingGroupOriginal === srv ? (
+                      <div className="flex items-center gap-1 w-full">
+                        <input
+                          type="text"
+                          className="px-2 py-1 rounded-lg bg-white text-gray-900 border flex-1 text-xs font-bold"
+                          value={editingGroupValue}
+                          onChange={e => setEditingGroupValue(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleSaveGroupRename(srv)}
+                          className="px-2 py-1 bg-green-700 text-white rounded-lg cursor-pointer"
+                        >
+                          <Check size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingGroupOriginal('')}
+                          className="px-2 py-1 bg-gray-200 text-gray-800 rounded-lg cursor-pointer"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingGroupOriginal(srv);
+                            setEditingGroupValue(srv);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 cursor-pointer ${
+                            isSelected ? 'bg-white/15 text-white hover:bg-white/25' : 'bg-white text-gray-800 border'
+                          }`}
+                        >
+                          <Pencil size={11} /> تعديل الاسم
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteGroup(srv)}
+                          className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 cursor-pointer ${
+                            isSelected ? 'bg-red-950/60 text-red-100 hover:bg-red-950' : 'bg-red-50 text-red-700 border border-red-200'
+                          }`}
+                        >
+                          <Trash2 size={11} /> حذف
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
 
-        {(currentScopeStructure.years.length > 0 || currentScopeStructure.groupClasses.length > 0 || currentScopeStructure.matchedGroup) && (
-          <div className="bg-[#fbfaf7] p-3 rounded-2xl border border-amber-200/80 space-y-2.5 text-xs">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-1.5 font-black">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedYearFilter('');
-                    setSelectedClassFilter('');
-                  }}
-                  className={`px-2.5 py-1 rounded-xl cursor-pointer ${
-                    !selectedYearFilter && !selectedClassFilter ? 'bg-[#7a1c24] text-white' : 'bg-white border text-gray-800'
-                  }`}
-                >
-                  🏫 {selectedScope}
-                </button>
-                {selectedYearFilter && (
-                  <>
-                    <span className="text-gray-400">/</span>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedClassFilter('')}
-                      className={`px-2.5 py-1 rounded-xl cursor-pointer ${
-                        !selectedClassFilter ? 'bg-amber-700 text-white' : 'bg-amber-50 border text-amber-950'
-                      }`}
-                    >
-                      📘 {selectedYearFilter}
-                    </button>
-                  </>
-                )}
-                {selectedClassFilter && (
-                  <>
-                    <span className="text-gray-400">/</span>
-                    <span className="px-2.5 py-1 rounded-xl bg-blue-700 text-white">
-                      📖 {selectedClassFilter}
-                    </span>
-                  </>
-                )}
-              </div>
-
-              {(selectedYearFilter || selectedClassFilter) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (selectedClassFilter) setSelectedClassFilter('');
-                    else setSelectedYearFilter('');
-                  }}
-                  className="px-2.5 py-1 bg-white hover:bg-gray-100 border rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                >
-                  <ArrowRight size={12} /> رجوع للمستوى السابق
-                </button>
+        {/* المحتوى الداخلي للخدمة المختارة: السنوات الدراسية ثم الفصول */}
+        <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-amber-200/80 space-y-3 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 font-black">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedYearFilter('');
+                  setSelectedClassFilter('');
+                }}
+                className={`px-3 py-1 rounded-xl cursor-pointer ${
+                  !selectedYearFilter && !selectedClassFilter ? 'bg-[#7a1c24] text-white' : 'bg-white border text-gray-800'
+                }`}
+              >
+                🏫 {selectedScope}
+              </button>
+              {selectedYearFilter && (
+                <>
+                  <span className="text-gray-400">/</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedClassFilter('')}
+                    className={`px-3 py-1 rounded-xl cursor-pointer ${
+                      !selectedClassFilter ? 'bg-amber-700 text-white' : 'bg-amber-50 border text-amber-950'
+                    }`}
+                  >
+                    📘 {selectedYearFilter}
+                  </button>
+                </>
+              )}
+              {selectedClassFilter && (
+                <>
+                  <span className="text-gray-400">/</span>
+                  <span className="px-3 py-1 rounded-xl bg-blue-700 text-white">
+                    📖 {selectedClassFilter}
+                  </span>
+                </>
               )}
             </div>
 
-            {currentScopeStructure.matchedGroup && (
-              <div className="flex flex-wrap gap-3 text-[11px] text-gray-600 font-bold">
-                {currentScopeStructure.matchedGroup.head_servant_name && (
-                  <span>⭐ الأمين: <strong className="text-gray-900">{currentScopeStructure.matchedGroup.head_servant_name}</strong></span>
-                )}
-                {(currentScopeStructure.matchedGroup.service_day || currentScopeStructure.matchedGroup.start_time) && (
-                  <span>
-                    ⏰ {currentScopeStructure.matchedGroup.service_day}
-                    {currentScopeStructure.matchedGroup.start_time && ` (${currentScopeStructure.matchedGroup.start_time}`}
-                    {currentScopeStructure.matchedGroup.end_time && ` - ${currentScopeStructure.matchedGroup.end_time}`}
-                    {currentScopeStructure.matchedGroup.start_time && ')'}
-                  </span>
-                )}
-              </div>
+            {(selectedYearFilter || selectedClassFilter) && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedClassFilter) setSelectedClassFilter('');
+                  else setSelectedYearFilter('');
+                }}
+                className="px-2.5 py-1 bg-white hover:bg-gray-100 border rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+              >
+                <ArrowRight size={12} /> رجوع للمستوى السابق
+              </button>
             )}
+          </div>
 
-            {currentScopeStructure.years.length > 0 && (
-              <div className="space-y-1">
-                <span className="text-[11px] font-bold text-gray-600 block">السنوات / المراحل داخل ({selectedScope}):</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {currentScopeStructure.years.map((yr, yIdx) => {
-                    const yrCount = allMembers.filter(m => memberMatchesScope(m, selectedScope, selectedGenderFilter, yr.yearName, '')).length;
-                    const activeYr = selectedYearFilter === yr.yearName;
-                    return (
-                      <button
-                        key={yIdx}
-                        type="button"
-                        onClick={() => {
-                          setSelectedYearFilter(activeYr ? '' : yr.yearName);
-                          setSelectedClassFilter('');
-                        }}
-                        className={`px-3 py-1.5 rounded-xl border text-[11px] font-bold cursor-pointer transition ${
-                          activeYr ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-gray-800 hover:bg-amber-50'
-                        }`}
-                      >
-                        {yr.yearName} ({yrCount})
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {visibleClassesForSelection.length > 0 && (
-              <div className="space-y-1">
-                <span className="text-[11px] font-bold text-gray-600 block">
-                  الفصول {selectedYearFilter ? `التابعة لـ (${selectedYearFilter})` : `التابعة لـ (${selectedScope})`}:
+          {currentScopeStructure.matchedGroup && (
+            <div className="flex flex-wrap gap-3 text-[11px] text-gray-600 font-bold">
+              {currentScopeStructure.matchedGroup.head_servant_name && (
+                <span>⭐ الأمين: <strong className="text-gray-900">{currentScopeStructure.matchedGroup.head_servant_name}</strong></span>
+              )}
+              {(currentScopeStructure.matchedGroup.service_day || currentScopeStructure.matchedGroup.start_time) && (
+                <span>
+                  ⏰ {currentScopeStructure.matchedGroup.service_day}
+                  {currentScopeStructure.matchedGroup.start_time && ` (${currentScopeStructure.matchedGroup.start_time}`}
+                  {currentScopeStructure.matchedGroup.end_time && ` - ${currentScopeStructure.matchedGroup.end_time}`}
+                  {currentScopeStructure.matchedGroup.start_time && ')'}
                 </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {visibleClassesForSelection.map((cls) => {
-                    const clsCount = allMembers.filter(m => memberMatchesScope(m, selectedScope, selectedGenderFilter, selectedYearFilter, cls.class_name)).length;
-                    const activeCls = selectedClassFilter === cls.class_name;
-                    return (
-                      <button
-                        key={cls.id}
-                        type="button"
-                        onClick={() => setSelectedClassFilter(activeCls ? '' : cls.class_name)}
-                        className={`px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1 cursor-pointer transition ${
-                          activeCls ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-blue-950 hover:bg-blue-50'
-                        }`}
-                      >
-                        <BookOpen size={12} /> {cls.class_name} ({clsCount})
-                      </button>
-                    );
-                  })}
-                </div>
+              )}
+            </div>
+          )}
+
+          {/* السنوات / المراحل داخل الخدمة المختارة */}
+          <div className="space-y-1.5">
+            <span className="text-[11px] font-bold text-gray-700 block">
+              السنوات / المراحل داخل ({selectedScope}):
+            </span>
+            {currentScopeStructure.years.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {currentScopeStructure.years.map((yr, yIdx) => {
+                  const yrCount = allMembers.filter(m => memberMatchesScope(m, selectedScope, selectedGenderFilter, yr.yearName, '')).length;
+                  const activeYr = selectedYearFilter === yr.yearName;
+
+                  return (
+                    <div
+                      key={yIdx}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-bold transition ${
+                        activeYr ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-gray-800 hover:bg-amber-50'
+                      }`}
+                    >
+                      {editMode && editingYearOriginal === yr.yearName ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            className="px-2 py-0.5 rounded bg-white text-gray-900 border text-xs font-bold"
+                            value={editingYearValue}
+                            onChange={e => setEditingYearValue(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleSaveYearRename(yr.yearName)}
+                            className="px-1.5 py-0.5 bg-green-700 text-white rounded cursor-pointer"
+                          >
+                            <Check size={11} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingYearOriginal('')}
+                            className="px-1.5 py-0.5 bg-gray-200 text-gray-800 rounded cursor-pointer"
+                          >
+                            <X size={11} />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedYearFilter(activeYr ? '' : yr.yearName);
+                              setSelectedClassFilter('');
+                            }}
+                            className="cursor-pointer font-bold"
+                          >
+                            {yr.yearName} ({yrCount})
+                          </button>
+                          {editMode && canManageStructure && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingYearOriginal(yr.yearName);
+                                  setEditingYearValue(yr.yearName);
+                                }}
+                                className="p-0.5 hover:opacity-80 cursor-pointer"
+                                title="تعديل السنة"
+                              >
+                                <Pencil size={11} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteYear(yr.yearName)}
+                                className="p-0.5 hover:opacity-80 cursor-pointer"
+                                title="حذف السنة"
+                              >
+                                <Trash2 size={11} />
+                              </button>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-[11px] text-gray-500">لا توجد سنوات مسجلة بعد داخل هذه الخدمة — يمكنك إضافتها مباشرة من هنا.</p>
+            )}
+
+            {editMode && canManageStructure && (
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <input
+                  type="text"
+                  placeholder={`إضافة سنة جديدة داخل ${selectedScope}...`}
+                  className="px-3 py-1.5 bg-white border rounded-xl text-xs font-bold min-w-[180px]"
+                  value={newYearName}
+                  onChange={e => setNewYearName(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={handleAddYearToScope}
+                  className="px-3 py-1.5 bg-amber-700 hover:bg-amber-800 text-white rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus size={13} /> إضافة سنة
+                </button>
               </div>
             )}
           </div>
-        )}
+
+          {/* الفصول التابعة للسنة أو الخدمة المختارة */}
+          <div className="space-y-1.5 pt-1 border-t border-amber-200/60">
+            <span className="text-[11px] font-bold text-gray-700 block">
+              الفصول {selectedYearFilter ? `التابعة لـ (${selectedYearFilter})` : `التابعة لـ (${selectedScope})`}:
+            </span>
+            {visibleClassesForSelection.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {visibleClassesForSelection.map((cls) => {
+                  const clsCount = allMembers.filter(m => memberMatchesScope(m, selectedScope, selectedGenderFilter, selectedYearFilter, cls.class_name)).length;
+                  const activeCls = selectedClassFilter === cls.class_name;
+                  return (
+                    <div
+                      key={cls.id}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold transition ${
+                        activeCls ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-blue-950 hover:bg-blue-50'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setSelectedClassFilter(activeCls ? '' : cls.class_name)}
+                        className="inline-flex items-center gap-1 cursor-pointer font-bold"
+                      >
+                        <BookOpen size={12} /> {cls.class_name} ({clsCount})
+                      </button>
+                      {editMode && canManageStructure && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteClass(cls)}
+                          className="p-0.5 hover:opacity-80 cursor-pointer"
+                          title="حذف الفصل"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-[11px] text-gray-500">لا توجد فصول مضافة في هذا المستوى حالياً.</p>
+            )}
+
+            {editMode && canManageStructure && (
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <input
+                  type="text"
+                  placeholder={`إضافة فصل داخل (${selectedYearFilter || selectedScope})...`}
+                  className="px-3 py-1.5 bg-white border rounded-xl text-xs font-bold min-w-[180px]"
+                  value={newClassName}
+                  onChange={e => setNewClassName(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={handleAddClassToCurrentLevel}
+                  className="px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus size={13} /> إضافة فصل
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
 
         <div className="pt-2 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-xs">
           <span className="font-bold text-gray-700">
@@ -847,7 +1260,7 @@ export default function ServantDashboard({
                     onChange={e => setNewMember({ ...newMember, assigned_class: e.target.value })}
                   >
                     <option value="">-- اختر الفصل --</option>
-                    {services.map(srv => (
+                    {localServices.map(srv => (
                       <option key={srv.id} value={srv.class_name}>{srv.class_name} ({srv.stage_name})</option>
                     ))}
                   </select>
@@ -881,7 +1294,7 @@ export default function ServantDashboard({
                 <div>
                   <label className="block mb-1">المرحلة *</label>
                   <select className="w-full p-2 border rounded-xl bg-white" value={newMember.detailed_stage} onChange={e => setNewMember({ ...newMember, detailed_stage: e.target.value, service_stage: e.target.value })}>
-                    {availableServicesList.map((st, i) => <option key={i} value={st}>{st}</option>)}
+                    {STAGE_OPTIONS.map((st, i) => <option key={i} value={st}>{st}</option>)}
                   </select>
                 </div>
               </div>
