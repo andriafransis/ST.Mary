@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { ArrowRight, Layers, Users, FolderOpen, Plus } from 'lucide-react';
+import { ArrowRight, Layers, Users, FolderOpen, Plus, Edit3, Trash2, ArrowLeftRight } from 'lucide-react';
 
 const splitList = (val) =>
   String(val || '')
@@ -17,7 +17,13 @@ export default function ServiceDrillDownCards({
   onSelectYear,
   onSelectClass,
   onQuickAddYear,
-  onQuickAddClassForYear
+  onQuickAddClassForYear,
+  onEditGroup,
+  onDeleteGroup,
+  onTransferGroupPriest,
+  onEditClass,
+  onDeleteClass,
+  onTransferClassPriest
 }) {
   const [activeGroupKey, setActiveGroupKey] = useState(null);
   const [activeYearName, setActiveYearName] = useState(null);
@@ -80,6 +86,7 @@ export default function ServiceDrillDownCards({
       return {
         ...grp,
         _key: key,
+        _index: idx,
         years,
         directClasses,
         hasYears: years.length > 0,
@@ -160,56 +167,92 @@ export default function ServiceDrillDownCards({
         )}
       </div>
 
-      {/* المستوى 1: كروت الخدمات الرئيسية من بره */}
+      {/* المستوى 1: كروت الخدمات الرئيسية */}
       {!currentGroup && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {enrichedGroups.map(grp => {
             const isSelected = selectedServiceId === grp.id;
             return (
-              <button
+              <div
                 key={grp._key}
-                type="button"
-                onClick={() => {
-                  setActiveGroupKey(grp._key);
-                  setActiveYearName(null);
-                  setActiveClassId(null);
-                  if (onSelectService) onSelectService(grp);
-                }}
-                className={`p-4 rounded-2xl border-2 text-right transition flex items-center justify-between gap-3 cursor-pointer ${
+                className={`p-4 rounded-2xl border-2 transition flex flex-col justify-between gap-3 ${
                   isSelected
                     ? 'bg-[#7a1c24] text-white border-[#7a1c24] shadow'
                     : 'bg-white hover:border-[#7a1c24] border-gray-200 text-gray-900 shadow-2xs'
                 }`}
               >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">{grp.icon || (grp.has_classes !== false ? '🏫' : '🕊️')}</span>
-                    <strong className="text-sm font-black">{grp.group_name}</strong>
-                  </div>
-                  <p className={`text-[11px] font-bold ${isSelected ? 'text-amber-100' : 'text-gray-500'}`}>
-                    {grp.has_classes === false
-                      ? 'اجتماع عام بدون فصول'
-                      : grp.hasYears
-                        ? `${grp.years.length} سنوات / مراحل`
-                        : grp.directClasses.length > 0
-                          ? `${grp.directClasses.length} فصول`
-                          : 'بدون فصول فرعية'}
-                  </p>
-                </div>
-                <span
-                  className={`px-2.5 py-1 rounded-full text-[11px] font-black shrink-0 ${
-                    isSelected ? 'bg-white/15 text-white' : 'bg-[#f9ecee] text-[#7a1c24]'
-                  }`}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveGroupKey(grp._key);
+                    setActiveYearName(null);
+                    setActiveClassId(null);
+                    if (onSelectService) onSelectService(grp);
+                  }}
+                  className="text-right flex items-start justify-between gap-2 w-full cursor-pointer"
                 >
-                  {grp.totalMembers} مخدوم
-                </span>
-              </button>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">{grp.icon || (grp.has_classes !== false ? '🏫' : '🕊️')}</span>
+                      <strong className="text-sm font-black">{grp.group_name}</strong>
+                    </div>
+                    <p className={`text-[11px] font-bold ${isSelected ? 'text-amber-100' : 'text-gray-500'}`}>
+                      {grp.has_classes === false
+                        ? 'اجتماع عام بدون فصول'
+                        : grp.hasYears
+                          ? `${grp.years.length} سنوات / مراحل (اضغط للفتح)`
+                          : grp.directClasses.length > 0
+                            ? `${grp.directClasses.length} فصول (اضغط للفتح)`
+                            : 'بدون فصول فرعية (اضغط للفتح)'}
+                    </p>
+                  </div>
+                  <span
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-black shrink-0 ${
+                      isSelected ? 'bg-white/15 text-white' : 'bg-[#f9ecee] text-[#7a1c24]'
+                    }`}
+                  >
+                    {grp.totalMembers} مخدوم
+                  </span>
+                </button>
+
+                {isAdmin && (
+                  <div className="flex flex-wrap items-center justify-end gap-1.5 pt-2 border-t border-gray-100 text-[11px] font-bold">
+                    {onTransferGroupPriest && (
+                      <button
+                        type="button"
+                        onClick={() => onTransferGroupPriest(grp)}
+                        className="px-2 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-950 flex items-center gap-1 cursor-pointer"
+                      >
+                        <ArrowLeftRight size={11} /> كاهن
+                      </button>
+                    )}
+                    {onEditGroup && (
+                      <button
+                        type="button"
+                        onClick={() => onEditGroup(grp, grp._index)}
+                        className="px-2 py-1 rounded-lg bg-gray-100 hover:bg-amber-100 text-gray-800 flex items-center gap-1 cursor-pointer"
+                      >
+                        <Edit3 size={11} /> تعديل
+                      </button>
+                    )}
+                    {onDeleteGroup && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteGroup(grp)}
+                        className="px-2 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 flex items-center gap-1 cursor-pointer"
+                      >
+                        <Trash2 size={11} /> حذف
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
       )}
 
-      {/* المستوى 2: كروت السنوات الدراسية جوه الخدمة المختارة */}
+      {/* المستوى 2: كروت السنوات الدراسية جوه الخدمة */}
       {currentGroup && !currentYear && (
         <div className="space-y-3">
           {isAdmin && currentGroup.has_classes !== false && onQuickAddYear && (
@@ -236,31 +279,47 @@ export default function ServiceDrillDownCards({
           {currentGroup.hasYears ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {currentGroup.years.map((yr, idx) => (
-                <button
+                <div
                   key={idx}
-                  type="button"
-                  onClick={() => {
-                    setActiveYearName(yr.yearName);
-                    setActiveClassId(null);
-                    if (onSelectYear) onSelectYear(currentGroup, yr);
-                  }}
-                  className="p-4 rounded-2xl border-2 border-gray-200 hover:border-[#7a1c24] bg-white text-right transition flex items-center justify-between gap-3 cursor-pointer shadow-2xs"
+                  className="p-4 rounded-2xl border-2 border-gray-200 hover:border-[#7a1c24] bg-white transition flex flex-col justify-between gap-3 shadow-2xs"
                 >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-1.5">
-                      <Layers size={16} className="text-[#7a1c24]" />
-                      <strong className="text-sm font-black text-gray-900">{yr.yearName}</strong>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveYearName(yr.yearName);
+                      setActiveClassId(null);
+                      if (onSelectYear) onSelectYear(currentGroup, yr);
+                    }}
+                    className="text-right flex items-start justify-between gap-2 w-full cursor-pointer"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5">
+                        <Layers size={16} className="text-[#7a1c24]" />
+                        <strong className="text-sm font-black text-gray-900">{yr.yearName}</strong>
+                      </div>
+                      <p className="text-[11px] font-bold text-gray-500">
+                        {yr.hasClasses
+                          ? `جواها ${yr.classes.length} فصول (اضغط لفتح الفصول)`
+                          : 'ملهاش فصول (سنة مباشرة)'}
+                      </p>
                     </div>
-                    <p className="text-[11px] font-bold text-gray-500">
-                      {yr.hasClasses
-                        ? `جواها ${yr.classes.length} فصول (اضغط لفتح الفصول)`
-                        : 'ملهاش فصول (سنة مباشرة)'}
-                    </p>
-                  </div>
-                  <span className="px-2.5 py-1 rounded-full text-[11px] font-black bg-amber-50 text-amber-950 shrink-0">
-                    {yr.memberCount} مخدوم
-                  </span>
-                </button>
+                    <span className="px-2.5 py-1 rounded-full text-[11px] font-black bg-amber-50 text-amber-950 shrink-0">
+                      {yr.memberCount} مخدوم
+                    </span>
+                  </button>
+
+                  {isAdmin && onQuickAddClassForYear && (
+                    <div className="flex justify-end pt-2 border-t border-gray-100">
+                      <button
+                        type="button"
+                        onClick={() => onQuickAddClassForYear(currentGroup, yr)}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-950 text-[11px] font-black flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus size={12} /> + إضافة فصل للسنة
+                      </button>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           ) : (
@@ -279,7 +338,7 @@ export default function ServiceDrillDownCards({
         </div>
       )}
 
-      {/* المستوى 3: كروت الفصول جوه السنة الدراسية المختارة */}
+      {/* المستوى 3: كروت الفصول جوه السنة الدراسية */}
       {currentGroup && currentYear && (
         <div className="space-y-3">
           {isAdmin && onQuickAddClassForYear && (
@@ -300,34 +359,70 @@ export default function ServiceDrillDownCards({
                 const isClsActive = activeClassId === cls.id;
                 const clsMembers = countMembersMatching([cls.class_name]);
                 return (
-                  <button
+                  <div
                     key={cls.id}
-                    type="button"
-                    onClick={() => {
-                      setActiveClassId(cls.id);
-                      if (onSelectClass) onSelectClass(currentGroup, currentYear, cls);
-                    }}
-                    className={`p-4 rounded-2xl border-2 text-right transition flex items-center justify-between gap-3 cursor-pointer ${
+                    className={`p-4 rounded-2xl border-2 transition flex flex-col justify-between gap-3 ${
                       isClsActive
                         ? 'bg-[#7a1c24] text-white border-[#7a1c24] shadow'
                         : 'bg-white hover:border-blue-700 border-gray-200 text-gray-900 shadow-2xs'
                     }`}
                   >
-                    <div className="space-y-1">
-                      <strong className="text-sm font-black block">{cls.class_name}</strong>
-                      <span className={`text-[11px] font-bold block ${isClsActive ? 'text-amber-100' : 'text-gray-500'}`}>
-                        {cls.head_servant_name ? `⭐ ${cls.head_servant_name}` : 'فصل دراسي'}
-                        {cls.meeting_time ? ` • ⏰ ${cls.meeting_time}` : ''}
-                      </span>
-                    </div>
-                    <span
-                      className={`px-2.5 py-1 rounded-full text-[11px] font-black shrink-0 ${
-                        isClsActive ? 'bg-white/15 text-white' : 'bg-blue-50 text-blue-900'
-                      }`}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveClassId(cls.id);
+                        if (onSelectClass) onSelectClass(currentGroup, currentYear, cls);
+                      }}
+                      className="text-right flex items-start justify-between gap-2 w-full cursor-pointer"
                     >
-                      {clsMembers} مخدوم
-                    </span>
-                  </button>
+                      <div className="space-y-1">
+                        <strong className="text-sm font-black block">{cls.class_name}</strong>
+                        <span className={`text-[11px] font-bold block ${isClsActive ? 'text-amber-100' : 'text-gray-500'}`}>
+                          {cls.head_servant_name ? `⭐ ${cls.head_servant_name}` : 'فصل دراسي'}
+                          {cls.meeting_time ? ` • ⏰ ${cls.meeting_time}` : ''}
+                        </span>
+                      </div>
+                      <span
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-black shrink-0 ${
+                          isClsActive ? 'bg-white/15 text-white' : 'bg-blue-50 text-blue-900'
+                        }`}
+                      >
+                        {clsMembers} مخدوم
+                      </span>
+                    </button>
+
+                    {isAdmin && (
+                      <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-gray-100 text-[11px] font-bold">
+                        {onTransferClassPriest && (
+                          <button
+                            type="button"
+                            onClick={() => onTransferClassPriest(cls)}
+                            className="px-2 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-950 flex items-center gap-1 cursor-pointer"
+                          >
+                            <ArrowLeftRight size={11} /> كاهن
+                          </button>
+                        )}
+                        {onEditClass && (
+                          <button
+                            type="button"
+                            onClick={() => onEditClass(cls, currentGroup, currentYear)}
+                            className="px-2 py-1 rounded-lg bg-gray-100 hover:bg-amber-100 text-gray-800 flex items-center gap-1 cursor-pointer"
+                          >
+                            <Edit3 size={11} /> تعديل
+                          </button>
+                        )}
+                        {onDeleteClass && (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteClass(cls.id)}
+                            className="px-2 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 flex items-center gap-1 cursor-pointer"
+                          >
+                            <Trash2 size={11} /> حذف
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>

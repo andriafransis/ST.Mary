@@ -1434,7 +1434,7 @@ export default function AdminDashboard({
         <div className="space-y-4 text-xs">
           {renderTopBack('🏫 الخدمات والاجتماعات والسنوات الدراسية وفصولها')}
 
-          {/* تصفح متدرج بالكروت: الخدمة ← السنة الدراسية ← الفصول */}
+          {/* تصفح متدرج بالكروت مع أكشنات مباشرة على كل مستوى: الخدمة ← السنة الدراسية ← الفصول */}
           <ServiceDrillDownCards
             groups={effectiveGroups}
             services={services}
@@ -1466,6 +1466,53 @@ export default function AdminDashboard({
                 head_servant_name: grp.head_servant_name || ''
               });
               document.getElementById('add-class-form')?.scrollIntoView({ behavior: 'smooth' });
+            }}
+            onEditGroup={(grp, idx) => {
+              if (!grp.id) return alert('قم بتشغيل SQL جدول service_groups أولاً.');
+              setEditingGrpId(grp.id);
+              setGrpForm({
+                group_name: grp.group_name,
+                icon: grp.icon || '🏫',
+                gender_target: grp.gender_target || 'عام (الكل: ذكور وإناث)',
+                has_classes: grp.has_classes !== false,
+                head_servant_name: grp.head_servant_name || '',
+                servants_names: grp.servants_names || '',
+                service_day: grp.service_day || '',
+                start_time: grp.start_time || '',
+                end_time: grp.end_time || '',
+                stagesText: normalizeGroupStages(grp.stages).join(', '),
+                sort_order: grp.sort_order || idx + 1
+              });
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onDeleteGroup={handleDeleteServiceGroup}
+            onTransferGroupPriest={(grp) => {
+              setPriestTransferForm(prev => ({
+                ...prev,
+                mode: 'by_service',
+                serviceName: grp.group_name,
+                yearFilter: ''
+              }));
+            }}
+            onEditClass={(cls, grp, yr) => {
+              setEditingSrvId(cls.id);
+              setSrvForm({
+                ...emptyService,
+                ...cls,
+                stage_name: grp?.group_name || cls.stage_name || '',
+                academic_year: yr?.yearName || '',
+                class_gender: 'عام'
+              });
+              document.getElementById('add-class-form')?.scrollIntoView({ behavior: 'smooth' });
+            }}
+            onDeleteClass={onDeleteService}
+            onTransferClassPriest={(cls) => {
+              setPriestTransferForm(prev => ({
+                ...prev,
+                mode: 'by_class',
+                classId: cls.id,
+                fromPriestId: cls.priest_id || ''
+              }));
             }}
           />
 
@@ -3261,3 +3308,4 @@ export default function AdminDashboard({
     </div>
   );
 }
+```[cite: 10, 11]
