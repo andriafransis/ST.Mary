@@ -69,6 +69,7 @@ export default function PublicPage({
   const [events, setEvents] = useState([]);
   const [masses, setMasses] = useState([]);
   const [publicTrips, setPublicTrips] = useState([]);
+  const [priestPublicTrips, setPriestPublicTrips] = useState([]);
   const [marySettingsUrl, setMarySettingsUrl] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -109,9 +110,11 @@ export default function PublicPage({
     password: '',
     phone: '',
     dob: '',
+    gender: 'ذكر',
     address: '',
     requested_role: 'member',
     also_parent: false,
+    guardian_type: 'father',
     detailed_stage: 'أولى ثانوي',
     job_title: '',
     is_studying: true,
@@ -124,6 +127,7 @@ export default function PublicPage({
   const [tempChild, setTempChild] = useState({
     child_name: '',
     dob: '',
+    gender: 'ذكر',
     stage: 'أولى ابتدائي',
     study_details: '',
     phone: ''
@@ -132,7 +136,7 @@ export default function PublicPage({
   const loadPublic = async () => {
     setLoading(true);
     try {
-      const [pc, ev, ms, tr, st] = await Promise.all([
+      const [pc, ev, ms, tr, pps, st] = await Promise.all([
         supabase
           .from('church_public_content')
           .select('*')
@@ -153,6 +157,11 @@ export default function PublicPage({
           .eq('is_public', true)
           .order('trip_date', { ascending: true }),
         supabase
+          .from('priest_personal_schedule')
+          .select('*')
+          .eq('is_public', true)
+          .order('event_date', { ascending: true }),
+        supabase
           .from('church_settings')
           .select('virgin_mary_image_url')
           .limit(1)
@@ -162,6 +171,11 @@ export default function PublicPage({
       if (ev.data) setEvents(ev.data);
       if (ms.data) setMasses(ms.data);
       if (tr.data) setPublicTrips(tr.data);
+      if (pps.data) {
+        setPriestPublicTrips(
+          pps.data.filter(x => x.event_type === 'رحلة كنسية 🚌' || x.event_type === 'مؤتمر روحي 🏕️')
+        );
+      }
       if (st.data?.virgin_mary_image_url) setMarySettingsUrl(st.data.virgin_mary_image_url);
     } finally {
       setLoading(false);
@@ -564,7 +578,7 @@ export default function PublicPage({
   const handleAddChildRow = () => {
     if (!tempChild.child_name.trim()) return alert('اكتب اسم الابن/الابنة أولاً');
     setChildrenList([...childrenList, { ...tempChild, child_name: tempChild.child_name.trim() }]);
-    setTempChild({ child_name: '', dob: '', stage: 'أولى ابتدائي', study_details: '', phone: '' });
+    setTempChild({ child_name: '', dob: '', gender: 'ذكر', stage: 'أولى ابتدائي', study_details: '', phone: '' });
   };
 
   const handleRegister = async (e) => {
@@ -595,6 +609,10 @@ export default function PublicPage({
       const isAlsoParent = regForm.requested_role === 'parent' || Boolean(regForm.also_parent);
       const extraScreens = isAlsoParent && dbRole !== 'parent' ? ['parent_panel'] : [];
       const childrenSummary = childrenList.map(c => `${c.child_name} (${c.study_details || c.stage})`).join('، ');
+      const userGender = regForm.gender === 'أنثى' ? 'أنثى' : 'ذكر';
+      const resolvedGuardianType = isAlsoParent
+        ? (regForm.guardian_type === 'mother' || userGender === 'أنثى' ? 'mother' : 'father')
+        : '';
 
       const { data: savedUser, error } = await supabase.from('church_users').insert([{
         username: cleanUser,
@@ -604,6 +622,9 @@ export default function PublicPage({
         second_name: regForm.second_name.trim(),
         third_name: regForm.third_name.trim(),
         fourth_name: regForm.fourth_name.trim(),
+        gender: userGender,
+        guardian_type: resolvedGuardianType,
+        family_role: resolvedGuardianType === 'mother' ? 'الأم' : resolvedGuardianType === 'father' ? 'الأب' : 'ابن/ابنة',
         role: dbRole,
         requested_role: dbRole,
         status: 'pending',
@@ -621,7 +642,8 @@ export default function PublicPage({
         permissions: {
           extra_screens: extraScreens,
           view_parent_panel: isAlsoParent,
-          also_parent: isAlsoParent
+          also_parent: isAlsoParent,
+          ...(resolvedGuardianType ? { guardian_type: resolvedGuardianType } : {})
         }
       }]).select().single();
 
@@ -633,17 +655,20 @@ export default function PublicPage({
       }
 
       if (isAlsoParent && savedUser && childrenList.length > 0) {
+        const isMother = resolvedGuardianType === 'mother';
         const childPayloads = childrenList.map((c, idx) => ({
           username: `${cleanUser}_c${idx + 1}_${Date.now().toString().slice(-3)}`,
           password: regForm.password,
           full_name: c.child_name.includes(' ') ? c.child_name : `${c.child_name} ${full_name}`,
           first_name: c.child_name.split(' ')[0] || c.child_name,
+          gender: c.gender === 'أنثى' ? 'أنثى' : 'ذكر',
           role: 'member',
           requested_role: 'member',
           status: 'pending',
           parent_id: savedUser.id,
-          father_full_name: full_name,
-          father_phone: regForm.phone.trim(),
+          ...(isMother
+            ? { mother_id: savedUser.id, mother_full_name: full_name, mother_phone: regForm.phone.trim() }
+            : { father_id: savedUser.id, father_full_name: full_name, father_phone: regForm.phone.trim() }),
           dob: c.dob || null,
           detailed_stage: c.study_details || c.stage || 'أولى ابتدائي',
           service_stage: c.stage || 'أولى ابتدائي',
@@ -796,7 +821,7 @@ export default function PublicPage({
             {!tripsMeta.hidden && (
               <a href="#sec-trips" className="bg-white p-4 rounded-2xl border shadow-2xs hover:border-[#7a1c24] transition">
                 <span className="text-xs text-gray-500 block">🚌 {tripsMeta.title}</span>
-                <strong className="text-lg font-black text-[#7a1c24]">{tripContents.length + publicTrips.length} رحلة</strong>
+                <strong className="text-lg font-black text-[#7a1c24]">{tripContents.length + publicTrips.length + priestPublicTrips.length} رحلة</strong>
               </a>
             )}
             {!newsMeta.hidden && (
@@ -974,7 +999,7 @@ export default function PublicPage({
                   <h2 className="text-base font-black text-[#7a1c24] flex items-center gap-2"><Bus size={19} /> {tripsMeta.title}</h2>
                   {canEdit && <button type="button" onClick={() => openAddContentModal('trip')} className="px-2.5 py-1 bg-[#f9ecee] text-[#7a1c24] rounded-lg text-[11px] font-black cursor-pointer">+ إعلان رحلة</button>}
                 </div>
-                {tripContents.length === 0 && publicTrips.length === 0 ? (
+                {tripContents.length === 0 && publicTrips.length === 0 && priestPublicTrips.length === 0 ? (
                   <p className="text-xs text-gray-500">لا توجد رحلات عامة معلنة حالياً.</p>
                 ) : (
                   <div className="space-y-2">
@@ -1012,6 +1037,21 @@ export default function PublicPage({
                         </div>
                       );
                     })}
+                    {priestPublicTrips.map(pt => (
+                      <div key={pt.id} className="p-3.5 bg-amber-50/40 rounded-2xl border border-amber-200 space-y-1.5 text-xs">
+                        <div className="flex justify-between items-start gap-2">
+                          <div>
+                            <span className="px-2 py-0.5 bg-amber-100 text-amber-950 rounded text-[10px] font-bold">{pt.event_type}</span>
+                            {pt.target_service && <span className="mr-1 px-2 py-0.5 bg-blue-100 text-blue-900 rounded text-[10px] font-bold">{pt.target_service}</span>}
+                            {Number(pt.trip_cost) > 0 && <span className="mr-1 px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded text-[10px] font-black">{pt.trip_cost} ج.م</span>}
+                            <strong className="text-sm text-gray-900 block mt-1">{pt.title}</strong>
+                          </div>
+                          <span className="px-2.5 py-1 bg-white border rounded-xl font-bold text-[#7a1c24] shrink-0">{pt.event_date || 'قريباً'}</span>
+                        </div>
+                        {pt.destinations && <p className="text-gray-700">🗺️ {pt.destinations}</p>}
+                        {pt.daily_program && <p className="text-gray-600 whitespace-pre-line bg-white/80 p-2 rounded-xl border">{pt.daily_program}</p>}
+                      </div>
+                    ))}
                     {tripContents.map(tr => (
                       <div key={tr.id} className="p-3 bg-[#fbfaf7] rounded-2xl border flex justify-between items-start gap-2 text-xs">
                         <div className="space-y-0.5">
@@ -1478,9 +1518,25 @@ export default function PublicPage({
                 <input required placeholder="اسم المستخدم للدخول *" className="w-full p-2.5 border rounded-xl" value={regForm.username} onChange={e => setRegForm({ ...regForm, username: e.target.value })} />
                 <input required type="password" placeholder="كلمة المرور *" className="w-full p-2.5 border rounded-xl" value={regForm.password} onChange={e => setRegForm({ ...regForm, password: e.target.value })} />
               </div>
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <input required type="tel" placeholder="رقم الموبايل / الواتساب *" className="w-full p-2.5 border rounded-xl" value={regForm.phone} onChange={e => setRegForm({ ...regForm, phone: e.target.value })} />
                 <input required type="date" className="w-full p-2.5 border rounded-xl" value={regForm.dob} onChange={e => setRegForm({ ...regForm, dob: e.target.value })} />
+                <select
+                  required
+                  className="w-full p-2.5 border rounded-xl bg-white"
+                  value={regForm.gender}
+                  onChange={e => {
+                    const g = e.target.value;
+                    setRegForm({
+                      ...regForm,
+                      gender: g,
+                      guardian_type: g === 'أنثى' ? 'mother' : 'father'
+                    });
+                  }}
+                >
+                  <option value="ذكر">♂️ النوع: ذكر</option>
+                  <option value="أنثى">♀️ النوع: أنثى</option>
+                </select>
               </div>
               <input required placeholder="العنوان بالتفصيل *" className="w-full p-2.5 border rounded-xl" value={regForm.address} onChange={e => setRegForm({ ...regForm, address: e.target.value })} />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -1509,12 +1565,22 @@ export default function PublicPage({
               )}
               {showParentChildrenBox && (
                 <div className="bg-amber-50/70 p-3.5 rounded-2xl border-2 border-amber-200 space-y-2.5">
-                  <strong className="text-[#7a1c24] block">👨‍👩‍👦 بيانات الأبناء:</strong>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="flex flex-wrap justify-between items-center gap-2">
+                    <strong className="text-[#7a1c24] block">👨‍👩‍👦 بيانات الأبناء:</strong>
+                    <select className="p-1.5 border border-amber-300 rounded-xl bg-white text-[11px]" value={regForm.guardian_type} onChange={e => setRegForm({ ...regForm, guardian_type: e.target.value })}>
+                      <option value="father">👨 الصفة: الأب</option>
+                      <option value="mother">👩 الصفة: الأم</option>
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     <input placeholder="اسم الابن / الابنة" className="p-2 border rounded-xl bg-white" value={tempChild.child_name} onChange={e => setTempChild({ ...tempChild, child_name: e.target.value })} />
                     <input type="date" className="p-2 border rounded-xl bg-white" value={tempChild.dob} onChange={e => setTempChild({ ...tempChild, dob: e.target.value })} />
+                    <select className="p-2 border rounded-xl bg-white" value={tempChild.gender} onChange={e => setTempChild({ ...tempChild, gender: e.target.value })}>
+                      <option value="ذكر">♂️ ذكر</option>
+                      <option value="أنثى">♀️ أنثى</option>
+                    </select>
                     <select className="p-2 border rounded-xl bg-white" value={tempChild.stage} onChange={e => setTempChild({ ...tempChild, stage: e.target.value })}>{STAGE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}</select>
-                    <input placeholder="تفاصيل الدراسة" className="p-2 border rounded-xl bg-white" value={tempChild.study_details} onChange={e => setTempChild({ ...tempChild, study_details: e.target.value })} />
+                    <input placeholder="تفاصيل الدراسة" className="sm:col-span-2 p-2 border rounded-xl bg-white" value={tempChild.study_details} onChange={e => setTempChild({ ...tempChild, study_details: e.target.value })} />
                   </div>
                   <div className="flex gap-2">
                     <input type="tel" placeholder="موبايل الابن (اختياري)" className="flex-1 p-2 border rounded-xl bg-white" value={tempChild.phone} onChange={e => setTempChild({ ...tempChild, phone: e.target.value })} />
@@ -1522,7 +1588,7 @@ export default function PublicPage({
                   </div>
                   {childrenList.map((c, idx) => (
                     <div key={idx} className="bg-white p-2 rounded-xl border flex justify-between items-center text-[11px]">
-                      <span>• <strong>{c.child_name}</strong> ({c.study_details || c.stage})</span>
+                      <span>• <strong>{c.child_name}</strong> ({c.gender === 'أنثى' ? 'أنثى' : 'ذكر'} • {c.study_details || c.stage})</span>
                       <button type="button" onClick={() => setChildrenList(childrenList.filter((_, i) => i !== idx))} className="text-red-600 p-1"><Trash2 size={13} /></button>
                     </div>
                   ))}
