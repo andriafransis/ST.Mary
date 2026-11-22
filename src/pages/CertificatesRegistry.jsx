@@ -14,11 +14,11 @@ const DEACON_RANKS = [
 const CERT_DESIGN_KEY = 'church_cert_design_prefs_v1';
 
 const DEFAULT_DESIGN = {
-  fontSize: 'large', // 'medium' | 'large' | 'xlarge'
-  fontFamily: 'cairo', // 'cairo' | 'amiri'
+  fontSize: 'large',
+  fontFamily: 'cairo',
   themeColor: '#7a1c24',
   accentColor: '#b8892b',
-  borderStyle: 'double', // 'double' | 'solid' | 'ridge'
+  borderStyle: 'double',
   baptismTitle: 'شهادة معمودية مقدسة',
   deaconTitlePrefix: 'شهادة',
   baptismIntro: 'بأنه بنعمة ربنا يسوع المسيح قد تم عماد',
@@ -63,7 +63,7 @@ const FONT_PRESETS = {
 };
 
 export default function CertificatesRegistry({ users = [], onRefresh }) {
-  const [tab, setTab] = useState('baptism'); // 'baptism' | 'deacons'
+  const [tab, setTab] = useState('baptism');
   const [searchQ, setSearchQ] = useState('');
 
   const [settings, setSettings] = useState({
@@ -74,7 +74,6 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
   const [baptisms, setBaptisms] = useState([]);
   const [ordinations, setOrdinations] = useState([]);
 
-  // معاينة وتعديل الشهادة
   const [printBaptism, setPrintBaptism] = useState(null);
   const [printOrdination, setPrintOrdination] = useState(null);
   const [showDesignPanel, setShowDesignPanel] = useState(false);
@@ -144,7 +143,6 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
 
   useEffect(() => { loadData(); }, []);
 
-  // حفظ معمودية جديدة
   const saveBaptism = async (e) => {
     e.preventDefault();
     const payload = {
@@ -162,7 +160,6 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
     } else if (error) alert(error.message);
   };
 
-  // تحديث بيانات شهادة معمودية من المعاينة وحفظها في السجل
   const handleSaveBaptismEdit = async () => {
     if (!printBaptism?.id) return;
     setSavingEdit(true);
@@ -203,7 +200,6 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
     if (!error) setBaptisms(baptisms.filter(b => b.id !== id));
   };
 
-  // حفظ رسامة / ترقية شماس جديدة
   const saveOrdination = async (e) => {
     e.preventDefault();
     const payload = {
@@ -215,7 +211,6 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
     const { data, error } = await supabase.from('deacon_ordinations').insert([payload]).select().single();
     if (!error && data) {
       if (ordForm.user_id) {
-        // تحديث حالة الفرد في قاعدة البيانات ليصبح شماساً بالرتبة الجديدة
         await supabase
           .from('church_users')
           .update({
@@ -232,7 +227,6 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
     } else if (error) alert(error.message);
   };
 
-  // تحديث بيانات شهادة الشماسية من المعاينة وحفظها في السجل
   const handleSaveOrdinationEdit = async () => {
     if (!printOrdination?.id) return;
     setSavingEdit(true);
@@ -271,21 +265,23 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
 
   const priestsList = users.filter(u => u.role === 'priest');
 
-  // استبعاد أي أنثى بنسبة 100% وحصر القائمة على الذكور فقط
+  // استبعاد الإناث تماماً + استبعاد الكهنة والسوبر أدمن
+  // واحتواء كل شعب وخدام وأولياء أمور الكنيسة الذكور
   const maleCandidates = users.filter(u => {
-    // شرط النوع: ذكر فقط بدون استثناء
+    // 1. النوع: ذكر فقط
     const isMale = u.gender === 'ذكر' || u.gender !== 'أنثى';
     if (!isMale) return false;
 
-    // استبعاد الأدمن وحصر الأدوار الكنسية
-    const validRole = ['member', 'servant', 'head_servant', 'vice_head_servant'].includes(u.role);
-    if (!validRole) return false;
+    // 2. الكهنة والسوبر أدمن ليسوا مرشحين للرتب الشماسية
+    if (u.role === 'priest' || u.role === 'admin') return false;
 
-    // لو الإجراء "ترقية رتبة"، نظهر فقط من هو شماس بالفعل
+    // 3. لو الإجراء المختار هو "ترقية رتبة":
+    // نظهر فقط من هو شماس بالفعل في قاعدة البيانات
     if (ordForm.action_type === 'ترقية رتبة') {
       return Boolean(u.is_deacon);
     }
 
+    // 4. لو رسامة جديدة: كل الذكور في الكنيسة متاحين (أولياء أمور، خدام، مخدومين...)
     return true;
   });
 
@@ -304,7 +300,6 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
 
   return (
     <div className="space-y-4 text-xs" dir="rtl">
-      {/* خط الأميري الرسمي للشهادات + ستايل الطباعة A4 Landscape */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&display=swap');
 
@@ -387,9 +382,7 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
         />
       </div>
 
-      {/* ======================================================
-          1. سجل المعمودية
-      ====================================================== */}
+      {/* 1. سجل المعمودية */}
       {tab === 'baptism' && (
         <div className="space-y-4 print:hidden">
           <form onSubmit={saveBaptism} className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 space-y-3 font-bold shadow-sm">
@@ -450,9 +443,7 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
         </div>
       )}
 
-      {/* ======================================================
-          2. سجل رشومات وترقيات الشمامسة (ذكور فقط)
-      ====================================================== */}
+      {/* 2. سجل رشومات وترقيات الشمامسة (ذكور فقط) */}
       {tab === 'deacons' && (
         <div className="space-y-4 print:hidden">
           <form onSubmit={saveOrdination} className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 space-y-3 font-bold shadow-sm">
@@ -463,7 +454,11 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
                 value={ordForm.user_id}
                 onChange={e => {
                   const u = users.find(x => x.id === e.target.value);
-                  setOrdForm({ ...ordForm, user_id: e.target.value, deacon_full_name: u?.full_name || ordForm.deacon_full_name });
+                  setOrdForm({
+                    ...ordForm,
+                    user_id: e.target.value,
+                    deacon_full_name: u?.full_name || ordForm.deacon_full_name
+                  });
                 }}
               >
                 <option value="">-- اختر من المسجلين (ذكور فقط) --</option>
@@ -473,7 +468,15 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
                   </option>
                 ))}
               </select>
-              <input required placeholder="اسم الشماس رباعي *" className="p-2.5 border rounded-xl" value={ordForm.deacon_full_name} onChange={e => setOrdForm({ ...ordForm, deacon_full_name: e.target.value })} />
+
+              <input
+                required
+                placeholder="اسم الشماس رباعي *"
+                className="p-2.5 border rounded-xl"
+                value={ordForm.deacon_full_name}
+                onChange={e => setOrdForm({ ...ordForm, deacon_full_name: e.target.value })}
+              />
+
               <select
                 className="p-2.5 border rounded-xl bg-white"
                 value={ordForm.action_type}
@@ -483,6 +486,7 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
                 <option value="ترقية رتبة">ترقية رتبة شماسية</option>
               </select>
             </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               <select className="p-2.5 border rounded-xl bg-purple-50/40" value={ordForm.deacon_rank} onChange={e => setOrdForm({ ...ordForm, deacon_rank: e.target.value })}>
                 {DEACON_RANKS.map((r, i) => <option key={i} value={r}>{r}</option>)}
@@ -490,6 +494,7 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
               <input required type="date" className="p-2.5 border rounded-xl" value={ordForm.ordination_date} onChange={e => setOrdForm({ ...ordForm, ordination_date: e.target.value })} />
               <input required placeholder="اسم نيافة الأب الأسقف المرشم *" className="p-2.5 border rounded-xl" value={ordForm.bishop_name} onChange={e => setOrdForm({ ...ordForm, bishop_name: e.target.value })} />
             </div>
+
             <button type="submit" className="w-full sm:w-auto px-5 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl flex items-center justify-center gap-1.5 shadow cursor-pointer">
               <Plus size={15} /> حفظ القيد ومعاينة شهادة الشماسية
             </button>
@@ -524,9 +529,7 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
         </div>
       )}
 
-      {/* ======================================================
-          معاينة وطباعة وتعديل شهادة المعمودية (A4 Landscape)
-      ====================================================== */}
+      {/* معاينة وطباعة وتعديل شهادة المعمودية */}
       {printBaptism && (
         <div className="fixed inset-0 bg-black/65 flex items-start justify-center p-2 sm:p-4 z-50 overflow-y-auto">
           <div className="bg-white rounded-3xl max-w-5xl w-full p-4 sm:p-6 space-y-4 my-auto">
@@ -550,7 +553,6 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
               </button>
             </div>
 
-            {/* لوحة تعديل الشكل والبيانات */}
             {showDesignPanel && (
               <div className="bg-[#fbfaf7] border border-amber-300 rounded-2xl p-4 space-y-4 no-print">
                 <div className="flex flex-wrap justify-between items-center gap-2 border-b pb-2">
@@ -675,7 +677,6 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
               }}
               className="p-6 sm:p-9 rounded-2xl bg-[#fffdf9] text-center flex flex-col justify-between gap-4"
             >
-              {/* ترويسة الشهادة */}
               <div className="flex justify-between items-center border-b-2 pb-3" style={{ borderColor: design.accentColor }}>
                 <div className="text-right space-y-1">
                   <p className={`font-black ${fp.diocese}`} style={{ color: design.themeColor }}>{settings.diocese_name}</p>
@@ -689,7 +690,6 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
                 )}
               </div>
 
-              {/* عنوان ومحتوى الشهادة */}
               <div className="space-y-4">
                 <h1 className={`font-black tracking-wide ${fp.title}`} style={{ color: design.themeColor }}>
                   {design.baptismTitle}
@@ -719,7 +719,6 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
                 </div>
               </div>
 
-              {/* التوقيعات */}
               <div className={`grid grid-cols-2 gap-12 pt-4 max-w-3xl mx-auto w-full font-extrabold text-gray-800 ${fp.sig}`}>
                 <div><p className="mb-8">{design.baptismSigRight}</p><p>........................................</p></div>
                 <div><p className="mb-8">{design.baptismSigLeft}</p><p>........................................</p></div>
@@ -729,9 +728,7 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
         </div>
       )}
 
-      {/* ======================================================
-          معاينة وطباعة وتعديل شهادة الشماسية (A4 Landscape)
-      ====================================================== */}
+      {/* معاينة وطباعة وتعديل شهادة الشماسية */}
       {printOrdination && (
         <div className="fixed inset-0 bg-black/65 flex items-start justify-center p-2 sm:p-4 z-50 overflow-y-auto">
           <div className="bg-white rounded-3xl max-w-5xl w-full p-4 sm:p-6 space-y-4 my-auto">
@@ -857,7 +854,6 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
               }}
               className="p-6 sm:p-9 rounded-2xl bg-[#fffdf9] text-center flex flex-col justify-between gap-4"
             >
-              {/* ترويسة الشهادة */}
               <div className="flex justify-between items-center border-b-2 pb-3" style={{ borderColor: design.themeColor }}>
                 <div className="text-right space-y-1">
                   <p className={`font-black ${fp.diocese}`} style={{ color: design.themeColor }}>{settings.diocese_name}</p>
@@ -871,7 +867,6 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
                 )}
               </div>
 
-              {/* عنوان ومحتوى الشهادة */}
               <div className="space-y-4">
                 <h1 className={`font-black ${fp.title}`} style={{ color: design.themeColor }}>
                   {design.deaconTitlePrefix} {printOrdination.action_type === 'ترقية رتبة' ? 'ترقية رتبة شماسية' : 'رسامة شماس'}
@@ -892,7 +887,6 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
                 </div>
               </div>
 
-              {/* التوقيعات */}
               <div className={`grid grid-cols-2 gap-12 pt-4 max-w-3xl mx-auto w-full font-extrabold text-gray-800 ${fp.sig}`}>
                 <div><p className="mb-8">{design.deaconSigRight}</p><p>........................................</p></div>
                 <div><p className="mb-8">{design.deaconSigLeft}</p><p>........................................</p></div>
