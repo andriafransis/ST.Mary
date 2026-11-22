@@ -57,13 +57,63 @@ const isPrepOrSecondaryScope = (scope = '') => {
 
 export default function ServantDashboard({
   servant, users = [], services = [], serviceGroups = [], activities = [], memberNotes = [], birthdays = [],
-  onAddMember, onSaveActivity, onSaveMemberNote, onRefresh, onUpdateServiceStructure
+  onAddMember, onSaveActivity, onSaveMemberNote, onAcknowledgeNote, onRefresh, onUpdateServiceStructure
 }) {
   const isAdminUser = servant?.role === 'admin';
   const canAdd = isAdminUser || servant?.permissions?.can_add !== false;
   const canManageStructure = true;
   const canExtractSheet = canExtractMasterSheet(servant);
   const [showMasterSheet, setShowMasterSheet] = useState(false);
+
+  const acknowledgedStorageKey = `acked_member_notes_${servant?.id || servant?.username || 'default'}`;
+
+  const [hiddenNotes, setHiddenNotes] = useState(() => {
+    try {
+      const saved = localStorage.getItem(acknowledgedStorageKey);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(acknowledgedStorageKey);
+      setHiddenNotes(saved ? JSON.parse(saved) : {});
+    } catch {
+      setHiddenNotes({});
+    }
+  }, [acknowledgedStorageKey]);
+
+  const handleAcknowledgeNote = async (note) => {
+    if (!note?.id) return;
+    const updatedMap = { ...hiddenNotes, [note.id]: true };
+    setHiddenNotes(updatedMap);
+    try {
+      localStorage.setItem(acknowledgedStorageKey, JSON.stringify(updatedMap));
+    } catch {
+      // تجاهل خطأ التخزين المحلي إذا كان غير متاح
+    }
+
+    if (typeof onAcknowledgeNote === 'function') {
+      try {
+        await onAcknowledgeNote(note);
+      } catch {
+        // استمرار العمل حتى لو الدالة غير مفعلة
+      }
+    }
+
+    if (supabase && typeof supabase.from === 'function') {
+      try {
+        await supabase
+          .from('member_notes')
+          .update({ is_read: true, acknowledged: true })
+          .eq('id', note.id);
+      } catch {
+        // تجاهل إذا كانت الأعمدة غير موجودة في الجدول
+      }
+    }
+  };
 
   const baseGroups = Array.isArray(serviceGroups) && serviceGroups.length > 0
     ? serviceGroups
@@ -180,7 +230,6 @@ export default function ServantDashboard({
   const [viewMode, setViewMode] = useState('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
-  const [hiddenNotes, setHiddenNotes] = useState({});
 
   const [actModal, setActModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState(null);
@@ -858,7 +907,6 @@ export default function ServantDashboard({
           })}
         </div>
 
-        {/* المحتوى الداخلي للخدمة المختارة: السنوات الدراسية ثم الفصول */}
         <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-amber-200/80 space-y-3 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-1.5 font-black">
@@ -928,7 +976,6 @@ export default function ServantDashboard({
             </div>
           )}
 
-          {/* السنوات / المراحل داخل الخدمة المختارة */}
           <div className="space-y-1.5">
             <span className="text-[11px] font-bold text-gray-700 block">
               السنوات / المراحل داخل ({selectedScope}):
@@ -1034,7 +1081,6 @@ export default function ServantDashboard({
             )}
           </div>
 
-          {/* الفصول التابعة للسنة أو الخدمة المختارة */}
           <div className="space-y-1.5 pt-1 border-t border-amber-200/60">
             <span className="text-[11px] font-bold text-gray-700 block">
               الفصول {selectedYearFilter ? `التابعة لـ (${selectedYearFilter})` : `التابعة لـ (${selectedScope})`}:
@@ -1277,8 +1323,8 @@ export default function ServantDashboard({
                         </div>
                         <button
                           type="button"
-                          onClick={() => setHiddenNotes(prev => ({ ...prev, [n.id]: true }))}
-                          className="px-3 py-1.5 bg-green-700 text-white rounded-xl font-bold text-[11px] shrink-0 cursor-pointer self-end sm:self-center"
+                          onClick={() => handleAcknowledgeNote(n)}
+                          className="px-3 py-1.5 bg-green-700 hover:bg-green-800 text-white rounded-xl font-bold text-[11px] shrink-0 cursor-pointer self-end sm:self-center transition"
                         >
                           علمت ✅
                         </button>
