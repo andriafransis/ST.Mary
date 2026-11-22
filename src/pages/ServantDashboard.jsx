@@ -87,6 +87,7 @@ export default function ServantDashboard({
 
   const handleAcknowledgeNote = async (note) => {
     if (!note?.id) return;
+
     const updatedMap = { ...hiddenNotes, [note.id]: true };
     setHiddenNotes(updatedMap);
     try {
@@ -105,12 +106,23 @@ export default function ServantDashboard({
 
     if (supabase && typeof supabase.from === 'function') {
       try {
-        await supabase
+        const { error } = await supabase
           .from('member_notes')
-          .update({ is_read: true, acknowledged: true })
+          .update({
+            is_read: true,
+            acknowledged: true,
+            acknowledged_at: new Date().toISOString(),
+            acknowledged_by: servant?.full_name || servant?.username || servant?.id || 'servant'
+          })
           .eq('id', note.id);
-      } catch {
-        // تجاهل إذا كانت الأعمدة غير موجودة في الجدول
+
+        if (error) {
+          console.error('خطأ في حفظ تأكيد الملاحظة في قاعدة البيانات:', error.message);
+        } else if (typeof onRefresh === 'function') {
+          onRefresh();
+        }
+      } catch (err) {
+        console.error('تعذر تحديث الملاحظة في قاعدة البيانات:', err);
       }
     }
   };
@@ -282,6 +294,9 @@ export default function ServantDashboard({
         onRefresh();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'church_users' }, () => {
+        onRefresh();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'member_notes' }, () => {
         onRefresh();
       })
       .subscribe();
@@ -1264,7 +1279,9 @@ export default function ServantDashboard({
         <div className="grid gap-3">
           {displayedMembers.map((m, index) => {
             const mActs = activities.filter(a => a.member_id === m.id);
-            const mNotes = memberNotes.filter(n => n.member_id === m.id && !hiddenNotes[n.id]);
+            const mNotes = memberNotes.filter(
+              n => n.member_id === m.id && !hiddenNotes[n.id] && !n.is_read && !n.acknowledged
+            );
             const attInfo = getAttendanceInfo(m.id);
             const callPhone = m.phone || m.father_phone || m.mother_phone;
 
