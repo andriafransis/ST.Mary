@@ -10,7 +10,7 @@ import {
 } from '../components/priest/BusTripManager';
 import {
   Bus, Plus, Trash2, Edit3, Printer, Globe, Lock, X,
-  ArrowRight, BedDouble, Wind, Sun, Moon, Users, Phone, MessageCircle
+  ArrowRight, BedDouble, Wind, Sun, Moon, Users, Phone, MessageCircle, ShieldAlert
 } from 'lucide-react';
 
 const TRIP_CATEGORIES = [
@@ -25,6 +25,30 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
   const [activeCard, setActiveCard] = useState('hub');
   const [trips, setTrips] = useState([]);
   const [registrations, setRegistrations] = useState([]);
+
+  // التحقق الدقيق من الصلاحيات المركزية للشخص (من جدول الصلاحيات)
+  const isAdmin = currentUser?.role === 'admin';
+  const isPriest = currentUser?.role === 'priest';
+
+  const userPerms = currentUser?.permissions || {};
+  const screenPerms = userPerms.screen_permissions?.trips_office || {};
+
+  // هل يملك صلاحية إضافة رحلة جديدة؟
+  const canAddTrips =
+    isAdmin ||
+    Boolean(screenPerms.add) ||
+    Boolean(userPerms.manage_trips && screenPerms.add !== false);
+
+  // هل يملك صلاحية تعديل الرحلات وتسكينها؟
+  const canEditTrips =
+    isAdmin ||
+    Boolean(screenPerms.edit) ||
+    Boolean(userPerms.manage_trips && screenPerms.edit !== false);
+
+  // هل يملك صلاحية حذف الرحلات؟
+  const canDeleteTrips =
+    isAdmin ||
+    Boolean(screenPerms.delete);
 
   const [editingId, setEditingId] = useState(null);
   const [viewBusTrip, setViewBusTrip] = useState(null);
@@ -140,6 +164,13 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
 
   const handleSave = async (e) => {
     e.preventDefault();
+    if (editingId && !canEditTrips) {
+      return alert('🔒 غير مصرح لك بتعديل الرحلات.');
+    }
+    if (!editingId && !canAddTrips) {
+      return alert('🔒 غير مصرح لك بإضافة رحلات جديدة. حسابك للمشاهدة فقط.');
+    }
+
     const busesClean = normalizeBuses(form.bus_seats);
     const isDayUse = stayMode === 'day_use';
     const payload = {
@@ -203,6 +234,9 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
 
   const persistTripBuses = async (updatedBuses) => {
     if (!viewBusTrip) return;
+    if (!canEditTrips) {
+      return alert('🔒 غير مصرح لك بتعديل المقاعد أو الحجوزات.');
+    }
     const { data, error } = await supabase
       .from('church_trips')
       .update({ bus_seats: updatedBuses })
@@ -224,6 +258,9 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
   };
 
   const persistTripRooms = async (tripId, updatedRooms) => {
+    if (!canEditTrips) {
+      return alert('🔒 غير مصرح لك بتعديل الغرف.');
+    }
     const { data, error } = await supabase
       .from('church_trips')
       .update({ rooms: updatedRooms })
@@ -245,6 +282,7 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
   };
 
   const handleAddRoom = async () => {
+    if (!canEditTrips) return alert('🔒 غير مصرح لك بإضافة أوض.');
     if (!newRoomForm.room_number.trim()) return alert('اكتب رقم أو اسم الأوضة أولاً');
     const roomObj = {
       id: `rm_${Date.now()}`,
@@ -265,11 +303,13 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
 
   const handleUpdateRoomOccupants = async (roomId, occupantsText) => {
     if (!viewRoomsTrip) return;
+    if (!canEditTrips) return alert('🔒 غير مصرح لك بالتعديل.');
     const updated = (viewRoomsTrip.rooms || []).map(r => (r.id === roomId ? { ...r, occupants_text: occupantsText } : r));
     await persistTripRooms(viewRoomsTrip.id, updated);
   };
 
   const handleDeleteRoom = async (roomId) => {
+    if (!canEditTrips) return alert('🔒 غير مصرح لك بالحذف.');
     if (viewRoomsTrip) {
       const updated = (viewRoomsTrip.rooms || []).filter(r => r.id !== roomId);
       await persistTripRooms(viewRoomsTrip.id, updated);
@@ -279,6 +319,7 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
   };
 
   const togglePublic = async (t) => {
+    if (!canEditTrips) return alert('🔒 غير مصرح لك بتغيير حالة النشر.');
     const { data } = await supabase
       .from('church_trips')
       .update({ is_public: !t.is_public })
@@ -298,6 +339,7 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
   };
 
   const deleteTrip = async (t) => {
+    if (!canDeleteTrips) return alert('🔒 غير مصرح لك بحذف الرحلات.');
     if (!confirm(`حذف رحلة "${t.title}" من مكتب الرحلات نهائياً؟`)) return;
     const { error } = await supabase.from('church_trips').delete().eq('id', t.id);
     if (!error) {
@@ -313,12 +355,17 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
   };
 
   const deleteRegistration = async (regId) => {
+    if (!canEditTrips && !canDeleteTrips) return alert('🔒 غير مصرح لك بإدارة الاشتراكات.');
     if (!confirm('حذف طلب الاشتراك؟')) return;
     const { error } = await supabase.from('trip_registrations').delete().eq('id', regId);
     if (!error) setRegistrations(registrations.filter(r => r.id !== regId));
   };
 
   const openAddScreen = (defaultCategory = 'منتظمة') => {
+    if (!canAddTrips) {
+      alert('🔒 غير مصرح لك بإضافة رحلات جديدة. صلاحيتك هي المشاهدة فقط.');
+      return;
+    }
     setEditingId(null);
     const defaultMode = defaultCategory === 'مبيت' ? 'overnight' : 'day_use';
     setStayMode(defaultMode);
@@ -332,6 +379,10 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
   };
 
   const openEditTrip = (t) => {
+    if (!canEditTrips) {
+      alert('🔒 غير مصرح لك بتعديل بيانات الرحلات.');
+      return;
+    }
     setEditingId(t.id);
     const isOvernight = Number(t.days_count || 1) > 1 || (Array.isArray(t.rooms) && t.rooms.length > 0);
     setStayMode(isOvernight ? 'overnight' : 'day_use');
@@ -352,13 +403,15 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
         </button>
         <h2 className="text-base md:text-lg font-black text-[#7a1c24]">{title}</h2>
       </div>
-      <button
-        type="button"
-        onClick={() => openAddScreen(activeCard === 'add' ? 'منتظمة' : activeCard)}
-        className="px-4 py-2 bg-[#7a1c24] text-white rounded-xl text-xs font-black cursor-pointer flex items-center gap-1"
-      >
-        <Plus size={14} /> إضافة رحلة جديدة
-      </button>
+      {canAddTrips && (
+        <button
+          type="button"
+          onClick={() => openAddScreen(activeCard === 'add' ? 'منتظمة' : activeCard)}
+          className="px-4 py-2 bg-[#7a1c24] text-white rounded-xl text-xs font-black cursor-pointer flex items-center gap-1"
+        >
+          <Plus size={14} /> إضافة رحلة جديدة
+        </button>
+      )}
     </div>
   );
 
@@ -377,27 +430,35 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
               رحلات اليوم الواحد (داي يوز) ببرنامجها الكامل، ورحلات المبيت بحجز الأوض والأتوبيسات والمشتركين
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 items-center">
+            {!canAddTrips && (
+              <span className="px-3 py-1.5 bg-black/30 border border-amber-300/40 rounded-xl text-xs font-bold text-amber-200 flex items-center gap-1.5">
+                <ShieldAlert size={14} /> وضع الاستعراض (مشاهدة فقط)
+              </span>
+            )}
             <span className="px-4 py-2 bg-white/15 rounded-2xl text-xs font-black">الرحلات: {trips.length}</span>
             <span className="px-4 py-2 bg-amber-400 text-[#4a0e13] rounded-2xl text-xs font-black">طلبات الاشتراك: {registrations.length}</span>
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          <button
-            type="button"
-            onClick={() => openAddScreen('منتظمة')}
-            className="bg-amber-50 border-2 border-amber-300 p-6 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer"
-          >
-            <div className="flex justify-between items-start w-full">
-              <span className="text-4xl">➕</span>
-              <span className="px-3 py-1 bg-[#7a1c24] text-white rounded-full text-xs font-black">جديد</span>
-            </div>
-            <div>
-              <h3 className="text-lg font-black text-[#7a1c24]">إضافة رحلة جديدة</h3>
-              <p className="text-xs text-gray-700 mt-1">رحلة يوم واحد (داي يوز) أو رحلة مبيت، مع البرنامج والزيارات والأتوبيسات</p>
-            </div>
-          </button>
+          {/* كارت إضافة رحلة جديدة: يظهر فقط إذا كان المستخدم يملك صلاحية الإضافة */}
+          {canAddTrips && (
+            <button
+              type="button"
+              onClick={() => openAddScreen('منتظمة')}
+              className="bg-amber-50 border-2 border-amber-300 p-6 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer"
+            >
+              <div className="flex justify-between items-start w-full">
+                <span className="text-4xl">➕</span>
+                <span className="px-3 py-1 bg-[#7a1c24] text-white rounded-full text-xs font-black">جديد</span>
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-[#7a1c24]">إضافة رحلة جديدة</h3>
+                <p className="text-xs text-gray-700 mt-1">رحلة يوم واحد (داي يوز) أو رحلة مبيت، مع البرنامج والزيارات والأتوبيسات</p>
+              </div>
+            </button>
+          )}
 
           {TRIP_CATEGORIES.map(cat => {
             const count = trips.filter(t => (t.trip_category || 'منتظمة') === cat.id).length;
@@ -670,11 +731,23 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
                       <button type="button" onClick={() => setPrintBusState({ trip: toManagerTrip(t), buses: busesList })} className="px-3.5 py-2 bg-slate-800 text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer text-xs">
                         <Printer size={16} /> طباعة
                       </button>
-                      <button type="button" onClick={() => openEditTrip(t)} className="p-2.5 bg-gray-100 rounded-xl cursor-pointer"><Edit3 size={15} /></button>
-                      <button type="button" onClick={() => togglePublic(t)} className="p-2.5 bg-blue-50 rounded-xl cursor-pointer" title={t.is_public ? 'ظاهرة للعامة' : 'مخفية'}>
-                        {t.is_public ? <Globe size={15} /> : <Lock size={15} />}
-                      </button>
-                      <button type="button" onClick={() => deleteTrip(t)} className="p-2.5 bg-red-50 text-red-700 rounded-xl cursor-pointer"><Trash2 size={15} /></button>
+
+                      {/* أزرار التعديل والحذف تظهر فقط لمن يملك الصلاحية */}
+                      {canEditTrips && (
+                        <>
+                          <button type="button" onClick={() => openEditTrip(t)} className="p-2.5 bg-gray-100 hover:bg-gray-200 rounded-xl cursor-pointer" title="تعديل">
+                            <Edit3 size={15} />
+                          </button>
+                          <button type="button" onClick={() => togglePublic(t)} className="p-2.5 bg-blue-50 rounded-xl cursor-pointer" title={t.is_public ? 'ظاهرة للعامة' : 'مخفية'}>
+                            {t.is_public ? <Globe size={15} /> : <Lock size={15} />}
+                          </button>
+                        </>
+                      )}
+                      {canDeleteTrips && (
+                        <button type="button" onClick={() => deleteTrip(t)} className="p-2.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl cursor-pointer" title="حذف">
+                          <Trash2 size={15} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -715,7 +788,9 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
                             <a href={`tel:${r.user_phone}`} className="p-2 bg-gray-100 text-gray-800 rounded-xl"><Phone size={14} /></a>
                           </>
                         )}
-                        <button type="button" onClick={() => deleteRegistration(r.id)} className="p-2 bg-red-50 text-red-700 rounded-xl cursor-pointer"><Trash2 size={14} /></button>
+                        {canDeleteTrips && (
+                          <button type="button" onClick={() => deleteRegistration(r.id)} className="p-2 bg-red-50 text-red-700 rounded-xl cursor-pointer"><Trash2 size={14} /></button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -765,23 +840,25 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
                 <button type="button" onClick={() => setViewRoomsTrip(null)} className="p-2 bg-gray-100 rounded-xl cursor-pointer"><X size={18} /></button>
               </div>
 
-              <div className="bg-blue-50/70 p-3.5 rounded-2xl border border-blue-200 space-y-2.5 font-bold">
-                <span className="text-xs text-blue-950 block">+ إضافة أوضة / شاليه جديد:</span>
-                <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-2">
-                  <input placeholder="رقم/اسم الأوضة *" className="p-2 border rounded-xl bg-white" value={newRoomForm.room_number} onChange={e => setNewRoomForm({ ...newRoomForm, room_number: e.target.value })} />
-                  <select className="p-2 border rounded-xl bg-white" value={newRoomForm.ac_type} onChange={e => setNewRoomForm({ ...newRoomForm, ac_type: e.target.value })}>
-                    <option value="مكيفة ❄️">مكيفة ❄️</option>
-                    <option value="مروحة 🌀">مروحة 🌀</option>
-                    <option value="عادي بدون تكييف">عادي بدون تكييف</option>
-                  </select>
-                  <input type="number" min="1" placeholder="عدد الأفراد (السعة)" className="p-2 border rounded-xl bg-white" value={newRoomForm.capacity} onChange={e => setNewRoomForm({ ...newRoomForm, capacity: e.target.value })} />
-                  <input placeholder="الدور / المواصفات" className="p-2 border rounded-xl bg-white" value={newRoomForm.floor_notes} onChange={e => setNewRoomForm({ ...newRoomForm, floor_notes: e.target.value })} />
+              {canEditTrips && (
+                <div className="bg-blue-50/70 p-3.5 rounded-2xl border border-blue-200 space-y-2.5 font-bold">
+                  <span className="text-xs text-blue-950 block">+ إضافة أوضة / شاليه جديد:</span>
+                  <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-2">
+                    <input placeholder="رقم/اسم الأوضة *" className="p-2 border rounded-xl bg-white" value={newRoomForm.room_number} onChange={e => setNewRoomForm({ ...newRoomForm, room_number: e.target.value })} />
+                    <select className="p-2 border rounded-xl bg-white" value={newRoomForm.ac_type} onChange={e => setNewRoomForm({ ...newRoomForm, ac_type: e.target.value })}>
+                      <option value="مكيفة ❄️">مكيفة ❄️</option>
+                      <option value="مروحة 🌀">مروحة 🌀</option>
+                      <option value="عادي بدون تكييف">عادي بدون تكييف</option>
+                    </select>
+                    <input type="number" min="1" placeholder="عدد الأفراد (السعة)" className="p-2 border rounded-xl bg-white" value={newRoomForm.capacity} onChange={e => setNewRoomForm({ ...newRoomForm, capacity: e.target.value })} />
+                    <input placeholder="الدور / المواصفات" className="p-2 border rounded-xl bg-white" value={newRoomForm.floor_notes} onChange={e => setNewRoomForm({ ...newRoomForm, floor_notes: e.target.value })} />
+                  </div>
+                  <div className="flex gap-2">
+                    <input placeholder="أسماء الأفراد المسكنين في الأوضة..." className="flex-1 p-2 border rounded-xl bg-white font-normal" value={newRoomForm.occupants_text} onChange={e => setNewRoomForm({ ...newRoomForm, occupants_text: e.target.value })} />
+                    <button type="button" onClick={handleAddRoom} className="px-4 py-2 bg-[#7a1c24] text-white rounded-xl cursor-pointer">+ إضافة</button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <input placeholder="أسماء الأفراد المسكنين في الأوضة..." className="flex-1 p-2 border rounded-xl bg-white font-normal" value={newRoomForm.occupants_text} onChange={e => setNewRoomForm({ ...newRoomForm, occupants_text: e.target.value })} />
-                  <button type="button" onClick={handleAddRoom} className="px-4 py-2 bg-[#7a1c24] text-white rounded-xl cursor-pointer">+ إضافة</button>
-                </div>
-              </div>
+              )}
 
               {(viewRoomsTrip.rooms || []).length === 0 ? (
                 <div className="p-6 bg-gray-50 rounded-2xl border text-center text-gray-500">لم تُضف أوض لهذه الرحلة بعد.</div>
@@ -798,14 +875,17 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
                           </div>
                           {rm.floor_notes && <span className="text-[11px] text-gray-500 block mt-1">{rm.floor_notes}</span>}
                         </div>
-                        <button type="button" onClick={() => handleDeleteRoom(rm.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer"><Trash2 size={13} /></button>
+                        {canEditTrips && (
+                          <button type="button" onClick={() => handleDeleteRoom(rm.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer"><Trash2 size={13} /></button>
+                        )}
                       </div>
                       <div>
                         <label className="text-[11px] text-gray-600 block mb-1 font-bold">أسماء النزلاء في الأوضة:</label>
                         <textarea
                           rows="2"
                           placeholder="اكتب أسماء الأفراد..."
-                          className="w-full p-2 border rounded-xl bg-white text-xs"
+                          className="w-full p-2 border rounded-xl bg-white text-xs disabled:bg-gray-100"
+                          disabled={!canEditTrips}
                           defaultValue={rm.occupants_text || ''}
                           onBlur={e => handleUpdateRoomOccupants(rm.id, e.target.value)}
                         />
