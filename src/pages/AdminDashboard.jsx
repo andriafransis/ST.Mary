@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { uploadChurchMedia } from '../lib/mediaUpload';
@@ -74,7 +73,8 @@ const emptyUser = {
     manage_trips: false,
     manage_joseph: false,
     can_edit_public: false,
-    extra_services: []
+    extra_services: [],
+    service_gender_scope: 'الكل'
   }
 };
 
@@ -145,7 +145,7 @@ const splitList = (val) =>
     .filter(Boolean);
 
 export default function AdminDashboard({
-  users = [], events = [], services = [], caseCategories = [], customCards = [],
+  users = [], events = [], services = [], serviceGroups = [], caseCategories = [], customCards = [],
   familiesTree = [], roleScreens = [], currentUserId, currentUser = null,
   churchName = 'كنيسة السيدة العذراء مريم بالمطرية',
   onRefresh,
@@ -223,13 +223,14 @@ export default function AdminDashboard({
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true });
     if (data && data.length > 0) setDbServiceGroups(data);
+    else if (Array.isArray(serviceGroups) && serviceGroups.length > 0) setDbServiceGroups(serviceGroups);
     else setDbServiceGroups(DEFAULT_SERVICE_GROUPS);
   };
 
   useEffect(() => {
     loadRoleTemplates();
     loadServiceGroups();
-  }, []);
+  }, [serviceGroups]);
 
   const handleSaveServiceGroup = async (e) => {
     e.preventDefault();
@@ -257,6 +258,7 @@ export default function AdminDashboard({
         setDbServiceGroups(dbServiceGroups.map(g => (g.id === editingGrpId ? data : g)).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)));
         setEditingGrpId(null);
         setGrpForm({ ...emptyGroup, sort_order: dbServiceGroups.length + 1 });
+        if (onRefresh) await onRefresh();
       }
     } else {
       const { data, error } = await supabase.from('service_groups').insert([payload]).select().single();
@@ -268,6 +270,7 @@ export default function AdminDashboard({
           setSrvForm(prev => ({ ...prev, stage_name: data.group_name }));
         }
         setGrpForm({ ...emptyGroup, sort_order: cleanExisting.length + 2 });
+        if (onRefresh) await onRefresh();
       }
     }
   };
@@ -277,7 +280,10 @@ export default function AdminDashboard({
     if (!grp.id) return alert('قم بتشغيل كود SQL جدول service_groups أولاً حتى يتم الحفظ والحذف في الداتابيز.');
     if (!confirm(`حذف "${grp.group_name}"؟`)) return;
     const { error } = await supabase.from('service_groups').delete().eq('id', grp.id);
-    if (!error) setDbServiceGroups(dbServiceGroups.filter(g => g.id !== grp.id));
+    if (!error) {
+      setDbServiceGroups(dbServiceGroups.filter(g => g.id !== grp.id));
+      if (onRefresh) await onRefresh();
+    }
   };
 
   const loadChurchIdentity = async () => {
@@ -416,7 +422,8 @@ export default function AdminDashboard({
       family_role: presetRole === 'parent' ? 'الأب' : 'ابن/ابنة',
       member_status: 'active',
       is_deacon: userSubTab === 'deacons',
-      deacon_rank: 'أبصالتس'
+      deacon_rank: 'أبصالتس',
+      permissions: { ...emptyUser.permissions }
     });
     setShowModal(true);
   };
@@ -471,7 +478,7 @@ export default function AdminDashboard({
       priest_wife_phone: u.priest_wife_phone || '',
       priest_family_notes: u.priest_family_notes || '',
       church_job: u.church_job || '',
-      permissions: u.permissions || emptyUser.permissions
+      permissions: { ...emptyUser.permissions, ...(u.permissions || {}) }
     });
     setShowModal(true);
   };
@@ -534,7 +541,12 @@ export default function AdminDashboard({
       family_tree_id: formData.family_tree_id || null,
       confession_father_id: formData.confession_father_id || null,
       is_deacon: Boolean(formData.is_deacon),
-      deacon_rank: normalizedRank
+      deacon_rank: normalizedRank,
+      permissions: {
+        ...emptyUser.permissions,
+        ...(formData.permissions || {}),
+        extra_services: splitList(formData.detailed_stage)
+      }
     };
 
     if (isEditing) {
@@ -770,8 +782,7 @@ export default function AdminDashboard({
                           )}
                           {isParentOfChild && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-950">👨‍👦 ولي أمر مسجل</span>}
                           {u.role === 'priest' && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900">{u.priest_degree} {u.ordination_date ? `(سيامة: ${u.ordination_date})` : ''}</span>}
-                          
-                          {/* الرتبة الدقيقة للشماس بدون تكرار الكلمات */}
+
                           {u.is_deacon && (
                             <span className="px-2.5 py-0.5 rounded text-[10px] font-extrabold bg-purple-100 text-purple-900 border border-purple-200">
                               🕯️ شماس: {getDeaconRankLabel(u.deacon_rank)}
@@ -779,6 +790,7 @@ export default function AdminDashboard({
                           )}
 
                           {u.detailed_stage && SERVANT_ROLES.includes(u.role) && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-900">خادم: {u.detailed_stage}</span>}
+                          {u.permissions?.service_gender_scope && SERVANT_ROLES.includes(u.role) && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-50 text-cyan-900">نطاق: {u.permissions.service_gender_scope}</span>}
                           {u.assigned_class && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800">فصل: {u.assigned_class}</span>}
                           {u.permissions?.manage_edu_center && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-900">🎓 مدير مركز تعليمي</span>}
                           {u.permissions?.manage_trips && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-900">🚌 صلاحية رحلات</span>}
@@ -901,6 +913,7 @@ export default function AdminDashboard({
                     <option value="ذكور / بنين فقط">♂️ ذكور / بنين فقط</option>
                     <option value="إناث / بنات فقط">♀️ إناث / بنات فقط</option>
                     <option value="أطفال (بنين وبنات)">🧸 أطفال (بنين وبنات)</option>
+                    <option value="مقسمة (بنين / بنات)">⚖️ مقسمة (بنين / بنات)</option>
                   </select>
                 </div>
 
@@ -1617,7 +1630,6 @@ export default function AdminDashboard({
                 </div>
               )}
 
-              {/* قسم الشماس: متطابق 100% مع الرتب المعتمدة */}
               <div className="bg-purple-50 p-3 rounded-2xl border border-purple-200 space-y-2">
                 <label className="flex items-center gap-2 cursor-pointer font-bold text-purple-950">
                   <input type="checkbox" checked={formData.is_deacon} onChange={e => setFormData({ ...formData, is_deacon: e.target.checked })} />
@@ -1673,21 +1685,47 @@ export default function AdminDashboard({
               {isServantRoleSelected && (
                 <div className="bg-emerald-50/50 p-3 rounded-2xl border border-emerald-200 space-y-3">
                   <div>
+                    <label className="block mb-1 text-cyan-950 font-extrabold">
+                      ⚖️ تخصيص النوع للخادم (مهم في إعدادي وثانوي والخدمات المقسمة):
+                    </label>
+                    <select
+                      className="w-full p-2.5 border border-cyan-300 rounded-xl bg-white"
+                      value={formData.permissions?.service_gender_scope || 'الكل'}
+                      onChange={e => setFormData({
+                        ...formData,
+                        permissions: { ...emptyUser.permissions, ...(formData.permissions || {}), service_gender_scope: e.target.value }
+                      })}
+                    >
+                      <option value="الكل">👥 الكل (بنين وبنات / عام)</option>
+                      <option value="بنين">♂️ بنين فقط (ذكور)</option>
+                      <option value="بنات">♀️ بنات فقط (إناث)</option>
+                    </select>
+                  </div>
+
+                  <div>
                     <label className="block mb-1.5 text-[#7a1c24] font-extrabold">
-                      📖 جروبات ومراحل الخدمة للخادم (تقدر تضيف وتعدل الجروبات من تاب الخدمات):
+                      📖 جروبات ومراحل الخدمة للخادم (يمكن اختيار خدمة واحدة أو أكثر كابتدائي + إعدادي أو ثانوي + اجتماع):
                     </label>
                     <div className="space-y-2 max-h-56 overflow-y-auto bg-white p-2.5 rounded-xl border">
                       {effectiveGroups.map((grp, gIdx) => {
                         const gName = grp.group_name;
                         const stagesArr = normalizeGroupStages(grp.stages);
+                        const groupMainSelected = selectedServantStages.includes(gName);
                         const allGroupSelected = stagesArr.length > 0
-                          ? stagesArr.every(st => selectedServantStages.includes(st)) && selectedServantStages.includes(gName)
-                          : selectedServantStages.includes(gName);
+                          ? stagesArr.every(st => selectedServantStages.includes(st)) && groupMainSelected
+                          : groupMainSelected;
 
                         return (
                           <div key={grp.id || gIdx} className="p-2 bg-gray-50 rounded-xl border space-y-1.5">
-                            <div className="flex justify-between items-center">
-                              <strong className="text-[11px] text-[#7a1c24]">{grp.icon || '📌'} {gName}</strong>
+                            <div className="flex justify-between items-center gap-2">
+                              <label className="flex items-center gap-1.5 text-[11px] text-[#7a1c24] font-black cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={groupMainSelected}
+                                  onChange={() => toggleMultiFieldValue('detailed_stage', gName)}
+                                />
+                                <span>{grp.icon || '📌'} {gName}</span>
+                              </label>
                               <button
                                 type="button"
                                 onClick={() => {

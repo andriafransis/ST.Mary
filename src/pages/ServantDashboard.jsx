@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Phone, Search, UserPlus, Calendar, MessageSquareText, Layers, MessageCircle, AlertTriangle, Users, MapPin, X, FileSpreadsheet } from 'lucide-react';
 import BirthdayBanner from '../components/BirthdayBanner';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
+import { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/ServiceGroupFeed';
 
 const STAGE_OPTIONS = [
   'حضانة',
@@ -16,29 +17,91 @@ const STAGE_OPTIONS = [
   'اجتماع الصدى'
 ];
 
+const GENDER_SCOPES = ['الكل', 'بنين', 'بنات'];
+
+const isMaleMember = (m) => {
+  const g = String(m?.gender || '').trim();
+  return g === 'ذكر' || g === 'بنين' || g.toLowerCase() === 'male';
+};
+
+const isFemaleMember = (m) => {
+  const g = String(m?.gender || '').trim();
+  return g === 'أنثى' || g === 'بنات' || g.toLowerCase() === 'female';
+};
+
+const isPrepOrSecondaryScope = (scope = '') => {
+  const s = String(scope || '');
+  return (
+    s.includes('إعدادي') ||
+    s.includes('اعدادي') ||
+    s.includes('ثانوي') ||
+    s.includes('أولى') ||
+    s.includes('ثانية') ||
+    s.includes('ثالثة')
+  );
+};
+
 export default function ServantDashboard({
-  servant, users = [], services = [], activities = [], memberNotes = [], birthdays = [],
+  servant, users = [], services = [], serviceGroups = [], activities = [], memberNotes = [], birthdays = [],
   onAddMember, onSaveActivity, onSaveMemberNote, onRefresh
 }) {
   const canAdd = servant?.permissions?.can_add !== false;
   const canExtractSheet = canExtractMasterSheet(servant);
   const [showMasterSheet, setShowMasterSheet] = useState(false);
 
-  const assignedClass = (servant.assigned_class || '').trim();
-  const baseStages = (servant.service_stage || servant.detailed_stage || '')
-    .split(',')
+  const effectiveGroups = Array.isArray(serviceGroups) && serviceGroups.length > 0
+    ? serviceGroups
+    : DEFAULT_SERVICE_GROUPS;
+
+  const assignedClass = (servant?.assigned_class || '').trim();
+  const baseStages = (servant?.service_stage || servant?.detailed_stage || '')
+    .split(/[,،]/)
     .map(s => s.trim())
     .filter(Boolean);
-  const extraServices = Array.isArray(servant.permissions?.extra_services) ? servant.permissions.extra_services : [];
+  const extraServices = Array.isArray(servant?.permissions?.extra_services) ? servant.permissions.extra_services : [];
 
-  const allowedTargets = [...new Set([
-    ...(assignedClass ? [assignedClass] : []),
+  // جميع الخدمات والمراحل المتاحة في الكنيسة (التي يضيفها الأدمن في الخدمات أو الفصول أو المراحل)
+  const allChurchServicesList = [...new Set([
+    ...effectiveGroups.map(g => g.group_name).filter(Boolean),
+    ...effectiveGroups.flatMap(g => normalizeGroupStages(g.stages)),
+    ...services.map(s => s.stage_name).filter(Boolean),
+    ...services.map(s => s.class_name).filter(Boolean),
+    ...STAGE_OPTIONS
+  ])];
+
+  // الخدمات والفصول المربوطة مباشرة بهذا الخادم
+  const servantBoundTargets = [...new Set([
+    ...(assignedClass ? splitCommaClasses(assignedClass) : []),
     ...baseStages,
     ...extraServices
-  ])];
-  if (allowedTargets.length === 0) allowedTargets.push('أولى ابتدائي');
+  ])].filter(Boolean);
 
-  const [selectedScope, setSelectedScope] = useState(allowedTargets[0]);
+  // القائمة الافتراضية المعروضة: خدمات الكنيسة المضافة (إن لم يكن مقيداً بقائمة فرعية ضيقة أو لعرض الكل المضاف من الأدمن)
+  const availableServicesList = allChurchServicesList.length > 0
+    ? allChurchServicesList
+    : (servantBoundTargets.length > 0 ? servantBoundTargets : ['أولى ابتدائي']);
+
+  function splitCommaClasses(val) {
+    return String(val || '')
+      .split(/[,،]/)
+      .map(s => s.trim())
+      .filter(Boolean);
+  }
+
+  const initialDefaultScope = servantBoundTargets[0] || availableServicesList[0] || 'أولى ابتدائي';
+  const [selectedScope, setSelectedScope] = useState(initialDefaultScope);
+  const [showAllChurchServices, setShowAllChurchServices] = useState(true);
+
+  const defaultGenderScope = (() => {
+    const saved = servant?.permissions?.service_gender_scope;
+    if (saved && GENDER_SCOPES.includes(saved)) return saved;
+    const clsText = assignedClass;
+    if (clsText.includes('بنات')) return 'بنات';
+    if (clsText.includes('بنين')) return 'بنين';
+    return 'الكل';
+  })();
+
+  const [selectedGenderFilter, setSelectedGenderFilter] = useState(defaultGenderScope);
   const [viewMode, setViewMode] = useState('list');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -68,7 +131,7 @@ export default function ServantDashboard({
     is_studying: true,
     detailed_stage: baseStages[0] || 'أولى ابتدائي',
     service_stage: baseStages[0] || 'أولى ابتدائي',
-    assigned_class: assignedClass || '',
+    assigned_class: splitCommaClasses(assignedClass)[0] || '',
     dob: '', address: '',
     confession_status: 'منتظم',
     has_communion: true,
@@ -76,15 +139,66 @@ export default function ServantDashboard({
   };
   const [newMember, setNewMember] = useState(emptyMember);
 
-  const memberMatchesScope = (m, scope) => {
+  useEffect(() => {
+    if (!availableServicesList.includes(selectedScope) && availableServicesList.length > 0) {
+      setSelectedScope(servantBoundTargets[0] || availableServicesList[0]);
+    }
+  }, [serviceGroups, services, servant]);
+
+  // التحقق هل هذا الخادم/النطاق مخصص لخدمة بعينها أو متعدد الخدمات
+  const isBoundToSpecificService = (scope) => {
     if (!scope) return false;
-    if ((m.assigned_class || '').trim() === scope) return true;
-    const mStages = `${m.detailed_stage || ''} ${m.service_stage || ''}`;
-    return mStages.includes(scope);
+    if (servantBoundTargets.includes(scope)) return true;
+    const matchedGroup = effectiveGroups.find(g => g.group_name === scope);
+    if (matchedGroup) {
+      const subStages = normalizeGroupStages(matchedGroup.stages);
+      return subStages.some(st => servantBoundTargets.includes(st)) || servantBoundTargets.includes(matchedGroup.group_name);
+    }
+    return false;
   };
 
+  const memberMatchesScope = (m, scope, genderFilter = 'الكل') => {
+    if (!scope) return false;
+    const mClass = (m.assigned_class || '').trim();
+    const mStages = `${m.detailed_stage || ''} ${m.service_stage || ''}`;
+    const matchedGroup = effectiveGroups.find(g => g.group_name === scope);
+    const groupStages = matchedGroup ? normalizeGroupStages(matchedGroup.stages) : [];
+    const groupClasses = services
+      .filter(s => s.stage_name === scope || (matchedGroup && s.stage_name === matchedGroup.group_name))
+      .map(s => (s.class_name || '').trim());
+
+    const matchesServiceOrClass =
+      mClass === scope ||
+      mStages.includes(scope) ||
+      groupStages.some(st => mStages.includes(st) || mClass.includes(st)) ||
+      groupClasses.includes(mClass);
+
+    if (!matchesServiceOrClass) return false;
+
+    // فلترة النوع (بنين / بنات) في إعدادي وثانوي أو عند اختيار بنين/بنات
+    if (genderFilter === 'بنين') {
+      return isMaleMember(m) || mClass.includes('بنين');
+    }
+    if (genderFilter === 'بنات') {
+      return isFemaleMember(m) || mClass.includes('بنات');
+    }
+
+    // لو الخادم محدد له بنين أو بنات في صلاحياته في إعدادي/ثانوي
+    const boundGender = servant?.permissions?.service_gender_scope;
+    if (isPrepOrSecondaryScope(scope) && boundGender && boundGender !== 'الكل') {
+      if (boundGender === 'بنين') return isMaleMember(m) || mClass.includes('بنين');
+      if (boundGender === 'بنات') return isFemaleMember(m) || mClass.includes('بنات');
+    }
+
+    return true;
+  };
+
+  const displayedServiceTabs = showAllChurchServices
+    ? availableServicesList
+    : (servantBoundTargets.length > 0 ? servantBoundTargets : availableServicesList);
+
   const allMembers = users.filter(u => u.role === 'member');
-  const scopeMembers = allMembers.filter(m => memberMatchesScope(m, selectedScope));
+  const scopeMembers = allMembers.filter(m => memberMatchesScope(m, selectedScope, selectedGenderFilter));
 
   const scopeMemberIds = new Set(scopeMembers.map(m => m.id));
   const scopeBirthdays = birthdays.filter(b => scopeMemberIds.has(b.id));
@@ -124,11 +238,19 @@ export default function ServantDashboard({
 
   const openAddMemberModal = () => {
     if (!canAdd) return alert('🔒 غير مسموح لك بإضافة مخدومين حسب صلاحياتك الحالية.');
+    const matchingClass = services.find(
+      s => s.class_name === selectedScope || s.stage_name === selectedScope
+    );
+    const defaultGenderForModal =
+      selectedGenderFilter === 'بنات' ? 'أنثى' :
+      selectedGenderFilter === 'بنين' ? 'ذكر' : 'ذكر';
+
     setNewMember({
       ...emptyMember,
-      assigned_class: assignedClass || (services.some(s => s.class_name === selectedScope) ? selectedScope : ''),
-      detailed_stage: STAGE_OPTIONS.includes(selectedScope) ? selectedScope : (baseStages[0] || 'أولى ابتدائي'),
-      service_stage: STAGE_OPTIONS.includes(selectedScope) ? selectedScope : (baseStages[0] || 'أولى ابتدائي')
+      gender: defaultGenderForModal,
+      assigned_class: matchingClass?.class_name || splitCommaClasses(assignedClass)[0] || '',
+      detailed_stage: STAGE_OPTIONS.includes(selectedScope) ? selectedScope : (matchingClass?.stage_name || selectedScope || baseStages[0] || 'أولى ابتدائي'),
+      service_stage: STAGE_OPTIONS.includes(selectedScope) ? selectedScope : (matchingClass?.stage_name || selectedScope || baseStages[0] || 'أولى ابتدائي')
     });
     setShowAddModal(true);
   };
@@ -209,42 +331,97 @@ export default function ServantDashboard({
         </div>
       )}
 
-      <div className="space-y-2">
-        <div className="flex items-center gap-1.5 text-xs font-black text-gray-700 px-1">
-          <Layers size={15} className="text-[#7a1c24]" /> فصلك وخدمتك المخصصة:
+      <div className="space-y-2.5 bg-white p-4 rounded-3xl border border-gray-200 shadow-2xs">
+        <div className="flex flex-wrap justify-between items-center gap-2 px-1">
+          <div className="flex items-center gap-1.5 text-xs font-black text-gray-800">
+            <Layers size={15} className="text-[#7a1c24]" /> الخدمات والفصول المتاحة (اختر خدمة لعرض بياناتها فقط):
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] font-bold">
+            <button
+              type="button"
+              onClick={() => setShowAllChurchServices(true)}
+              className={`px-3 py-1 rounded-xl cursor-pointer transition ${showAllChurchServices ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700'}`}
+            >
+              كل خدمات الكنيسة ({availableServicesList.length})
+            </button>
+            {servantBoundTargets.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAllChurchServices(false);
+                  if (!servantBoundTargets.includes(selectedScope)) setSelectedScope(servantBoundTargets[0]);
+                }}
+                className={`px-3 py-1 rounded-xl cursor-pointer transition ${!showAllChurchServices ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700'}`}
+              >
+                خدماتي المربوطة ({servantBoundTargets.length})
+              </button>
+            )}
+          </div>
         </div>
-        <div className={`grid gap-2.5 ${allowedTargets.length === 1 ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'}`}>
-          {allowedTargets.map((srv, idx) => {
-            const count = allMembers.filter(m => memberMatchesScope(m, srv)).length;
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+          {displayedServiceTabs.map((srv, idx) => {
+            const count = allMembers.filter(m => memberMatchesScope(m, srv, selectedGenderFilter)).length;
             const isSelected = selectedScope === srv;
+            const isBound = isBoundToSpecificService(srv);
             return (
               <button
                 key={idx}
                 type="button"
-                onClick={() => { setSelectedScope(srv); setSearchQuery(''); }}
-                className={`p-4 rounded-3xl border text-right cursor-pointer transition shadow-sm flex justify-between items-center gap-3 ${
+                onClick={() => {
+                  setSelectedScope(srv);
+                  setSearchQuery('');
+                  if (srv.includes('بنات')) setSelectedGenderFilter('بنات');
+                  else if (srv.includes('بنين')) setSelectedGenderFilter('بنين');
+                }}
+                className={`p-3.5 rounded-3xl border text-right cursor-pointer transition shadow-2xs flex justify-between items-center gap-3 ${
                   isSelected
                     ? 'bg-linear-to-l from-[#5c1319] to-[#7a1c24] text-white border-[#7a1c24]'
-                    : 'bg-white text-gray-900 hover:bg-red-50/40 border-gray-200'
+                    : 'bg-[#fbfaf7] text-gray-900 hover:bg-red-50/40 border-gray-200'
                 }`}
               >
                 <div>
-                  <span className={`text-[10px] font-bold block mb-0.5 ${isSelected ? 'text-amber-200' : 'text-gray-400'}`}>الفصل / الخدمة</span>
-                  <strong className="text-base font-black block">{srv}</strong>
+                  <span className={`text-[10px] font-bold block mb-0.5 ${isSelected ? 'text-amber-200' : 'text-gray-400'}`}>
+                    {isBound ? '⭐ خدمة مخصصة لك' : '⛪ خدمة بالكنيسة'}
+                  </span>
+                  <strong className="text-sm sm:text-base font-black block">{srv}</strong>
                 </div>
-                <div className={`px-3.5 py-1.5 rounded-2xl text-xs font-black shrink-0 ${isSelected ? 'bg-white/20 text-white' : 'bg-red-50 text-[#7a1c24]'}`}>
+                <div className={`px-3 py-1 rounded-2xl text-xs font-black shrink-0 ${isSelected ? 'bg-white/20 text-white' : 'bg-red-50 text-[#7a1c24]'}`}>
                   {count} مخدوم
                 </div>
               </button>
             );
           })}
         </div>
+
+        {/* تخصيص النوع (بنين / بنات / الكل) للخدمة المختارة خصوصاً في إعدادي وثانوي */}
+        <div className="pt-2 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <span className="font-bold text-gray-700">
+            تخصيص الفئة داخل <strong className="text-[#7a1c24]">{selectedScope}</strong> (مفيد في إعدادي وثانوي):
+          </span>
+          <div className="flex items-center gap-1.5 bg-gray-100 p-1 rounded-xl font-bold">
+            {GENDER_SCOPES.map(gScope => (
+              <button
+                key={gScope}
+                type="button"
+                onClick={() => setSelectedGenderFilter(gScope)}
+                className={`px-3 py-1 rounded-lg cursor-pointer transition ${
+                  selectedGenderFilter === gScope ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-white'
+                }`}
+              >
+                {gScope === 'الكل' ? '👥 الكل' : gScope === 'بنين' ? '♂️ بنين' : '♀️ بنات'}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3 text-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
-            <h2 className="text-base sm:text-lg font-black text-gray-900">📖 {selectedScope}</h2>
+            <h2 className="text-base sm:text-lg font-black text-gray-900">
+              📖 {selectedScope} {selectedGenderFilter !== 'الكل' ? `(${selectedGenderFilter})` : ''}
+            </h2>
             <div className="flex flex-wrap items-center gap-2 mt-1">
               <span className="text-gray-500 font-bold">الخادم: {servant.full_name}</span>
               <span className="px-2.5 py-0.5 bg-gray-100 text-gray-800 rounded-full font-bold text-[11px]">
@@ -347,6 +524,7 @@ export default function ServantDashboard({
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="px-2.5 py-0.5 bg-[#7a1c24] text-white rounded-lg text-[11px] font-black">#{index + 1}</span>
                       <h3 className="text-sm sm:text-base font-black text-gray-900">{m.full_name}</h3>
+                      {m.gender && <span className="px-2 py-0.5 bg-pink-50 text-pink-900 rounded-lg text-[10px] font-bold">{m.gender === 'أنثى' ? '♀️ بنات' : '♂️ بنين'}</span>}
                       {m.assigned_class && <span className="px-2 py-0.5 bg-red-50 text-[#7a1c24] rounded-lg text-[10px] font-bold">⛪ {m.assigned_class}</span>}
                       <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-bold ${attInfo.badgeColor}`}>{attInfo.label}</span>
                     </div>
@@ -435,18 +613,31 @@ export default function ServantDashboard({
                 </div>
               </div>
 
-              <div className="bg-red-50/50 p-3 rounded-2xl border border-red-200">
-                <label className="block mb-1 text-[#7a1c24]">الفصل المسجل به</label>
-                <select
-                  className="w-full p-2.5 border rounded-xl bg-white font-bold"
-                  value={newMember.assigned_class}
-                  onChange={e => setNewMember({ ...newMember, assigned_class: e.target.value })}
-                >
-                  <option value="">-- اختر الفصل --</option>
-                  {services.map(srv => (
-                    <option key={srv.id} value={srv.class_name}>{srv.class_name} ({srv.stage_name})</option>
-                  ))}
-                </select>
+              <div className="bg-red-50/50 p-3 rounded-2xl border border-red-200 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="block mb-1 text-[#7a1c24]">الفصل المسجل به</label>
+                  <select
+                    className="w-full p-2.5 border rounded-xl bg-white font-bold"
+                    value={newMember.assigned_class}
+                    onChange={e => setNewMember({ ...newMember, assigned_class: e.target.value })}
+                  >
+                    <option value="">-- اختر الفصل --</option>
+                    {services.map(srv => (
+                      <option key={srv.id} value={srv.class_name}>{srv.class_name} ({srv.stage_name})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block mb-1 text-[#7a1c24]">النوع *</label>
+                  <select
+                    className="w-full p-2.5 border rounded-xl bg-white font-bold"
+                    value={newMember.gender || 'ذكر'}
+                    onChange={e => setNewMember({ ...newMember, gender: e.target.value })}
+                  >
+                    <option value="ذكر">♂️ ذكر (بنين)</option>
+                    <option value="أنثى">♀️ أنثى (بنات)</option>
+                  </select>
+                </div>
               </div>
 
               <div className="bg-[#fbfaf7] p-3 rounded-2xl border">
@@ -465,7 +656,7 @@ export default function ServantDashboard({
                 <div>
                   <label className="block mb-1">المرحلة *</label>
                   <select className="w-full p-2 border rounded-xl bg-white" value={newMember.detailed_stage} onChange={e => setNewMember({ ...newMember, detailed_stage: e.target.value, service_stage: e.target.value })}>
-                    {STAGE_OPTIONS.map((st, i) => <option key={i} value={st}>{st}</option>)}
+                    {availableServicesList.map((st, i) => <option key={i} value={st}>{st}</option>)}
                   </select>
                 </div>
               </div>
