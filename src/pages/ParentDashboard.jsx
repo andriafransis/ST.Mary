@@ -4,7 +4,6 @@ import {
   MapPin, School, Search, UserCheck, Sparkles, X, Check, Unlink, RotateCcw, Bell
 } from 'lucide-react';
 
-// يتحقق أن الاسم مكتوب باللغة العربية فقط (بدون حروف إنجليزية)
 export const isArabicOnlyName = (value = '') => {
   const cleaned = String(value || '').trim();
   if (!cleaned) return false;
@@ -12,7 +11,6 @@ export const isArabicOnlyName = (value = '') => {
   return /^[\u0600-\u06FF\s]+$/.test(cleaned);
 };
 
-// يتحقق أن الاسم الرباعي (4 أسماء) مكتوب بالكامل وباللغة العربية فقط
 export const validateQuadArabicName = ({
   first_name = '',
   second_name = '',
@@ -271,7 +269,6 @@ export default function ParentDashboard({
       .filter(item => Boolean(item.reason));
   }, [candidatePool, linkedIds, existingUserIds, dismissedIds, parent, isMother]);
 
-  // البحث وإظهار التفاصيل يتم حصراً برقم تليفون الأب أو الأم (وليس بحثاً عشوائياً بالاسم)
   const phoneLookupResults = useMemo(() => {
     const qPhone = normalizePhone(phoneQuery);
     if (qPhone.length < 7) return [];
@@ -303,19 +300,6 @@ export default function ParentDashboard({
     if (!onLinkChild || !canManageLinks) return;
     setValidationError('');
 
-    const quadCheck = validateQuadArabicName({
-      first_name: child.first_name,
-      second_name: child.second_name,
-      third_name: child.third_name,
-      fourth_name: child.fourth_name,
-      full_name: child.full_name
-    });
-
-    if (!quadCheck.valid) {
-      setValidationError(`تعذر ربط (${child.full_name || 'الحساب'}): ${quadCheck.error}`);
-      return;
-    }
-
     setBusyChildId(child.id);
     try {
       const ok = await onLinkChild(child.id, true, isMother ? 'mother' : 'father');
@@ -342,7 +326,7 @@ export default function ParentDashboard({
     try {
       localStorage.setItem(dismissedStorageKey, JSON.stringify(next));
     } catch {
-      // ignore storage errors
+      // ignore
     }
   };
 
@@ -393,7 +377,6 @@ export default function ParentDashboard({
 
   return (
     <div className="space-y-4 text-xs" dir="rtl">
-      {/* بانر الترحيب */}
       <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-base sm:text-xl font-black text-amber-200">أهلاً بحضرتك، {parent.full_name}</h2>
@@ -406,7 +389,6 @@ export default function ParentDashboard({
         </p>
       </div>
 
-      {/* إشعارات طلبات ربط الأبناء القادمة من الأبناء */}
       {linkRequests.length > 0 && (
         <div className="bg-emerald-50 border-2 border-emerald-300 p-4 sm:p-5 rounded-3xl shadow-sm space-y-3">
           <div className="flex items-center gap-2 text-emerald-950">
@@ -440,13 +422,13 @@ export default function ParentDashboard({
                         {childUser.assigned_class ? ` • فصل: ${childUser.assigned_class}` : ''}
                       </p>
                     )}
-                    {childUser?.father_phone || childUser?.mother_phone ? (
+                    {(childUser?.father_phone || childUser?.mother_phone) && (
                       <p className="text-[11px] text-gray-500">
                         {childUser.father_phone ? `تليفون الأب: ${childUser.father_phone}` : ''}
                         {childUser.father_phone && childUser.mother_phone ? ' • ' : ''}
                         {childUser.mother_phone ? `تليفون الأم: ${childUser.mother_phone}` : ''}
                       </p>
-                    ) : null}
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 pt-1">
@@ -481,7 +463,6 @@ export default function ParentDashboard({
         </div>
       )}
 
-      {/* قسم الاقتراحات التلقائية */}
       {canManageLinks && autoSuggestions.length > 0 && (
         <div className="bg-amber-50 border-2 border-amber-300 p-4 sm:p-5 rounded-3xl shadow-sm space-y-3">
           <div className="flex items-center gap-2 text-amber-950">
@@ -540,7 +521,6 @@ export default function ParentDashboard({
         </div>
       )}
 
-      {/* البحث وإظهار التفاصيل برقم تليفون الأب أو الأم */}
       {canManageLinks && (
         <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
           <div className="flex flex-wrap justify-between items-center gap-2">
@@ -655,7 +635,6 @@ export default function ParentDashboard({
         </div>
       )}
 
-      {/* قسم الأبناء المربوطين */}
       {effectiveChildrenList.length === 0 ? (
         <div className="bg-amber-50/70 border border-amber-200 p-5 rounded-3xl flex flex-col sm:flex-row items-center gap-3 text-center sm:text-right">
           <div className="w-11 h-11 rounded-2xl bg-amber-100 text-[#7a1c24] flex items-center justify-center shrink-0">
@@ -748,7 +727,6 @@ export default function ParentDashboard({
         </div>
       )}
 
-      {/* مواعيد القداسات والاجتماعات */}
       <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
         <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
           <Calendar size={17} /> مواعيد القداسات والاجتماعات بالكنيسة
@@ -779,7 +757,6 @@ export default function ParentDashboard({
         )}
       </div>
 
-      {/* الفصول والخدمات المتاحة */}
       {services.length > 0 && (
         <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
           <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
