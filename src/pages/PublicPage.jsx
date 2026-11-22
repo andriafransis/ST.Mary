@@ -608,7 +608,10 @@ export default function PublicPage({
       const dbRole = regForm.requested_role === 'parish' ? 'member' : regForm.requested_role;
       const isAlsoParent = regForm.requested_role === 'parent' || Boolean(regForm.also_parent);
       const extraScreens = isAlsoParent && dbRole !== 'parent' ? ['parent_panel'] : [];
-      const childrenSummary = childrenList.map(c => `${c.child_name} (${c.study_details || c.stage})`).join('، ');
+      const effectiveChildren = tempChild.child_name.trim()
+        ? [...childrenList, { ...tempChild, child_name: tempChild.child_name.trim() }]
+        : childrenList;
+      const childrenSummary = effectiveChildren.map(c => `${c.child_name} (${c.study_details || c.stage})`).join('، ');
       const userGender = regForm.gender === 'أنثى' ? 'أنثى' : 'ذكر';
       const resolvedGuardianType = isAlsoParent
         ? (regForm.guardian_type === 'mother' || userGender === 'أنثى' ? 'mother' : 'father')
@@ -654,10 +657,10 @@ export default function PublicPage({
         });
       }
 
-      if (isAlsoParent && savedUser && childrenList.length > 0) {
+      if (isAlsoParent && savedUser && effectiveChildren.length > 0) {
         const isMother = resolvedGuardianType === 'mother';
-        const childPayloads = childrenList.map((c, idx) => ({
-          username: `${cleanUser}_c${idx + 1}_${Date.now().toString().slice(-3)}`,
+        const childPayloads = effectiveChildren.map((c, idx) => ({
+          username: `${cleanUser}_c${idx + 1}_${Date.now().toString().slice(-4)}`,
           password: regForm.password,
           full_name: c.child_name.includes(' ') ? c.child_name : `${c.child_name} ${full_name}`,
           first_name: c.child_name.split(' ')[0] || c.child_name,
@@ -677,15 +680,22 @@ export default function PublicPage({
           is_studying: true,
           permissions: {}
         }));
-        await supabase.from('church_users').insert(childPayloads);
+        const { error: childrenErr } = await supabase.from('church_users').insert(childPayloads);
+        if (childrenErr) {
+          return setRegStatus({
+            type: 'error',
+            msg: 'تم حفظ ولي الأمر ولكن تعذر حفظ الأبناء: ' + childrenErr.message
+          });
+        }
       }
 
       setRegStatus({
         type: 'success',
-        msg: 'تم إرسال طلب تسجيلك بنجاح ✅! سيقوم أدمن الكنيسة بمراجعة بياناتك وقبول انضمامك.'
+        msg: `تم إرسال طلب تسجيلك بنجاح ✅${effectiveChildren.length > 0 ? ` (مع ${effectiveChildren.length} من الأبناء)` : ''}! سيقوم أدمن الكنيسة بمراجعة بياناتك وقبول انضمامك.`
       });
       setRegForm(emptyReg);
       setChildrenList([]);
+      setTempChild({ child_name: '', dob: '', gender: 'ذكر', stage: 'أولى ابتدائي', study_details: '', phone: '' });
     } finally {
       setSubmitting(false);
     }
@@ -1188,7 +1198,7 @@ export default function PublicPage({
                   <button
                     type="button"
                     onClick={onBackToApp}
-                    className="min-h-[44px] px-4 py-2 bg-white text-[#7a1c24] hover:bg-amber-50 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer shadow transition"
+                    className="min-h-11 px-4 py-2 bg-white text-[#7a1c24] hover:bg-amber-50 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer shadow transition"
                   >
                     <ArrowRight size={15} /> العودة لحسابي
                   </button>
@@ -1197,14 +1207,14 @@ export default function PublicPage({
                       <button
                         type="button"
                         onClick={() => openAddContentModal('news')}
-                        className="min-h-[44px] px-2.5 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl text-xs font-black flex items-center justify-center gap-1 cursor-pointer shadow transition"
+                        className="min-h-11 px-2.5 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl text-xs font-black flex items-center justify-center gap-1 cursor-pointer shadow transition"
                       >
                         <Plus size={14} /> إضافة محتوى
                       </button>
                       <button
                         type="button"
                         onClick={openSectionsCustomizer}
-                        className="min-h-[44px] px-2.5 py-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition"
+                        className="min-h-11 px-2.5 py-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1 cursor-pointer transition"
                       >
                         <Settings size={14} /> الأقسام
                       </button>
@@ -1216,14 +1226,14 @@ export default function PublicPage({
                   <button
                     type="button"
                     onClick={() => { setRegStatus({ type: '', msg: '' }); setShowRegister(true); }}
-                    className="min-h-[44px] px-3.5 py-2 bg-white/10 hover:bg-white/20 border border-white/30 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition"
+                    className="min-h-11 px-3.5 py-2 bg-white/10 hover:bg-white/20 border border-white/30 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition"
                   >
                     <UserPlus size={15} /> تسجيل حساب جديد
                   </button>
                   <button
                     type="button"
                     onClick={onOpenLogin}
-                    className="min-h-[44px] px-4 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer shadow transition"
+                    className="min-h-11 px-4 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer shadow transition"
                   >
                     <LogIn size={15} /> تسجيل الدخول
                   </button>
@@ -1253,7 +1263,7 @@ export default function PublicPage({
                         <a
                           key={btn.key}
                           href={btn.href}
-                          className={`min-h-[44px] px-3 py-2 rounded-xl text-xs flex items-center justify-center text-center leading-snug transition ${btn.className} ${spanClass}`}
+                          className={`min-h-11 px-3 py-2 rounded-xl text-xs flex items-center justify-center text-center leading-snug transition ${btn.className} ${spanClass}`}
                         >
                           {btn.label}
                         </a>
@@ -1264,7 +1274,7 @@ export default function PublicPage({
                         key={btn.key}
                         type="button"
                         onClick={btn.onClick}
-                        className={`min-h-[44px] px-3 py-2 rounded-xl text-xs flex items-center justify-center text-center leading-snug cursor-pointer transition ${btn.className} ${spanClass}`}
+                        className={`min-h-11 px-3 py-2 rounded-xl text-xs flex items-center justify-center text-center leading-snug cursor-pointer transition ${btn.className} ${spanClass}`}
                       >
                         {btn.label}
                       </button>
@@ -1414,7 +1424,7 @@ export default function PublicPage({
                       <input type="file" accept="image/*,video/*" className="hidden" disabled={uploadingMedia} onChange={handleUploadFile} />
                     </label>
                   )}
-                  <input placeholder="أو رابط مباشر https://..." className="flex-1 min-w-[180px] p-2.5 border rounded-xl bg-white" value={contentForm.url} onChange={e => setContentForm({ ...contentForm, url: e.target.value })} />
+                  <input placeholder="أو رابط مباشر https://..." className="flex-1 min-w-45 p-2.5 border rounded-xl bg-white" value={contentForm.url} onChange={e => setContentForm({ ...contentForm, url: e.target.value })} />
                 </div>
                 {contentForm.url && isImageUrl(contentForm.url) && <img src={contentForm.url} alt="معاينة" className="h-24 rounded-xl border object-cover bg-white" />}
               </div>
@@ -1566,7 +1576,7 @@ export default function PublicPage({
               {showParentChildrenBox && (
                 <div className="bg-amber-50/70 p-3.5 rounded-2xl border-2 border-amber-200 space-y-2.5">
                   <div className="flex flex-wrap justify-between items-center gap-2">
-                    <strong className="text-[#7a1c24] block">👨‍👩‍👦 بيانات الأبناء:</strong>
+                    <strong className="text-[#7a1c24] block">👨‍👩‍👦 بيانات الأبناء ({childrenList.length} مضافين):</strong>
                     <select className="p-1.5 border border-amber-300 rounded-xl bg-white text-[11px]" value={regForm.guardian_type} onChange={e => setRegForm({ ...regForm, guardian_type: e.target.value })}>
                       <option value="father">👨 الصفة: الأب</option>
                       <option value="mother">👩 الصفة: الأم</option>

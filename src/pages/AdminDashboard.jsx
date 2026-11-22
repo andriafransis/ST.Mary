@@ -7,6 +7,7 @@ import AdminPageDesigner from '../components/AdminPageDesigner';
 import EducationalCenterManager from '../components/EducationalCenterManager';
 import JosephArimatheaManager from '../components/JosephArimatheaManager';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
+import ServiceGroupFeed, { SERVICE_GROUPS } from '../components/ServiceGroupFeed';
 import PermissionsPage from './PermissionsPage';
 import {
   UserPlus, Edit3, Trash2, CalendarPlus, BookOpen,
@@ -492,7 +493,7 @@ export default function AdminDashboard({
       { id: 'roles_permissions', icon: '🔐', title: 'المركز الموحد للصلاحيات والأدوار', desc: 'إنشاء قوالب صلاحيات (الشعب، الكاهن، الخادم، المخدوم...) وتحديد مين يشوف ومين يعدل لكل شاشة ولكل فرد', count: `${roleTemplatesCount} قالب • موحّد`, color: 'border-emerald-300 bg-emerald-50/30' },
       { id: 'page_designer', icon: '🎨', title: 'تصميم وتعديل الصفحة الرئيسية والصفحات', desc: 'ترتيب الأقسام، إضافة ونشر الأخبار والقداسات والرحلات والفيديوهات والكهنة وروابط يوتيوب وفيسبوك', count: 'تحكم كامل', color: 'border-pink-300 bg-pink-50/30' },
       { id: 'events', icon: '⛪', title: 'مواعيد القداسات والاجتماعات', desc: 'إضافة وتعديل مواعيد القداسات، العشيات، والاجتماعات العامة', count: `${events.length} موعد`, color: 'border-amber-200 bg-white' },
-      { id: 'services', icon: '🏫', title: 'الفصول والخدمات', desc: 'تنظيم المراحل والفصول وأمناء الخدمة والكاهن المشرف', count: `${services.length} فصل`, color: 'border-blue-200 bg-white' },
+      { id: 'services', icon: '🏫', title: 'الفصول والخدمات والجروبات', desc: 'تنظيم المراحل والفصول، وكروت جروبات الخدمة الخاصة بأبناء وخدام كل خدمة', count: `${services.length} فصل`, color: 'border-blue-200 bg-white' },
       { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل، المواد، الأسعار، حضور الطلاب والمدرسين، وشيت المحاسبة', count: 'إدارة الدروس', color: 'border-indigo-200 bg-white' },
       { id: 'joseph_arimathea', icon: '🕊️', title: 'خدمة يوسف الرامي', desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، خط سير السائق، ومتابعة المرافقين', count: 'خدمة المنتقلين', color: 'border-slate-300 bg-white' },
       { id: 'burial_and_caskets', icon: '⚰️', title: 'أماكن الدفن والصناديق وألحان يوسف الرامي', desc: 'جدول أماكن الدفن بالترقيم المتسلسل ورسوم الانتقال + مخزون الصناديق + ألحان يوسف الرامي وسلايدر الصوت', count: 'جداول وألحان', color: 'border-cyan-200 bg-white' },
@@ -551,6 +552,8 @@ export default function AdminDashboard({
   const isServantRoleSelected = SERVANT_ROLES.includes(formData.role);
   const selectedServantStages = splitList(formData.detailed_stage);
   const selectedServantClasses = splitList(formData.assigned_class);
+  const dynamicExtraStages = [...new Set(services.map(s => s.stage_name).filter(Boolean))]
+    .filter(st => !SERVICE_GROUPS.some(g => g.groupName === st || g.stages.includes(st)));
 
   return (
     <div className="space-y-4">
@@ -604,7 +607,7 @@ export default function AdminDashboard({
           </div>
 
           <div className="flex flex-wrap justify-between items-center gap-2">
-            <div className="relative flex-1 min-w-[220px] text-xs">
+            <div className="relative flex-1 min-w-55 text-xs">
               <Search size={15} className="absolute right-3 top-2.5 text-gray-400" />
               <input type="text" placeholder="بحث بالاسم، اليوزر، التليفون، الفصل، أو القطاع..." className="w-full pr-9 pl-3 py-2.5 bg-white border rounded-xl outline-none focus:border-[#7a1c24]" value={searchQ} onChange={e => setSearchQ(e.target.value)} />
             </div>
@@ -729,7 +732,7 @@ export default function AdminDashboard({
 
       {activeCard === 'services' && (
         <div className="space-y-4 text-xs">
-          {renderTopBack('🏫 الفصول والخدمات')}
+          {renderTopBack('🏫 الفصول والخدمات وجروبات الخدمة')}
           {isAdmin && (
             <form onSubmit={e => { e.preventDefault(); if (!requireAdminGuard()) return; const payload = { ...srvForm, priest_id: srvForm.priest_id || null }; if (editingSrvId) { onUpdateService({ ...payload, id: editingSrvId }); setEditingSrvId(null); } else { onAddService(payload); } setSrvForm(emptyService); }} className="bg-white p-4 rounded-3xl border space-y-3 font-bold shadow-sm">
               <h3 className="text-sm font-extrabold flex items-center gap-1 text-[#7a1c24]"><BookOpen size={16} /> {editingSrvId ? 'تعديل الفصل / الخدمة' : 'إضافة فصل أو خدمة جديدة بالكنيسة'}</h3>
@@ -779,6 +782,8 @@ export default function AdminDashboard({
               );
             })}
           </div>
+
+          <ServiceGroupFeed currentUser={effectiveUser} services={services} canPost={isAdmin} />
         </div>
       )}
 
@@ -1206,28 +1211,74 @@ export default function AdminDashboard({
                 <div className="bg-emerald-50/50 p-3 rounded-2xl border border-emerald-200 space-y-3">
                   <div>
                     <label className="block mb-1.5 text-[#7a1c24] font-extrabold">
-                      📖 أماكن ومراحل الخدمة للخادم (يمكنك اختيار أكثر من مكان):
+                      📖 جروبات ومراحل الخدمة للخادم (كل جروب له كارت عام خاص بأهله فقط):
                     </label>
-                    <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto bg-white p-2 rounded-xl border">
-                      {STAGE_OPTIONS.map((st, i) => {
-                        const checked = selectedServantStages.includes(st);
+                    <div className="space-y-2 max-h-56 overflow-y-auto bg-white p-2.5 rounded-xl border">
+                      {SERVICE_GROUPS.map(grp => {
+                        const allGroupSelected = grp.stages.every(st => selectedServantStages.includes(st));
                         return (
-                          <label
-                            key={i}
-                            className={`flex items-center gap-1 px-2 py-1 rounded-lg border cursor-pointer text-[11px] ${
-                              checked ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-gray-50 text-gray-800'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              className="hidden"
-                              checked={checked}
-                              onChange={() => toggleMultiFieldValue('detailed_stage', st)}
-                            />
-                            {checked ? '✓ ' : ''}{st}
-                          </label>
+                          <div key={grp.groupName} className="p-2 bg-gray-50 rounded-xl border space-y-1.5">
+                            <div className="flex justify-between items-center">
+                              <strong className="text-[11px] text-[#7a1c24]">{grp.icon} {grp.groupName}</strong>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = allGroupSelected
+                                    ? selectedServantStages.filter(x => !grp.stages.includes(x) && x !== grp.groupName)
+                                    : [...new Set([...selectedServantStages, ...grp.stages, grp.groupName])];
+                                  setFormData({ ...formData, detailed_stage: next.join(', ') });
+                                }}
+                                className={`px-2 py-0.5 rounded-lg text-[10px] font-black cursor-pointer ${allGroupSelected ? 'bg-[#7a1c24] text-white' : 'bg-amber-100 text-amber-950'}`}
+                              >
+                                {allGroupSelected ? '✓ الجروب كله محدد' : '+ تحديد الجروب كله'}
+                              </button>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {grp.stages.map((st, i) => {
+                                const checked = selectedServantStages.includes(st);
+                                return (
+                                  <label
+                                    key={i}
+                                    className={`flex items-center gap-1 px-2 py-1 rounded-lg border cursor-pointer text-[11px] ${
+                                      checked ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-gray-800'
+                                    }`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      className="hidden"
+                                      checked={checked}
+                                      onChange={() => toggleMultiFieldValue('detailed_stage', st)}
+                                    />
+                                    {checked ? '✓ ' : ''}{st}
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
                         );
                       })}
+
+                      {dynamicExtraStages.length > 0 && (
+                        <div className="p-2 bg-amber-50/50 rounded-xl border space-y-1.5">
+                          <strong className="text-[11px] text-amber-950 block">✨ خدمات مضافة أخرى:</strong>
+                          <div className="flex flex-wrap gap-1.5">
+                            {dynamicExtraStages.map((st, i) => {
+                              const checked = selectedServantStages.includes(st);
+                              return (
+                                <label
+                                  key={i}
+                                  className={`flex items-center gap-1 px-2 py-1 rounded-lg border cursor-pointer text-[11px] ${
+                                    checked ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-gray-800'
+                                  }`}
+                                >
+                                  <input type="checkbox" className="hidden" checked={checked} onChange={() => toggleMultiFieldValue('detailed_stage', st)} />
+                                  {checked ? '✓ ' : ''}{st}
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
