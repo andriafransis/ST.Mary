@@ -1,5 +1,4 @@
 // src/lib/permissions.js
-
 export const SCREEN_ORDER = [
   'admin_panel',
   'priest_panel',
@@ -135,24 +134,21 @@ export function getDetailedScreenPermissions(user, screenKey, roleScreens = []) 
   const roleCfg = ROLE_DEFAULT_PERMISSIONS[role] || ROLE_DEFAULT_PERMISSIONS.member;
   const base = roleCfg.screens?.[screenKey] || { view: false, create: false, edit: false, delete: false };
 
-  // 1) تطبيق إعدادات جدول role_screens إن وُجدت للدور والشاشة
   const dbRow = Array.isArray(roleScreens)
-    ? roleScreens.find(r => r.role === role && r.screen_key === screenKey)
+    ? roleScreens.find(r => r.role === role && r.screen === screenKey)
     : null;
 
   let perms = {
-    view: dbRow ? (dbRow.can_view ?? dbRow.allowed ?? base.view) : base.view,
+    view: dbRow ? (dbRow.can_view ?? base.view) : base.view,
     create: dbRow ? (dbRow.can_create ?? false) : base.create,
     edit: dbRow ? (dbRow.can_edit ?? false) : base.edit,
     delete: dbRow ? (dbRow.can_delete ?? false) : base.delete
   };
 
-  // 2) لو تم تفعيل وضع "عرض فقط" على الدور أو المستخدم
   if (user?.permissions?.read_only === true) {
     perms = { ...perms, create: false, edit: false, delete: false };
   }
 
-  // 3) تطبيق التخصيص الفردي للشاشة على مستوى المستخدم إن وُجد
   const userScreenOverride = user?.permissions?.screens?.[screenKey];
   if (userScreenOverride && typeof userScreenOverride === 'object') {
     perms = {
@@ -163,7 +159,6 @@ export function getDetailedScreenPermissions(user, screenKey, roleScreens = []) 
     };
   }
 
-  // لو لم يُسمح بالعرض (view = false) فلا يُسمح بالإضافة أو التعديل أو الحذف
   if (!perms.view) {
     return { view: false, create: false, edit: false, delete: false };
   }
@@ -181,12 +176,12 @@ export function resolveScreens(user, roleScreens = []) {
 
   const role = user.role || 'member';
   const roleCfg = ROLE_DEFAULT_PERMISSIONS[role] || ROLE_DEFAULT_PERMISSIONS.member;
+  const roleDbRows = Array.isArray(roleScreens) ? roleScreens.filter(r => r.role === role) : [];
 
-  // أي شاشة مضافة صراحة في role_screens لهذا الدور أو في user.permissions.screens
   const candidateKeys = new Set([
     ...SCREEN_ORDER,
     ...Object.keys(roleCfg.screens || {}),
-    ...(Array.isArray(roleScreens) ? roleScreens.filter(r => r.role === role).map(r => r.screen_key) : []),
+    ...roleDbRows.map(r => r.screen).filter(Boolean),
     ...Object.keys(user?.permissions?.screens || {})
   ]);
 
@@ -198,7 +193,6 @@ export function resolveScreens(user, roleScreens = []) {
     }
   });
 
-  // لو الأدمن حدد شاشات مخصصة صراحة في user.permissions.allowed_screens
   if (Array.isArray(user?.permissions?.allowed_screens)) {
     const customSet = new Set(user.permissions.allowed_screens);
     Array.from(allowed).forEach(k => {
@@ -209,7 +203,12 @@ export function resolveScreens(user, roleScreens = []) {
     });
   }
 
-  const preferredDefault = user?.permissions?.default_screen || roleCfg.defaultScreen;
+  const dbDefaultRow = roleDbRows.find(r => r.is_default === true && allowed.has(r.screen));
+  const preferredDefault =
+    user?.permissions?.default_screen ||
+    dbDefaultRow?.screen ||
+    roleCfg.defaultScreen;
+
   const defaultScreen =
     preferredDefault && allowed.has(preferredDefault)
       ? preferredDefault
