@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { uploadChurchMedia } from '../lib/mediaUpload';
 import AdminLogsAndWaWidget from '../components/AdminLogsAndWaWidget';
@@ -20,6 +20,7 @@ import {
 
 const emptyUser = {
   first_name: '', second_name: '', third_name: '', fourth_name: '',
+  gender: 'ذكر',
   username: '', password: '', role: 'member', guardian_type: '',
   sector: '', detailed_stage: 'أولى ابتدائي', assigned_class: '', family_role: 'ابن/ابنة',
   member_status: 'active',
@@ -330,6 +331,7 @@ export default function AdminDashboard({
     setFormData({
       ...emptyUser,
       role: presetRole,
+      gender: 'ذكر',
       guardian_type: presetRole === 'parent' ? 'father' : '',
       family_role: presetRole === 'parent' ? 'الأب' : 'ابن/ابنة',
       member_status: 'active',
@@ -355,6 +357,7 @@ export default function AdminDashboard({
       second_name: u.second_name || parts[1] || '',
       third_name: u.third_name || parts[2] || '',
       fourth_name: u.fourth_name || parts.slice(3).join(' ') || '',
+      gender: u.gender || (resolvedGuardianType === 'mother' ? 'أنثى' : 'ذكر'),
       username: u.username || '',
       password: u.password || '',
       role: u.role || 'member',
@@ -426,6 +429,7 @@ export default function AdminDashboard({
 
     const payload = {
       ...formData,
+      gender: formData.gender || 'ذكر',
       full_name,
       guardian_type: normalizedGuardianType,
       family_role: isParentRole
@@ -655,6 +659,9 @@ export default function AdminDashboard({
                         <div className="flex items-center gap-2 flex-wrap">
                           <strong className="text-sm text-gray-950">{u.full_name}</strong>
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-50 text-[#7a1c24]">{u.permissions?.custom_role_label || ROLE_LABELS[u.role] || u.role}</span>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-pink-50 text-pink-900">
+                            {u.gender === 'أنثى' ? '♀️ أنثى' : '♂️ ذكر'}
+                          </span>
                           {u.role === 'parent' && (
                             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-950">
                               {guardianKind === 'mother' ? '👩 الأم' : '👨 الأب'}
@@ -1064,7 +1071,7 @@ export default function AdminDashboard({
                 <div><label className="block mb-1">كلمة المرور *</label><input required className="w-full p-2.5 border rounded-xl" value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} /></div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div>
                   <label className="block mb-1">الدور والصلاحية *</label>
                   <select
@@ -1093,6 +1100,17 @@ export default function AdminDashboard({
                     <option value="admin">سوبر أدمن</option>
                   </select>
                 </div>
+                <div>
+                  <label className="block mb-1">النوع *</label>
+                  <select
+                    className="w-full p-2.5 border rounded-xl bg-white"
+                    value={formData.gender || 'ذكر'}
+                    onChange={e => setFormData({ ...formData, gender: e.target.value })}
+                  >
+                    <option value="ذكر">♂️ ذكر</option>
+                    <option value="أنثى">♀️ أنثى</option>
+                  </select>
+                </div>
                 <div><label className="block mb-1">تاريخ الميلاد</label><input type="date" className="w-full p-2.5 border rounded-xl" value={formData.dob} onChange={e => setFormData({ ...formData, dob: e.target.value })} /></div>
               </div>
 
@@ -1107,6 +1125,7 @@ export default function AdminDashboard({
                       setFormData({
                         ...formData,
                         guardian_type: nextG,
+                        gender: nextG === 'mother' ? 'أنثى' : 'ذكر',
                         family_role: nextG === 'mother' ? 'الأم' : 'الأب'
                       });
                     }}

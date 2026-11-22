@@ -1,9 +1,7 @@
-
 import { supabase } from './supabase';
 
 const SESSION_KEY = 'church_active_session_id';
 const SESSION_START_KEY = 'church_active_session_start';
-const SESSION_USER_KEY = 'church_active_session_user_id';
 
 export function detectDeviceInfo() {
   if (typeof navigator === 'undefined') {
@@ -51,11 +49,7 @@ export async function logActivity({
   if (!user?.id) return;
   try {
     const { deviceType } = detectDeviceInfo();
-    const storedUserId = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(SESSION_USER_KEY) : null;
-    const sessionId =
-      typeof sessionStorage !== 'undefined' && storedUserId === String(user.id)
-        ? sessionStorage.getItem(SESSION_KEY)
-        : null;
+    const sessionId = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(SESSION_KEY) : null;
 
     await supabase.from('activity_logs').insert([{
       session_id: sessionId || null,
@@ -75,24 +69,24 @@ export async function logActivity({
 }
 
 export async function endUserSession() {
-  if (typeof sessionStorage === 'undefined') return;
+  if (typeof window === 'undefined') return;
   const sid = sessionStorage.getItem(SESSION_KEY);
-  const startMs = Number(sessionStorage.getItem(SESSION_START_KEY) || Date.now());
-  if (sid) {
-    const nowISO = new Date().toISOString();
-    const duration = Math.max(1, Math.round((Date.now() - startMs) / 1000));
-    try {
-      await supabase
-        .from('user_sessions')
-        .update({ last_active_at: nowISO, closed_at: nowISO, duration_seconds: duration })
-        .eq('id', sid);
-    } catch {
-      // ignore
-    }
+  const startTimeMs = Number(sessionStorage.getItem(SESSION_START_KEY) || Date.now());
+  if (!sid) return;
+  const nowISO = new Date().toISOString();
+  const duration = Math.max(1, Math.round((Date.now() - startTimeMs) / 1000));
+  try {
+    await supabase.from('user_sessions').update({
+      last_active_at: nowISO,
+      closed_at: nowISO,
+      duration_seconds: duration
+    }).eq('id', sid);
+  } catch {
+    // ignore
+  } finally {
+    sessionStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(SESSION_START_KEY);
   }
-  sessionStorage.removeItem(SESSION_KEY);
-  sessionStorage.removeItem(SESSION_START_KEY);
-  sessionStorage.removeItem(SESSION_USER_KEY);
 }
 
 export function startUserSession(user) {
@@ -100,15 +94,6 @@ export function startUserSession(user) {
 
   let cancelled = false;
   let heartbeatTimer = null;
-
-  // لو تغيّر المستخدم في نفس التاب نبدأ جلسة جديدة له
-  const prevUserId = sessionStorage.getItem(SESSION_USER_KEY);
-  if (prevUserId && prevUserId !== String(user.id)) {
-    sessionStorage.removeItem(SESSION_KEY);
-    sessionStorage.removeItem(SESSION_START_KEY);
-    sessionStorage.removeItem(SESSION_USER_KEY);
-  }
-
   let currentSessionId = sessionStorage.getItem(SESSION_KEY);
   let startTimeMs = Number(sessionStorage.getItem(SESSION_START_KEY) || Date.now());
   const { deviceType, osBrowser, userAgent } = detectDeviceInfo();
@@ -120,7 +105,6 @@ export function startUserSession(user) {
       if (!currentSessionId) {
         startTimeMs = Date.now();
         sessionStorage.setItem(SESSION_START_KEY, String(startTimeMs));
-        sessionStorage.setItem(SESSION_USER_KEY, String(user.id));
 
         const { data, error } = await supabase
           .from('user_sessions')
@@ -167,16 +151,14 @@ export function startUserSession(user) {
     };
 
     try {
-      const sbUrl = supabase.supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
-      const sbKey = supabase.supabaseKey || import.meta.env.VITE_SUPABASE_ANON_KEY;
-      if (isClosing && sbUrl && sbKey) {
-        fetch(`${sbUrl}/rest/v1/user_sessions?id=eq.${sid}`, {
+      if (isClosing && supabase.supabaseUrl && supabase.supabaseKey) {
+        fetch(`${supabase.supabaseUrl}/rest/v1/user_sessions?id=eq.${sid}`, {
           method: 'PATCH',
           keepalive: true,
           headers: {
             'Content-Type': 'application/json',
-            apikey: sbKey,
-            Authorization: `Bearer ${sbKey}`,
+            apikey: supabase.supabaseKey,
+            Authorization: `Bearer ${supabase.supabaseKey}`,
             Prefer: 'return=minimal'
           },
           body: JSON.stringify(payload)
@@ -197,7 +179,9 @@ export function startUserSession(user) {
     else updateHeartbeat(false);
   };
 
-  const handleUnload = () => updateHeartbeat(true);
+  const handleUnload = () => {
+    updateHeartbeat(true);
+  };
 
   document.addEventListener('visibilitychange', handleVisibility);
   window.addEventListener('pagehide', handleUnload);
