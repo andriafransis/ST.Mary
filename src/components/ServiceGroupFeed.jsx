@@ -1,46 +1,28 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Layers, Plus, Trash2, Users, MessageSquare } from 'lucide-react';
+import { Layers, Plus, Trash2, Users } from 'lucide-react';
 
-export const SERVICE_GROUPS = [
-  {
-    groupName: 'خدمة حضانة وطفولة',
-    icon: '🧸',
-    stages: ['حضانة']
-  },
-  {
-    groupName: 'خدمة ابتدائي',
-    icon: '🎒',
-    stages: ['أولى ابتدائي', 'ثانية ابتدائي', 'ثالثة ابتدائي', 'رابعة ابتدائي', 'خامسة ابتدائي', 'سادسة ابتدائي']
-  },
-  {
-    groupName: 'خدمة إعدادي',
-    icon: '📘',
-    stages: ['أولى إعدادي', 'ثانية إعدادي', 'ثالثة إعدادي']
-  },
-  {
-    groupName: 'خدمة ثانوي',
-    icon: '🎓',
-    stages: ['أولى ثانوي', 'ثانية ثانوي', 'ثالثة ثانوي']
-  },
-  {
-    groupName: 'خدمة جامعة وخريجين',
-    icon: '🏛️',
-    stages: ['جامعة وخريجين']
-  },
-  {
-    groupName: 'خدمات واجتماعات خاصة',
-    icon: '🤝',
-    stages: ['حرفيين ومهنيين', 'أصحاب معاشات', 'اجتماع الأرامل', 'إخوة الرب', 'اجتماع الصدى', 'شمامسة وألحان']
-  }
+export const DEFAULT_SERVICE_GROUPS = [
+  { group_name: 'خدمة حضانة وطفولة', icon: '🧸', stages: ['حضانة'], sort_order: 1 },
+  { group_name: 'خدمة ابتدائي', icon: '🎒', stages: ['أولى ابتدائي', 'ثانية ابتدائي', 'ثالثة ابتدائي', 'رابعة ابتدائي', 'خامسة ابتدائي', 'سادسة ابتدائي'], sort_order: 2 },
+  { group_name: 'خدمة إعدادي', icon: '📘', stages: ['أولى إعدادي', 'ثانية إعدادي', 'ثالثة إعدادي'], sort_order: 3 },
+  { group_name: 'خدمة ثانوي', icon: '🎓', stages: ['أولى ثانوي', 'ثانية ثانوي', 'ثالثة ثانوي'], sort_order: 4 },
+  { group_name: 'خدمة جامعة وخريجين', icon: '🏛️', stages: ['جامعة وخريجين'], sort_order: 5 },
+  { group_name: 'خدمات واجتماعات خاصة', icon: '🤝', stages: ['حرفيين ومهنيين', 'أصحاب معاشات', 'اجتماع الأرامل', 'إخوة الرب', 'اجتماع الصدى', 'شمامسة وألحان'], sort_order: 6 }
 ];
 
-export function resolveUserServiceGroups(user, services = []) {
-  if (!user) return [];
-  const dynamicGroupNames = [...new Set(services.map(s => s.stage_name).filter(Boolean))];
-  const allGroupNames = [...new Set([...SERVICE_GROUPS.map(g => g.groupName), ...dynamicGroupNames])];
+export const normalizeGroupStages = (raw) => {
+  if (Array.isArray(raw)) return raw.map(s => String(s).trim()).filter(Boolean);
+  if (typeof raw === 'string') return raw.split(/[,،]/).map(s => s.trim()).filter(Boolean);
+  return [];
+};
 
-  // الأدمن وأبونا يشوفوا كل الكروت والجروبات
+export function resolveUserServiceGroups(user, services = [], groupsList = DEFAULT_SERVICE_GROUPS) {
+  if (!user) return [];
+  const activeGroups = (groupsList && groupsList.length > 0) ? groupsList : DEFAULT_SERVICE_GROUPS;
+  const dynamicGroupNames = [...new Set(services.map(s => s.stage_name).filter(Boolean))];
+  const allGroupNames = [...new Set([...activeGroups.map(g => g.group_name || g.groupName), ...dynamicGroupNames])];
+
   if (user.role === 'admin' || user.role === 'priest') {
     return allGroupNames;
   }
@@ -57,27 +39,27 @@ export function resolveUserServiceGroups(user, services = []) {
   const matched = new Set();
 
   userTokens.forEach(tok => {
-    // مطابقة مباشرة مع اسم الجروب
     allGroupNames.forEach(gName => {
       if (tok === gName || gName.includes(tok) || tok.includes(gName)) {
         matched.add(gName);
       }
     });
 
-    // مطابقة مع مراحل الجروبات الثابتة
-    SERVICE_GROUPS.forEach(grp => {
-      if (grp.stages.some(st => tok.includes(st) || st.includes(tok))) {
-        matched.add(grp.groupName);
+    activeGroups.forEach(grp => {
+      const gName = grp.group_name || grp.groupName;
+      const stages = normalizeGroupStages(grp.stages);
+      if (stages.some(st => tok.includes(st) || st.includes(tok))) {
+        matched.add(gName);
       }
     });
 
-    // مطابقة مع الفصول المسجلة في جدول church_services
     services.forEach(srv => {
       if (srv.class_name === tok && srv.stage_name) {
         matched.add(srv.stage_name);
-        SERVICE_GROUPS.forEach(grp => {
-          if (grp.groupName.includes(srv.stage_name) || srv.stage_name.includes(grp.groupName.replace('خدمة ', ''))) {
-            matched.add(grp.groupName);
+        activeGroups.forEach(grp => {
+          const gName = grp.group_name || grp.groupName;
+          if (gName.includes(srv.stage_name) || srv.stage_name.includes(gName.replace('خدمة ', ''))) {
+            matched.add(gName);
           }
         });
       }
@@ -87,12 +69,30 @@ export function resolveUserServiceGroups(user, services = []) {
   return Array.from(matched);
 }
 
-export default function ServiceGroupFeed({ currentUser, services = [], canPost = false }) {
+export default function ServiceGroupFeed({ currentUser, services = [], groups = null, canPost = false }) {
+  const [dbGroups, setDbGroups] = useState([]);
   const [posts, setPosts] = useState([]);
   const [selectedGroup, setSelectedGroup] = useState('');
   const [form, setForm] = useState({ title: '', post_type: 'إعلان للخدمة', body: '', event_date: '' });
 
-  const myGroups = resolveUserServiceGroups(currentUser, services);
+  useEffect(() => {
+    if (Array.isArray(groups)) {
+      setDbGroups(groups);
+      return;
+    }
+    supabase
+      .from('service_groups')
+      .select('*')
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true })
+      .then(({ data }) => {
+        if (data && data.length > 0) setDbGroups(data);
+        else setDbGroups(DEFAULT_SERVICE_GROUPS);
+      });
+  }, [groups]);
+
+  const effectiveGroups = dbGroups.length > 0 ? dbGroups : DEFAULT_SERVICE_GROUPS;
+  const myGroups = resolveUserServiceGroups(currentUser, services, effectiveGroups);
 
   useEffect(() => {
     if (myGroups.length > 0 && (!selectedGroup || !myGroups.includes(selectedGroup))) {
@@ -160,10 +160,9 @@ export default function ServiceGroupFeed({ currentUser, services = [], canPost =
         </div>
       </div>
 
-      {/* كروت الجروبات */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
         {myGroups.map(gName => {
-          const grpObj = SERVICE_GROUPS.find(g => g.groupName === gName);
+          const grpObj = effectiveGroups.find(g => (g.group_name || g.groupName) === gName);
           const count = posts.filter(p => p.group_name === gName).length;
           const isSelected = selectedGroup === gName;
           return (
@@ -189,7 +188,6 @@ export default function ServiceGroupFeed({ currentUser, services = [], canPost =
         })}
       </div>
 
-      {/* محتوى الكارت المختار */}
       {selectedGroup && (
         <div className="bg-[#fbfaf7] border rounded-2xl p-4 space-y-3">
           <div className="flex items-center justify-between">

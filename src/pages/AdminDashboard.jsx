@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { uploadChurchMedia } from '../lib/mediaUpload';
@@ -7,12 +8,12 @@ import AdminPageDesigner from '../components/AdminPageDesigner';
 import EducationalCenterManager from '../components/EducationalCenterManager';
 import JosephArimatheaManager from '../components/JosephArimatheaManager';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
-import ServiceGroupFeed, { SERVICE_GROUPS } from '../components/ServiceGroupFeed';
+import ServiceGroupFeed, { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/ServiceGroupFeed';
 import PermissionsPage from './PermissionsPage';
 import {
   UserPlus, Edit3, Trash2, CalendarPlus, BookOpen,
   Search, RefreshCw, FolderEdit, Sparkles, ArrowRight,
-  Users, Settings, Save, Upload, ShieldCheck, Lock
+  Users, Settings, Save, Upload, ShieldCheck, Lock, Layers
 } from 'lucide-react';
 
 const emptyUser = {
@@ -134,6 +135,11 @@ export default function AdminDashboard({
   const [srvForm, setSrvForm] = useState(emptyService);
   const [editingSrvId, setEditingSrvId] = useState(null);
 
+  // إدارة جروبات ومراحل الخدمة من الأدمن (إضافة، تعديل، حذف)
+  const [dbServiceGroups, setDbServiceGroups] = useState([]);
+  const [grpForm, setGrpForm] = useState({ group_name: '', icon: '📌', stagesText: '', sort_order: 1 });
+  const [editingGrpId, setEditingGrpId] = useState(null);
+
   const [catForm, setCatForm] = useState({ name: '', icon: '📂' });
   const [editingCat, setEditingCat] = useState(null);
 
@@ -171,9 +177,59 @@ export default function AdminDashboard({
     setRoleTemplatesCount(data?.length || 0);
   };
 
+  const loadServiceGroups = async () => {
+    const { data } = await supabase
+      .from('service_groups')
+      .select('*')
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true });
+    if (data && data.length > 0) setDbServiceGroups(data);
+    else setDbServiceGroups(DEFAULT_SERVICE_GROUPS);
+  };
+
   useEffect(() => {
     loadRoleTemplates();
+    loadServiceGroups();
   }, []);
+
+  const handleSaveServiceGroup = async (e) => {
+    e.preventDefault();
+    if (!requireAdminGuard()) return;
+    const stagesArr = normalizeGroupStages(grpForm.stagesText);
+    const payload = {
+      group_name: grpForm.group_name.trim(),
+      icon: grpForm.icon.trim() || '📌',
+      stages: stagesArr,
+      sort_order: Number(grpForm.sort_order || dbServiceGroups.length + 1)
+    };
+    if (!payload.group_name) return alert('اكتب اسم الجروب / الخدمة');
+
+    if (editingGrpId) {
+      const { data, error } = await supabase.from('service_groups').update(payload).eq('id', editingGrpId).select().single();
+      if (error) return alert('خطأ في التعديل: ' + error.message);
+      if (data) {
+        setDbServiceGroups(dbServiceGroups.map(g => (g.id === editingGrpId ? data : g)).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)));
+        setEditingGrpId(null);
+        setGrpForm({ group_name: '', icon: '📌', stagesText: '', sort_order: dbServiceGroups.length + 1 });
+      }
+    } else {
+      const { data, error } = await supabase.from('service_groups').insert([payload]).select().single();
+      if (error) return alert('خطأ في الإضافة (تأكد من تشغيل SQL إنشاء جدول service_groups): ' + error.message);
+      if (data) {
+        const cleanExisting = dbServiceGroups.filter(g => g.id);
+        setDbServiceGroups([...cleanExisting, data].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)));
+        setGrpForm({ group_name: '', icon: '📌', stagesText: '', sort_order: cleanExisting.length + 2 });
+      }
+    }
+  };
+
+  const handleDeleteServiceGroup = async (grp) => {
+    if (!requireAdminGuard()) return;
+    if (!grp.id) return alert('قم بتشغيل كود SQL جدول service_groups أولاً حتى يتم الحفظ والحذف في الداتابيز.');
+    if (!confirm(`حذف جروب "${grp.group_name}"؟`)) return;
+    const { error } = await supabase.from('service_groups').delete().eq('id', grp.id);
+    if (!error) setDbServiceGroups(dbServiceGroups.filter(g => g.id !== grp.id));
+  };
 
   const loadChurchIdentity = async () => {
     const [pubLogo, stRow] = await Promise.all([
@@ -493,7 +549,7 @@ export default function AdminDashboard({
       { id: 'roles_permissions', icon: '🔐', title: 'المركز الموحد للصلاحيات والأدوار', desc: 'إنشاء قوالب صلاحيات (الشعب، الكاهن، الخادم، المخدوم...) وتحديد مين يشوف ومين يعدل لكل شاشة ولكل فرد', count: `${roleTemplatesCount} قالب • موحّد`, color: 'border-emerald-300 bg-emerald-50/30' },
       { id: 'page_designer', icon: '🎨', title: 'تصميم وتعديل الصفحة الرئيسية والصفحات', desc: 'ترتيب الأقسام، إضافة ونشر الأخبار والقداسات والرحلات والفيديوهات والكهنة وروابط يوتيوب وفيسبوك', count: 'تحكم كامل', color: 'border-pink-300 bg-pink-50/30' },
       { id: 'events', icon: '⛪', title: 'مواعيد القداسات والاجتماعات', desc: 'إضافة وتعديل مواعيد القداسات، العشيات، والاجتماعات العامة', count: `${events.length} موعد`, color: 'border-amber-200 bg-white' },
-      { id: 'services', icon: '🏫', title: 'الفصول والخدمات والجروبات', desc: 'تنظيم المراحل والفصول، وكروت جروبات الخدمة الخاصة بأبناء وخدام كل خدمة', count: `${services.length} فصل`, color: 'border-blue-200 bg-white' },
+      { id: 'services', icon: '🏫', title: 'الفصول والخدمات والجروبات', desc: 'إضافة وتعديل وحذف جروبات الخدمات والفصول + كروت الخدمة الخاصة بكل خدمة', count: `${dbServiceGroups.length} جروب • ${services.length} فصل`, color: 'border-blue-200 bg-white' },
       { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل، المواد، الأسعار، حضور الطلاب والمدرسين، وشيت المحاسبة', count: 'إدارة الدروس', color: 'border-indigo-200 bg-white' },
       { id: 'joseph_arimathea', icon: '🕊️', title: 'خدمة يوسف الرامي', desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، خط سير السائق، ومتابعة المرافقين', count: 'خدمة المنتقلين', color: 'border-slate-300 bg-white' },
       { id: 'burial_and_caskets', icon: '⚰️', title: 'أماكن الدفن والصناديق وألحان يوسف الرامي', desc: 'جدول أماكن الدفن بالترقيم المتسلسل ورسوم الانتقال + مخزون الصناديق + ألحان يوسف الرامي وسلايدر الصوت', count: 'جداول وألحان', color: 'border-cyan-200 bg-white' },
@@ -549,11 +605,17 @@ export default function AdminDashboard({
     );
   }
 
+  const effectiveGroups = dbServiceGroups.length > 0 ? dbServiceGroups : DEFAULT_SERVICE_GROUPS;
+  const allGroupStagesFlat = [...new Set([
+    ...STAGE_OPTIONS,
+    ...effectiveGroups.flatMap(g => normalizeGroupStages(g.stages)),
+    ...services.map(s => s.stage_name).filter(Boolean)
+  ])];
   const isServantRoleSelected = SERVANT_ROLES.includes(formData.role);
   const selectedServantStages = splitList(formData.detailed_stage);
   const selectedServantClasses = splitList(formData.assigned_class);
   const dynamicExtraStages = [...new Set(services.map(s => s.stage_name).filter(Boolean))]
-    .filter(st => !SERVICE_GROUPS.some(g => g.groupName === st || g.stages.includes(st)));
+    .filter(st => !effectiveGroups.some(g => g.group_name === st || normalizeGroupStages(g.stages).includes(st)));
 
   return (
     <div className="space-y-4">
@@ -733,11 +795,112 @@ export default function AdminDashboard({
       {activeCard === 'services' && (
         <div className="space-y-4 text-xs">
           {renderTopBack('🏫 الفصول والخدمات وجروبات الخدمة')}
+
+          {/* إدارة جروبات ومراحل الخدمة من الأدمن (إضافة وتعديل وحذف) */}
+          {isAdmin && (
+            <div className="bg-amber-50/40 p-4 rounded-3xl border-2 border-amber-200 space-y-3 font-bold">
+              <h3 className="text-sm font-black flex items-center gap-1.5 text-[#7a1c24]">
+                <Layers size={16} /> {editingGrpId ? '✏️ تعديل جروب خدمة' : '➕ إضافة وتعديل وحذف جروبات الخدمة والمراحل'}
+              </h3>
+              <form onSubmit={handleSaveServiceGroup} className="space-y-2.5">
+                <div className="grid md:grid-cols-4 gap-2">
+                  <input
+                    required
+                    placeholder="اسم الجروب (مثال: خدمة ابتدائي / كشافة) *"
+                    className="md:col-span-2 p-2.5 border rounded-xl bg-white"
+                    value={grpForm.group_name}
+                    onChange={e => setGrpForm({ ...grpForm, group_name: e.target.value })}
+                  />
+                  <input
+                    placeholder="الأيقونة (🎒 أو 🕊️)"
+                    className="p-2.5 border rounded-xl bg-white text-center"
+                    value={grpForm.icon}
+                    onChange={e => setGrpForm({ ...grpForm, icon: e.target.value })}
+                  />
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="الترتيب"
+                    className="p-2.5 border rounded-xl bg-white text-center"
+                    value={grpForm.sort_order}
+                    onChange={e => setGrpForm({ ...grpForm, sort_order: e.target.value })}
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    placeholder="اكتب المراحل/الاجتماعات جوه الجروب مفصولة بفاصلة (مثال: أولى ابتدائي, ثانية ابتدائي)"
+                    className="flex-1 min-w-55 p-2.5 border rounded-xl bg-white font-normal"
+                    value={grpForm.stagesText}
+                    onChange={e => setGrpForm({ ...grpForm, stagesText: e.target.value })}
+                  />
+                  <button type="submit" className="px-5 py-2.5 bg-[#7a1c24] text-white rounded-xl cursor-pointer shadow">
+                    {editingGrpId ? 'حفظ التعديل' : '+ إضافة الجروب'}
+                  </button>
+                  {editingGrpId && (
+                    <button
+                      type="button"
+                      onClick={() => { setEditingGrpId(null); setGrpForm({ group_name: '', icon: '📌', stagesText: '', sort_order: effectiveGroups.length + 1 }); }}
+                      className="px-4 py-2 border rounded-xl bg-white"
+                    >
+                      إلغاء
+                    </button>
+                  )}
+                </div>
+              </form>
+
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
+                {effectiveGroups.map((grp, idx) => {
+                  const stagesArr = normalizeGroupStages(grp.stages);
+                  return (
+                    <div key={grp.id || idx} className="bg-white p-3 rounded-2xl border flex justify-between items-start gap-2">
+                      <div className="min-w-0">
+                        <strong className="text-sm text-gray-900 block">
+                          {grp.icon || '📌'} {grp.group_name}
+                        </strong>
+                        <p className="text-[11px] text-gray-600 font-normal mt-1 leading-relaxed">
+                          {stagesArr.length > 0 ? stagesArr.join(' • ') : 'بدون مراحل فرعية'}
+                        </p>
+                      </div>
+                      <div className="flex gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!grp.id) return alert('قم بتشغيل كود SQL إنشاء جدول service_groups أولاً.');
+                            setEditingGrpId(grp.id);
+                            setGrpForm({
+                              group_name: grp.group_name,
+                              icon: grp.icon || '📌',
+                              stagesText: stagesArr.join(', '),
+                              sort_order: grp.sort_order || idx + 1
+                            });
+                          }}
+                          className="p-1.5 bg-gray-100 hover:bg-amber-100 rounded-lg cursor-pointer"
+                          title="تعديل"
+                        >
+                          <Edit3 size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteServiceGroup(grp)}
+                          className="p-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg cursor-pointer"
+                          title="حذف"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {isAdmin && (
             <form onSubmit={e => { e.preventDefault(); if (!requireAdminGuard()) return; const payload = { ...srvForm, priest_id: srvForm.priest_id || null }; if (editingSrvId) { onUpdateService({ ...payload, id: editingSrvId }); setEditingSrvId(null); } else { onAddService(payload); } setSrvForm(emptyService); }} className="bg-white p-4 rounded-3xl border space-y-3 font-bold shadow-sm">
               <h3 className="text-sm font-extrabold flex items-center gap-1 text-[#7a1c24]"><BookOpen size={16} /> {editingSrvId ? 'تعديل الفصل / الخدمة' : 'إضافة فصل أو خدمة جديدة بالكنيسة'}</h3>
               <div className="grid md:grid-cols-3 gap-2">
                 <select className="p-2.5 border rounded-xl" value={srvForm.stage_name} onChange={e => setSrvForm({ ...srvForm, stage_name: e.target.value })}>
+                  {effectiveGroups.map((g, i) => <option key={i} value={g.group_name}>{g.group_name}</option>)}
                   <option value="حضانة">حضانة</option><option value="ابتدائي">ابتدائي</option><option value="إعدادي">إعدادي</option><option value="ثانوي">ثانوي</option><option value="جامعة وخريجين">جامعة وخريجين</option><option value="اجتماعات عامة">اجتماعات عامة</option><option value="إخوة الرب">إخوة الرب</option><option value="شمامسة وألحان">مدرسة الشمامسة والألحان</option>
                 </select>
                 <input required placeholder="اسم الفصل *" className="p-2.5 border rounded-xl" value={srvForm.class_name} onChange={e => setSrvForm({ ...srvForm, class_name: e.target.value })} />
@@ -783,7 +946,7 @@ export default function AdminDashboard({
             })}
           </div>
 
-          <ServiceGroupFeed currentUser={effectiveUser} services={services} canPost={isAdmin} />
+          <ServiceGroupFeed currentUser={effectiveUser} services={services} groups={effectiveGroups} canPost={isAdmin} />
         </div>
       )}
 
@@ -1186,7 +1349,7 @@ export default function AdminDashboard({
                     <div>
                       <label className="block mb-1">المرحلة / الصف الدراسي</label>
                       <select className="w-full p-2.5 border rounded-xl bg-amber-50/40" value={formData.detailed_stage} onChange={e => setFormData({ ...formData, detailed_stage: e.target.value })}>
-                        {STAGE_OPTIONS.map((st, i) => <option key={i} value={st}>{st}</option>)}
+                        {allGroupStagesFlat.map((st, i) => <option key={i} value={st}>{st}</option>)}
                       </select>
                     </div>
                     <div>
@@ -1211,21 +1374,26 @@ export default function AdminDashboard({
                 <div className="bg-emerald-50/50 p-3 rounded-2xl border border-emerald-200 space-y-3">
                   <div>
                     <label className="block mb-1.5 text-[#7a1c24] font-extrabold">
-                      📖 جروبات ومراحل الخدمة للخادم (كل جروب له كارت عام خاص بأهله فقط):
+                      📖 جروبات ومراحل الخدمة للخادم (تقدر تضيف وتعدل الجروبات من تاب الفصول والخدمات):
                     </label>
                     <div className="space-y-2 max-h-56 overflow-y-auto bg-white p-2.5 rounded-xl border">
-                      {SERVICE_GROUPS.map(grp => {
-                        const allGroupSelected = grp.stages.every(st => selectedServantStages.includes(st));
+                      {effectiveGroups.map((grp, gIdx) => {
+                        const gName = grp.group_name;
+                        const stagesArr = normalizeGroupStages(grp.stages);
+                        const allGroupSelected = stagesArr.length > 0
+                          ? stagesArr.every(st => selectedServantStages.includes(st))
+                          : selectedServantStages.includes(gName);
+
                         return (
-                          <div key={grp.groupName} className="p-2 bg-gray-50 rounded-xl border space-y-1.5">
+                          <div key={grp.id || gIdx} className="p-2 bg-gray-50 rounded-xl border space-y-1.5">
                             <div className="flex justify-between items-center">
-                              <strong className="text-[11px] text-[#7a1c24]">{grp.icon} {grp.groupName}</strong>
+                              <strong className="text-[11px] text-[#7a1c24]">{grp.icon || '📌'} {gName}</strong>
                               <button
                                 type="button"
                                 onClick={() => {
                                   const next = allGroupSelected
-                                    ? selectedServantStages.filter(x => !grp.stages.includes(x) && x !== grp.groupName)
-                                    : [...new Set([...selectedServantStages, ...grp.stages, grp.groupName])];
+                                    ? selectedServantStages.filter(x => !stagesArr.includes(x) && x !== gName)
+                                    : [...new Set([...selectedServantStages, ...stagesArr, gName])];
                                   setFormData({ ...formData, detailed_stage: next.join(', ') });
                                 }}
                                 className={`px-2 py-0.5 rounded-lg text-[10px] font-black cursor-pointer ${allGroupSelected ? 'bg-[#7a1c24] text-white' : 'bg-amber-100 text-amber-950'}`}
@@ -1233,27 +1401,29 @@ export default function AdminDashboard({
                                 {allGroupSelected ? '✓ الجروب كله محدد' : '+ تحديد الجروب كله'}
                               </button>
                             </div>
-                            <div className="flex flex-wrap gap-1.5">
-                              {grp.stages.map((st, i) => {
-                                const checked = selectedServantStages.includes(st);
-                                return (
-                                  <label
-                                    key={i}
-                                    className={`flex items-center gap-1 px-2 py-1 rounded-lg border cursor-pointer text-[11px] ${
-                                      checked ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-gray-800'
-                                    }`}
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      className="hidden"
-                                      checked={checked}
-                                      onChange={() => toggleMultiFieldValue('detailed_stage', st)}
-                                    />
-                                    {checked ? '✓ ' : ''}{st}
-                                  </label>
-                                );
-                              })}
-                            </div>
+                            {stagesArr.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5">
+                                {stagesArr.map((st, i) => {
+                                  const checked = selectedServantStages.includes(st);
+                                  return (
+                                    <label
+                                      key={i}
+                                      className={`flex items-center gap-1 px-2 py-1 rounded-lg border cursor-pointer text-[11px] ${
+                                        checked ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-gray-800'
+                                      }`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        className="hidden"
+                                        checked={checked}
+                                        onChange={() => toggleMultiFieldValue('detailed_stage', st)}
+                                      />
+                                      {checked ? '✓ ' : ''}{st}
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
