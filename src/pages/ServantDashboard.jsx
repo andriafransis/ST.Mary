@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Phone, Search, UserPlus, Calendar, MessageSquareText, Layers, MessageCircle, AlertTriangle, Users, MapPin, X, FileSpreadsheet } from 'lucide-react';
+import { Phone, Search, UserPlus, Calendar, MessageSquareText, Layers, MessageCircle, AlertTriangle, Users, MapPin, X, FileSpreadsheet, ArrowRight, BookOpen } from 'lucide-react';
 import BirthdayBanner from '../components/BirthdayBanner';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
 import { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/ServiceGroupFeed';
@@ -96,6 +96,8 @@ export default function ServantDashboard({
     : (servantBoundTargets[0] || availableServicesList[0] || 'أولى ابتدائي');
 
   const [selectedScope, setSelectedScope] = useState(initialDefaultScope);
+  const [selectedYearFilter, setSelectedYearFilter] = useState('');
+  const [selectedClassFilter, setSelectedClassFilter] = useState('');
   const [showAllChurchServices, setShowAllChurchServices] = useState(true);
 
   const defaultGenderScope = (() => {
@@ -148,8 +150,46 @@ export default function ServantDashboard({
   useEffect(() => {
     if (!availableServicesList.includes(selectedScope) && availableServicesList.length > 0) {
       setSelectedScope(initialDefaultScope);
+      setSelectedYearFilter('');
+      setSelectedClassFilter('');
     }
   }, [serviceGroups, services, servant]);
+
+  const getScopeStructure = (scope) => {
+    const matchedGroup = effectiveGroups.find(g => g.group_name === scope) || null;
+    const groupStages = matchedGroup ? normalizeGroupStages(matchedGroup.stages) : [];
+    const groupClasses = services.filter(
+      s =>
+        s.stage_name === scope ||
+        groupStages.includes(s.stage_name) ||
+        (matchedGroup && s.stage_name === matchedGroup.group_name)
+    );
+
+    const inferredYears = new Set(groupStages);
+    groupClasses.forEach(cls => {
+      if (cls.stage_name && cls.stage_name !== scope && !matchedGroup?.group_name?.includes(cls.stage_name)) {
+        inferredYears.add(cls.stage_name);
+      }
+      const txt = `${cls.class_name || ''} ${cls.stage_name || ''}`;
+      STAGE_OPTIONS.forEach(st => {
+        if (txt.includes(st)) inferredYears.add(st);
+      });
+    });
+
+    const years = [...inferredYears].filter(Boolean).map(yrName => {
+      const classesForYr = groupClasses.filter(
+        c => c.stage_name === yrName || String(c.class_name || '').includes(yrName)
+      );
+      return { yearName: yrName, classes: classesForYr };
+    });
+
+    return {
+      matchedGroup,
+      groupStages,
+      groupClasses,
+      years
+    };
+  };
 
   const isBoundToSpecificService = (scope) => {
     if (!scope) return false;
@@ -162,23 +202,35 @@ export default function ServantDashboard({
     return false;
   };
 
-  const memberMatchesScope = (m, scope, genderFilter = 'الكل') => {
+  const memberMatchesScope = (m, scope, genderFilter = 'الكل', yearFilter = '', classFilter = '') => {
     if (!scope) return false;
     const mClass = (m.assigned_class || '').trim();
     const mStages = `${m.detailed_stage || ''} ${m.service_stage || ''}`;
-    const matchedGroup = effectiveGroups.find(g => g.group_name === scope);
-    const groupStages = matchedGroup ? normalizeGroupStages(matchedGroup.stages) : [];
-    const groupClasses = services
-      .filter(s => s.stage_name === scope || (matchedGroup && s.stage_name === matchedGroup.group_name))
-      .map(s => (s.class_name || '').trim());
+    const mExtra = Array.isArray(m.permissions?.extra_services) ? m.permissions.extra_services.join(' ') : '';
+    const combinedMemberText = `${mClass} ${mStages} ${mExtra}`;
+
+    const { matchedGroup, groupStages, groupClasses } = getScopeStructure(scope);
+    const groupClassNames = groupClasses.map(s => (s.class_name || '').trim()).filter(Boolean);
 
     const matchesServiceOrClass =
       mClass === scope ||
       mStages.includes(scope) ||
-      groupStages.some(st => mStages.includes(st) || mClass.includes(st)) ||
-      groupClasses.includes(mClass);
+      mExtra.includes(scope) ||
+      groupStages.some(st => combinedMemberText.includes(st)) ||
+      groupClassNames.some(cName => mClass === cName || combinedMemberText.includes(cName)) ||
+      (matchedGroup && combinedMemberText.includes(matchedGroup.group_name));
 
     if (!matchesServiceOrClass) return false;
+
+    if (yearFilter && !combinedMemberText.includes(yearFilter)) {
+      const yrObj = getScopeStructure(scope).years.find(y => y.yearName === yearFilter);
+      const yrClassNames = (yrObj?.classes || []).map(c => c.class_name);
+      if (!yrClassNames.includes(mClass)) return false;
+    }
+
+    if (classFilter && mClass !== classFilter && !combinedMemberText.includes(classFilter)) {
+      return false;
+    }
 
     if (genderFilter === 'بنين') {
       return isMaleMember(m) || mClass.includes('بنين');
@@ -201,7 +253,15 @@ export default function ServantDashboard({
     : (servantBoundTargets.length > 0 ? servantBoundTargets : availableServicesList);
 
   const allMembers = users.filter(u => u.role === 'member');
-  const scopeMembers = allMembers.filter(m => memberMatchesScope(m, selectedScope, selectedGenderFilter));
+  const scopeMembers = allMembers.filter(m =>
+    memberMatchesScope(m, selectedScope, selectedGenderFilter, selectedYearFilter, selectedClassFilter)
+  );
+
+  const currentScopeStructure = getScopeStructure(selectedScope);
+  const currentYearObj = currentScopeStructure.years.find(y => y.yearName === selectedYearFilter) || null;
+  const visibleClassesForSelection = currentYearObj
+    ? currentYearObj.classes
+    : currentScopeStructure.groupClasses;
 
   const scopeMemberIds = new Set(scopeMembers.map(m => m.id));
   const scopeBirthdays = birthdays.filter(b => scopeMemberIds.has(b.id));
@@ -242,7 +302,9 @@ export default function ServantDashboard({
   const openAddMemberModal = () => {
     if (!canAdd) return alert('🔒 غير مسموح لك بإضافة مخدومين حسب صلاحياتك الحالية.');
     const matchingClass = services.find(
-      s => s.class_name === selectedScope || s.stage_name === selectedScope
+      s =>
+        s.class_name === (selectedClassFilter || selectedScope) ||
+        s.stage_name === (selectedYearFilter || selectedScope)
     );
     const defaultGenderForModal =
       selectedGenderFilter === 'بنات' ? 'أنثى' :
@@ -251,9 +313,9 @@ export default function ServantDashboard({
     setNewMember({
       ...emptyMember,
       gender: defaultGenderForModal,
-      assigned_class: matchingClass?.class_name || splitCommaClasses(assignedClass)[0] || '',
-      detailed_stage: STAGE_OPTIONS.includes(selectedScope) ? selectedScope : (matchingClass?.stage_name || selectedScope || baseStages[0] || 'أولى ابتدائي'),
-      service_stage: STAGE_OPTIONS.includes(selectedScope) ? selectedScope : (matchingClass?.stage_name || selectedScope || baseStages[0] || 'أولى ابتدائي')
+      assigned_class: selectedClassFilter || matchingClass?.class_name || splitCommaClasses(assignedClass)[0] || '',
+      detailed_stage: selectedYearFilter || (STAGE_OPTIONS.includes(selectedScope) ? selectedScope : (matchingClass?.stage_name || selectedScope || baseStages[0] || 'أولى ابتدائي')),
+      service_stage: selectedYearFilter || (STAGE_OPTIONS.includes(selectedScope) ? selectedScope : (matchingClass?.stage_name || selectedScope || baseStages[0] || 'أولى ابتدائي'))
     });
     setShowAddModal(true);
   };
@@ -352,7 +414,11 @@ export default function ServantDashboard({
                 type="button"
                 onClick={() => {
                   setShowAllChurchServices(false);
-                  if (!servantBoundTargets.includes(selectedScope)) setSelectedScope(servantBoundTargets[0]);
+                  if (!servantBoundTargets.includes(selectedScope)) {
+                    setSelectedScope(servantBoundTargets[0]);
+                    setSelectedYearFilter('');
+                    setSelectedClassFilter('');
+                  }
                 }}
                 className={`px-3 py-1 rounded-xl cursor-pointer transition ${!showAllChurchServices ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700'}`}
               >
@@ -373,6 +439,8 @@ export default function ServantDashboard({
                 type="button"
                 onClick={() => {
                   setSelectedScope(srv);
+                  setSelectedYearFilter('');
+                  setSelectedClassFilter('');
                   setSearchQuery('');
                   if (srv.includes('بنات')) setSelectedGenderFilter('بنات');
                   else if (srv.includes('بنين')) setSelectedGenderFilter('بنين');
@@ -397,9 +465,135 @@ export default function ServantDashboard({
           })}
         </div>
 
+        {/* تسلسل متدرج داخل الخدمة المختارة: الخدمة ← السنوات الدراسية ← الفصول */}
+        {(currentScopeStructure.years.length > 0 || currentScopeStructure.groupClasses.length > 0 || currentScopeStructure.matchedGroup) && (
+          <div className="bg-[#fbfaf7] p-3 rounded-2xl border border-amber-200/80 space-y-2.5 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-1.5 font-black">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedYearFilter('');
+                    setSelectedClassFilter('');
+                  }}
+                  className={`px-2.5 py-1 rounded-xl cursor-pointer ${
+                    !selectedYearFilter && !selectedClassFilter ? 'bg-[#7a1c24] text-white' : 'bg-white border text-gray-800'
+                  }`}
+                >
+                  🏫 {selectedScope}
+                </button>
+                {selectedYearFilter && (
+                  <>
+                    <span className="text-gray-400">/</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedClassFilter('')}
+                      className={`px-2.5 py-1 rounded-xl cursor-pointer ${
+                        !selectedClassFilter ? 'bg-amber-700 text-white' : 'bg-amber-50 border text-amber-950'
+                      }`}
+                    >
+                      📘 {selectedYearFilter}
+                    </button>
+                  </>
+                )}
+                {selectedClassFilter && (
+                  <>
+                    <span className="text-gray-400">/</span>
+                    <span className="px-2.5 py-1 rounded-xl bg-blue-700 text-white">
+                      📖 {selectedClassFilter}
+                    </span>
+                  </>
+                )}
+              </div>
+
+              {(selectedYearFilter || selectedClassFilter) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (selectedClassFilter) setSelectedClassFilter('');
+                    else setSelectedYearFilter('');
+                  }}
+                  className="px-2.5 py-1 bg-white hover:bg-gray-100 border rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <ArrowRight size={12} /> رجوع للمستوى السابق
+                </button>
+              )}
+            </div>
+
+            {currentScopeStructure.matchedGroup && (
+              <div className="flex flex-wrap gap-3 text-[11px] text-gray-600 font-bold">
+                {currentScopeStructure.matchedGroup.head_servant_name && (
+                  <span>⭐ الأمين: <strong className="text-gray-900">{currentScopeStructure.matchedGroup.head_servant_name}</strong></span>
+                )}
+                {(currentScopeStructure.matchedGroup.service_day || currentScopeStructure.matchedGroup.start_time) && (
+                  <span>
+                    ⏰ {currentScopeStructure.matchedGroup.service_day}
+                    {currentScopeStructure.matchedGroup.start_time && ` (${currentScopeStructure.matchedGroup.start_time}`}
+                    {currentScopeStructure.matchedGroup.end_time && ` - ${currentScopeStructure.matchedGroup.end_time}`}
+                    {currentScopeStructure.matchedGroup.start_time && ')'}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {currentScopeStructure.years.length > 0 && (
+              <div className="space-y-1">
+                <span className="text-[11px] font-bold text-gray-600 block">السنوات / المراحل داخل ({selectedScope}):</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {currentScopeStructure.years.map((yr, yIdx) => {
+                    const yrCount = allMembers.filter(m => memberMatchesScope(m, selectedScope, selectedGenderFilter, yr.yearName, '')).length;
+                    const activeYr = selectedYearFilter === yr.yearName;
+                    return (
+                      <button
+                        key={yIdx}
+                        type="button"
+                        onClick={() => {
+                          setSelectedYearFilter(activeYr ? '' : yr.yearName);
+                          setSelectedClassFilter('');
+                        }}
+                        className={`px-3 py-1.5 rounded-xl border text-[11px] font-bold cursor-pointer transition ${
+                          activeYr ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-gray-800 hover:bg-amber-50'
+                        }`}
+                      >
+                        {yr.yearName} ({yrCount})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {visibleClassesForSelection.length > 0 && (
+              <div className="space-y-1">
+                <span className="text-[11px] font-bold text-gray-600 block">
+                  الفصول {selectedYearFilter ? `التابعة لـ (${selectedYearFilter})` : `التابعة لـ (${selectedScope})`}:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {visibleClassesForSelection.map((cls) => {
+                    const clsCount = allMembers.filter(m => memberMatchesScope(m, selectedScope, selectedGenderFilter, selectedYearFilter, cls.class_name)).length;
+                    const activeCls = selectedClassFilter === cls.class_name;
+                    return (
+                      <button
+                        key={cls.id}
+                        type="button"
+                        onClick={() => setSelectedClassFilter(activeCls ? '' : cls.class_name)}
+                        className={`px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1 cursor-pointer transition ${
+                          activeCls ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-blue-950 hover:bg-blue-50'
+                        }`}
+                      >
+                        <BookOpen size={12} /> {cls.class_name} ({clsCount})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="pt-2 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-xs">
           <span className="font-bold text-gray-700">
-            تخصيص الفئة داخل <strong className="text-[#7a1c24]">{selectedScope}</strong> (مفيد في إعدادي وثانوي):
+            تخصيص الفئة داخل <strong className="text-[#7a1c24]">{selectedClassFilter || selectedYearFilter || selectedScope}</strong> (مفيد في إعدادي وثانوي):
           </span>
           <div className="flex items-center gap-1.5 bg-gray-100 p-1 rounded-xl font-bold">
             {GENDER_SCOPES.map(gScope => (
@@ -422,7 +616,10 @@ export default function ServantDashboard({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
             <h2 className="text-base sm:text-lg font-black text-gray-900">
-              📖 {selectedScope} {selectedGenderFilter !== 'الكل' ? `(${selectedGenderFilter})` : ''}
+              📖 {selectedScope}
+              {selectedYearFilter ? ` ← ${selectedYearFilter}` : ''}
+              {selectedClassFilter ? ` ← ${selectedClassFilter}` : ''}
+              {selectedGenderFilter !== 'الكل' ? ` (${selectedGenderFilter})` : ''}
             </h2>
             <div className="flex flex-wrap items-center gap-2 mt-1">
               <span className="text-gray-500 font-bold">المسؤول: {servant.full_name}</span>
@@ -600,7 +797,7 @@ export default function ServantDashboard({
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50">
           <div className="bg-white rounded-3xl w-full max-w-xl p-4 sm:p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-2">
-              <h3 className="font-extrabold text-sm text-[#7a1c24]">إضافة مخدوم جديد لفصل: {selectedScope}</h3>
+              <h3 className="font-extrabold text-sm text-[#7a1c24]">إضافة مخدوم جديد لفصل: {selectedClassFilter || selectedYearFilter || selectedScope}</h3>
               <button type="button" onClick={() => setShowAddModal(false)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer"><X size={16} /></button>
             </div>
             <form onSubmit={handleCreateMember} className="space-y-3">
