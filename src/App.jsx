@@ -248,7 +248,7 @@ export default function App() {
     if (!error) setUsers(users.filter(u => u.id !== id));
   };
 
-  // ====== ربط / فك ربط الأبناء بولي الأمر ======
+  // ====== ربط / فك ربط الأبناء بولي الأمر (على نفس عمود parent_id في church_users) ======
   const handleLinkChild = async (childId, shouldLink = true) => {
     const newParentId = shouldLink ? currentUser.id : null;
     const { data, error } = await supabase
@@ -468,7 +468,7 @@ export default function App() {
 
   const allServants = users.filter(u => ['servant', 'head_servant', 'vice_head_servant', 'meeting_servant', 'mercy_servant'].includes(u.role));
   const myChildrenAsParent = users.filter(
-    u => u.parent_id === currentUser.id || u.father_id === currentUser.id || u.mother_id === currentUser.id
+    u => u.parent_id === currentUser.id || u.father_id === currentUser.id
   );
   const priestFamilies = families.filter(f => f.priest_id === currentUser.id);
   const upcomingBirthdays = getUpcomingBirthdays(users, isPriest ? priestFamilies : families);
@@ -486,7 +486,7 @@ export default function App() {
         canEdit={canEditPublic}
         churchName={churchName}
         onOpenEditor={() => {
-          if (!canEditPublic) return alert('التعديل متاح للأدمن أو الكاهن أو من لديه صلاحية التعديل فقط');
+          if (!canEditPublic) return alert('التعديل متاح للأدمن أو الكاهن فقط');
           setExtraScreen('');
           setActiveScreen('public_editor');
         }}
@@ -501,7 +501,7 @@ export default function App() {
   }
 
   const navScreens = Array.from(new Set(SCREEN_ORDER)).filter(s => {
-    if (s === 'public_editor') return canEditPublic && allowed.has('public_editor');
+    if (s === 'public_editor' && !canEditPublic) return false;
     if (s === 'trips_office') return canAccessTripsOffice;
     return allowed.has(s);
   });
