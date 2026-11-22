@@ -355,7 +355,6 @@ export default function PermissionsPage({
   const [newTplForm, setNewTplForm] = useState(EMPTY_TPL_FORM);
   const [syncUsersOnTplSave, setSyncUsersOnTplSave] = useState(true);
 
-  // التعيين الجماعي يدعم الآن اختيار أكثر من بوليسي أو إضافة/استبدال
   const [bulkPolicyKeys, setBulkPolicyKeys] = useState(['tpl_parent']);
   const [bulkMode, setBulkMode] = useState('merge'); // 'merge' (إضافة ودمج) | 'replace' (استبدال)
   const [bulkSearch, setBulkSearch] = useState('');
@@ -389,6 +388,10 @@ export default function PermissionsPage({
       data.forEach((row) => {
         try {
           const obj = JSON.parse(row.body || '{}');
+          if (obj.hidden) {
+            mergedMap.delete(row.title);
+            return;
+          }
           const screens = Array.isArray(obj.screens) ? obj.screens : [];
           const actions = obj.actions || {};
           mergedMap.set(row.title, {
@@ -404,7 +407,9 @@ export default function PermissionsPage({
         }
       });
     }
-    setRoleTemplates(Array.from(mergedMap.values()));
+    const finalTemplates = Array.from(mergedMap.values());
+    setRoleTemplates(finalTemplates);
+    setBulkPolicyKeys((prev) => prev.filter((k) => finalTemplates.some((t) => t.key === k)));
   };
 
   useEffect(() => {
@@ -497,7 +502,6 @@ export default function PermissionsPage({
     }
   };
 
-  // تبديل جروب بوليسي للمستخدم (إضافة أو إزالة ضمن قائمة جروباته)
   const toggleUserPolicyGroup = (policyKey) => {
     if (!isAdmin || !selectedUser) return;
     const currentKeys = Array.isArray(selectedUser.permissions?.policy_keys)
@@ -628,7 +632,8 @@ export default function PermissionsPage({
       base_role: newTplForm.base_role,
       screens: finalScreens,
       screen_permissions: newTplForm.screen_permissions,
-      actions: newTplForm.actions
+      actions: newTplForm.actions,
+      hidden: false
     };
     const bodyJson = JSON.stringify(bodyObj);
 
@@ -678,15 +683,45 @@ export default function PermissionsPage({
     alert('تم حفظ جروب البوليسي بنجاح ✅');
   };
 
+  // حذف أي جروب (سواء له dbId أو قالب افتراضي)
   const handleDeleteRoleTemplate = async (tpl) => {
-    if (!requireAdminGuard() || !tpl.dbId) return;
-    const isDefaultOverride = DEFAULT_ROLE_TEMPLATES.some((d) => d.key === tpl.key);
-    const msg = isDefaultOverride
-      ? `استعادة القالب الافتراضي لـ (${tpl.label})؟`
-      : `هل أنت متأكد من حذف جروب البوليسي (${tpl.label})؟`;
+    if (!requireAdminGuard()) return;
+    const isDefaultTpl = DEFAULT_ROLE_TEMPLATES.some((d) => d.key === tpl.key);
+    const msg = `هل أنت متأكد من حذف جروب البوليسي (${tpl.label})؟`;
     if (!window.confirm(msg)) return;
-    const { error } = await supabase.from('church_public_content').delete().eq('id', tpl.dbId);
-    if (!error) await loadRoleTemplates();
+
+    if (tpl.dbId && !isDefaultTpl) {
+      const { error } = await supabase.from('church_public_content').delete().eq('id', tpl.dbId);
+      if (error) return alert('خطأ أثناء الحذف: ' + error.message);
+    } else {
+      const hiddenBody = JSON.stringify({
+        label: tpl.label,
+        base_role: tpl.base_role,
+        screens: tpl.screens || [],
+        screen_permissions: tpl.screen_permissions || {},
+        actions: tpl.actions || {},
+        hidden: true
+      });
+
+      if (tpl.dbId) {
+        const { error } = await supabase
+          .from('church_public_content')
+          .update({ title: tpl.key, body: hiddenBody })
+          .eq('id', tpl.dbId);
+        if (error) return alert('خطأ أثناء الحذف: ' + error.message);
+      } else {
+        const { error } = await supabase
+          .from('church_public_content')
+          .insert([{ kind: 'role_template', title: tpl.key, body: hiddenBody }]);
+        if (error) return alert('خطأ أثناء الحذف: ' + error.message);
+      }
+    }
+
+    if (newTplForm.key === tpl.key) {
+      setNewTplForm(EMPTY_TPL_FORM);
+    }
+    await loadRoleTemplates();
+    alert('تم حذف الجروب بنجاح ✅');
   };
 
   const toggleBulkPolicyKey = (key) => {
@@ -734,7 +769,6 @@ export default function PermissionsPage({
     }
   };
 
-  // ملخص حي لصلاحيات المستخدم الحالي في التبويب الأول
   const selectedUserSummary = useMemo(() => {
     if (!selectedUser) return null;
     const spMap = selectedUser.permissions?.screen_permissions || {};
@@ -916,7 +950,6 @@ export default function PermissionsPage({
                   </div>
                 </div>
 
-                {/* اختيار أكثر من جروب بوليسي للشخص الواحد */}
                 <div className="bg-amber-50 p-3.5 rounded-2xl border border-amber-200 space-y-2">
                   <div className="flex justify-between items-center">
                     <strong className="text-amber-950 text-xs block">
@@ -948,7 +981,6 @@ export default function PermissionsPage({
                   </div>
                 </div>
 
-                {/* ملخص ماذا يرى وماذا يفعل فعلياً */}
                 {selectedUserSummary && (
                   <div className="grid sm:grid-cols-3 gap-2.5 bg-slate-50 p-3.5 rounded-2xl border text-xs">
                     <div className="bg-white p-2.5 rounded-xl border">
@@ -1302,15 +1334,14 @@ export default function PermissionsPage({
                       >
                         تعيين لناس
                       </button>
-                      {tpl.dbId && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteRoleTemplate(tpl)}
-                          className="p-1.5 bg-red-50 text-red-700 hover:bg-red-100 rounded-lg cursor-pointer"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        title="حذف"
+                        onClick={() => handleDeleteRoleTemplate(tpl)}
+                        className="p-1.5 bg-red-50 text-red-700 hover:bg-red-100 rounded-lg cursor-pointer"
+                      >
+                        <Trash2 size={13} />
+                      </button>
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-1 pt-1">
