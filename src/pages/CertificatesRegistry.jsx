@@ -215,7 +215,14 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
     const { data, error } = await supabase.from('deacon_ordinations').insert([payload]).select().single();
     if (!error && data) {
       if (ordForm.user_id) {
-        await supabase.from('church_users').update({ is_deacon: true, deacon_rank: ordForm.deacon_rank }).eq('id', ordForm.user_id);
+        // تحديث حالة الفرد في قاعدة البيانات ليصبح شماساً بالرتبة الجديدة
+        await supabase
+          .from('church_users')
+          .update({
+            is_deacon: true,
+            deacon_rank: ordForm.deacon_rank
+          })
+          .eq('id', ordForm.user_id);
         onRefresh?.();
       }
       setOrdinations([data, ...ordinations]);
@@ -263,6 +270,24 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
   };
 
   const priestsList = users.filter(u => u.role === 'priest');
+
+  // استبعاد أي أنثى بنسبة 100% وحصر القائمة على الذكور فقط
+  const maleCandidates = users.filter(u => {
+    // شرط النوع: ذكر فقط بدون استثناء
+    const isMale = u.gender === 'ذكر' || u.gender !== 'أنثى';
+    if (!isMale) return false;
+
+    // استبعاد الأدمن وحصر الأدوار الكنسية
+    const validRole = ['member', 'servant', 'head_servant', 'vice_head_servant'].includes(u.role);
+    if (!validRole) return false;
+
+    // لو الإجراء "ترقية رتبة"، نظهر فقط من هو شماس بالفعل
+    if (ordForm.action_type === 'ترقية رتبة') {
+      return Boolean(u.is_deacon);
+    }
+
+    return true;
+  });
 
   const filteredBaptisms = baptisms.filter(b =>
     (String(b.record_number) + ' ' + b.child_full_name + ' ' + b.father_name + ' ' + b.mother_name + ' ' + b.godparent_name).toLowerCase().includes(searchQ.toLowerCase())
@@ -426,7 +451,7 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
       )}
 
       {/* ======================================================
-          2. سجل رشومات وترقيات الشمامسة
+          2. سجل رشومات وترقيات الشمامسة (ذكور فقط)
       ====================================================== */}
       {tab === 'deacons' && (
         <div className="space-y-4 print:hidden">
@@ -441,13 +466,19 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
                   setOrdForm({ ...ordForm, user_id: e.target.value, deacon_full_name: u?.full_name || ordForm.deacon_full_name });
                 }}
               >
-                <option value="">-- اختر من المسجلين (اختياري) --</option>
-                {users.filter(u => ['member', 'servant', 'head_servant'].includes(u.role)).map(u => (
-                  <option key={u.id} value={u.id}>{u.full_name} {u.is_deacon ? `(${u.deacon_rank})` : ''}</option>
+                <option value="">-- اختر من المسجلين (ذكور فقط) --</option>
+                {maleCandidates.map(u => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name} {u.is_deacon ? `(${u.deacon_rank || 'شماس'})` : ''}
+                  </option>
                 ))}
               </select>
               <input required placeholder="اسم الشماس رباعي *" className="p-2.5 border rounded-xl" value={ordForm.deacon_full_name} onChange={e => setOrdForm({ ...ordForm, deacon_full_name: e.target.value })} />
-              <select className="p-2.5 border rounded-xl bg-white" value={ordForm.action_type} onChange={e => setOrdForm({ ...ordForm, action_type: e.target.value })}>
+              <select
+                className="p-2.5 border rounded-xl bg-white"
+                value={ordForm.action_type}
+                onChange={e => setOrdForm({ ...ordForm, action_type: e.target.value })}
+              >
                 <option value="رسامة جديدة">رسامة جديدة</option>
                 <option value="ترقية رتبة">ترقية رتبة شماسية</option>
               </select>
@@ -519,7 +550,7 @@ export default function CertificatesRegistry({ users = [], onRefresh }) {
               </button>
             </div>
 
-            {/* لوحة تعديل الشكل والبيانات (مخفية عند الطباعة) */}
+            {/* لوحة تعديل الشكل والبيانات */}
             {showDesignPanel && (
               <div className="bg-[#fbfaf7] border border-amber-300 rounded-2xl p-4 space-y-4 no-print">
                 <div className="flex flex-wrap justify-between items-center gap-2 border-b pb-2">
