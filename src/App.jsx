@@ -19,7 +19,7 @@ import MemberDashboard from './pages/MemberDashboard';
 import ParentDashboard from './pages/ParentDashboard';
 import DeaconSchedule from './pages/DeaconSchedule';
 import CertificatesRegistry from './pages/CertificatesRegistry';
-import { LogOut, Bell, GraduationCap, HeartHandshake, Menu, X } from 'lucide-react';
+import { LogOut, Bell, Menu, X } from 'lucide-react';
 
 const SAVED_USER_KEY = 'church_app_logged_user_id';
 const DEFAULT_CHURCH_NAME = 'كنيسة السيدة العذراء مريم بالمطرية';
@@ -449,7 +449,6 @@ export default function App() {
 
   const publicAccess = getScreenAccess(currentUser, 'public_page', roleScreens);
   const publicEditorAccess = getScreenAccess(currentUser, 'public_editor', roleScreens);
-  const eduAccess = getScreenAccess(currentUser, 'edu_center', roleScreens);
   const tripsAccess = getScreenAccess(currentUser, 'trips_office', roleScreens);
   const deaconsAccess = getScreenAccess(currentUser, 'deacons', roleScreens);
 
@@ -459,14 +458,6 @@ export default function App() {
     Boolean(currentUser.permissions?.can_edit_public) ||
     publicAccess.edit ||
     publicEditorAccess.edit;
-
-  const canManageEduCenter =
-    isAdmin ||
-    isPriest ||
-    currentUser.role === 'edu_manager' ||
-    Boolean(currentUser.permissions?.manage_edu_center) ||
-    Boolean(currentUser.permissions?.is_edu_teacher) ||
-    eduAccess.edit;
 
   const canAccessTripsOffice =
     isAdmin ||
@@ -509,7 +500,6 @@ export default function App() {
     );
   }
 
-  // بدون تكرار 'public_editor' لأنها موجودة في SCREEN_ORDER
   const navScreens = Array.from(new Set(SCREEN_ORDER)).filter(s => {
     if (s === 'public_editor') return canEditPublic && allowed.has('public_editor');
     if (s === 'trips_office') return canAccessTripsOffice;
@@ -519,11 +509,6 @@ export default function App() {
   const selectScreen = (scr) => {
     setExtraScreen('');
     setActiveScreen(scr);
-    setMobileMenuOpen(false);
-  };
-
-  const selectExtra = (ext) => {
-    setExtraScreen(ext);
     setMobileMenuOpen(false);
   };
 
@@ -614,30 +599,6 @@ export default function App() {
                 </button>
               );
             })}
-
-            <button
-              type="button"
-              onClick={() => selectExtra('edu_center')}
-              className={`px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition ${
-                extraScreen === 'edu_center'
-                  ? 'bg-amber-400 text-[#4a0e13] shadow-sm font-black'
-                  : 'bg-white/10 hover:bg-white/20 text-white/95'
-              }`}
-            >
-              <GraduationCap size={14} /> {canManageEduCenter ? 'إدارة المركز التعليمي' : 'المركز التعليمي'}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => selectExtra('joseph_arimathea')}
-              className={`px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition ${
-                extraScreen === 'joseph_arimathea'
-                  ? 'bg-amber-400 text-[#4a0e13] shadow-sm font-black'
-                  : 'bg-red-600/80 hover:bg-red-600 text-white'
-              }`}
-            >
-              <HeartHandshake size={14} /> يوسف الرامي
-            </button>
           </div>
         </div>
 
@@ -663,26 +624,6 @@ export default function App() {
                   </button>
                 );
               })}
-              <button
-                type="button"
-                onClick={() => selectExtra('edu_center')}
-                className={`px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
-                  extraScreen === 'edu_center' ? 'bg-amber-400 text-[#4a0e13] font-black' : 'bg-white/10 text-white'
-                }`}
-              >
-                <GraduationCap size={14} className="shrink-0" />
-                <span className="truncate">المركز التعليمي</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => selectExtra('joseph_arimathea')}
-                className={`px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
-                  extraScreen === 'joseph_arimathea' ? 'bg-amber-400 text-[#4a0e13] font-black' : 'bg-red-700/80 text-white'
-                }`}
-              >
-                <HeartHandshake size={14} className="shrink-0" />
-                <span className="truncate">يوسف الرامي</span>
-              </button>
             </div>
           </div>
         )}
