@@ -24,6 +24,30 @@ const HALL_PURPOSES = [
   { id: 'funeral_reception', label: '💒 صلاة التجنيز واستقبال الأسرة' }
 ];
 
+const MASS_ORDER_OPTIONS = [
+  'القداس الأول',
+  'القداس الثاني',
+  'القداس الثالث'
+];
+
+const ALTAR_OPTIONS = [
+  'المذبح الرئيسي',
+  'المذبح البحري',
+  'المذبح القبلي',
+  'مذبح السيدة العذراء مريم',
+  'مذبح الشهيد مار جرجس',
+  'مذبح آخر'
+];
+
+const VIRGIN_MARY_IMAGE_CANDIDATES = [
+  '/virgin-mary.png',
+  '/virgin-mary.jpg',
+  '/images/virgin-mary.png',
+  '/images/virgin-mary.jpg',
+  '/st-mary.png',
+  '/st-mary.jpg'
+];
+
 export function suggestLiturgicalRites(timeStr = '') {
   if (!timeStr) {
     return {
@@ -116,14 +140,20 @@ function buildMemorialShareText(m) {
     '✝ «طُوبَى لِلَّذِينَ يَمُوتُونَ فِي الرَّبِّ مُنْذُ الآنَ» (رؤ 14: 13)',
     '',
     `🕯️ *${m.memorial_type || 'ذكرى الأربعين'}*`,
-    `للمنتقل / المنتقلة: *${m.deceased_name || ''}*`,
+    `🕊️ *${m.deceased_name || ''}*`,
     ''
   ];
 
-  if (m.mass_date || m.mass_time) {
-    lines.push(`⛪ *القداس الإلهي:* ${m.mass_date || ''} ${m.mass_time ? `الساعة ${m.mass_time}` : ''}`.trim());
+  if (m.church_name) {
+    lines.push(`⛪ *الكنيسة:* ${m.church_name}`);
   }
-
+  if (m.mass_order || m.altar_name) {
+    const subMass = [m.mass_order, m.altar_name ? `على ${m.altar_name}` : ''].filter(Boolean).join(' — ');
+    lines.push(`✝ *القداس:* ${subMass}`);
+  }
+  if (m.mass_date || m.mass_time) {
+    lines.push(`🕒 *الميعاد:* ${m.mass_date || ''} ${m.mass_time ? `الساعة ${m.mass_time}` : ''}`.trim());
+  }
   if (m.needs_hall && m.hall_name) {
     lines.push(`🏛️ *الاستقبال / القاعة:* ${m.hall_name} ${m.hall_slot ? `(${m.hall_slot})` : ''}`.trim());
   }
@@ -148,6 +178,62 @@ function wrapCanvasText(ctx, text, maxWidth) {
   }
   if (current) lines.push(current);
   return lines;
+}
+
+function drawVirginMaryIllustrationOnCanvas(ctx, x, y, w, h) {
+  ctx.save();
+  ctx.fillStyle = '#fff8ea';
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 20);
+  ctx.fill();
+  ctx.stroke();
+
+  const cx = x + w / 2;
+  const topY = y + 22;
+
+  // هالة ذهبية
+  ctx.strokeStyle = '#e0b13b';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(cx, topY + 42, 34, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // رداء السيدة العذراء (أزرق سماوي وذهبي)
+  ctx.fillStyle = '#1d4ed8';
+  ctx.beginPath();
+  ctx.moveTo(cx - 56, y + h - 42);
+  ctx.quadraticCurveTo(cx - 46, topY + 66, cx, topY + 66);
+  ctx.quadraticCurveTo(cx + 46, topY + 66, cx + 56, y + h - 42);
+  ctx.closePath();
+  ctx.fill();
+
+  // وشاح ذهبي علوي
+  ctx.fillStyle = '#f59e0b';
+  ctx.beginPath();
+  ctx.arc(cx, topY + 42, 22, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#fde68a';
+  ctx.beginPath();
+  ctx.arc(cx, topY + 42, 16, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#4a0e13';
+  ctx.font = 'bold 21px sans-serif';
+  ctx.fillText('السيدة العذراء مريم', cx, y + h - 22);
+  ctx.restore();
+}
+
+function loadOptionalImage(url) {
+  return new Promise((resolve) => {
+    const img = new window.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
 }
 
 function downloadObituaryCardImage(c) {
@@ -238,7 +324,7 @@ function downloadObituaryCardImage(c) {
   link.click();
 }
 
-function downloadMemorialCardImage(m) {
+async function downloadMemorialCardImage(m) {
   const canvas = document.createElement('canvas');
   canvas.width = 1080;
   canvas.height = 1080;
@@ -250,8 +336,8 @@ function downloadMemorialCardImage(m) {
 
   const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
   grad.addColorStop(0, '#3b0b11');
-  grad.addColorStop(0.28, '#5c121a');
-  grad.addColorStop(0.28, '#fcf8f2');
+  grad.addColorStop(0.24, '#5c121a');
+  grad.addColorStop(0.24, '#fcf8f2');
   grad.addColorStop(1, '#f3eadb');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -261,64 +347,104 @@ function downloadMemorialCardImage(m) {
   ctx.strokeRect(30, 30, canvas.width - 60, canvas.height - 60);
 
   ctx.fillStyle = '#fde68a';
-  ctx.font = 'bold 44px sans-serif';
-  ctx.fillText('✝', canvas.width / 2, 85);
+  ctx.font = 'bold 40px sans-serif';
+  ctx.fillText('✝', canvas.width / 2, 74);
 
   ctx.fillStyle = '#fffbeb';
   ctx.font = 'bold 30px sans-serif';
-  ctx.fillText(m.memorial_type || 'ذكرى الأربعين', canvas.width / 2, 138);
+  ctx.fillText(m.memorial_type || 'ذكرى الأربعين', canvas.width / 2, 122);
 
   ctx.fillStyle = '#f3d27a';
   ctx.font = 'bold 20px sans-serif';
-  ctx.fillText('«طُوبَى لِلَّذِينَ يَمُوتُونَ فِي الرَّبِّ مُنْذُ الآنَ» (رؤ 14: 13)', canvas.width / 2, 182);
+  ctx.fillText('«طُوبَى لِلَّذِينَ يَمُوتُونَ فِي الرَّبِّ مُنْذُ الآنَ» (رؤ 14: 13)', canvas.width / 2, 165);
 
-  // الجنب الأيمن: السيدة العذراء مريم
-  ctx.fillStyle = '#fff9eb';
-  ctx.strokeStyle = '#d4af37';
-  ctx.lineWidth = 3;
-  ctx.fillRect(80, 340, 210, 260);
-  ctx.strokeRect(80, 340, 210, 260);
-  ctx.fillStyle = '#4a0e13';
-  ctx.font = 'bold 22px sans-serif';
-  ctx.fillText('السيدة العذراء', 185, 440);
-  ctx.font = 'bold 18px sans-serif';
-  ctx.fillText('والدة الإله', 185, 475);
-  ctx.font = 'bold 34px sans-serif';
-  ctx.fillText('👑', 185, 535);
+  // الجنب الشمال: صورة السيدة العذراء مريم
+  let maryImg = null;
+  for (const candidate of VIRGIN_MARY_IMAGE_CANDIDATES) {
+    // eslint-disable-next-line no-await-in-loop
+    maryImg = await loadOptionalImage(candidate);
+    if (maryImg) break;
+  }
 
-  // الجنب الأيسر: الصليب والترحيم
-  ctx.fillStyle = '#fff9eb';
-  ctx.fillRect(790, 340, 210, 260);
-  ctx.strokeRect(790, 340, 210, 260);
-  ctx.fillStyle = '#4a0e13';
-  ctx.font = 'bold 42px sans-serif';
-  ctx.fillText('✝', 895, 445);
-  ctx.font = 'bold 20px sans-serif';
-  ctx.fillText('صلاة وترحيم', 895, 495);
-  ctx.font = 'bold 18px sans-serif';
-  ctx.fillText('على المذبح المقدس', 895, 530);
+  if (maryImg) {
+    ctx.save();
+    ctx.fillStyle = '#fff8ea';
+    ctx.strokeStyle = '#d4af37';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.roundRect(75, 295, 230, 290, 20);
+    ctx.fill();
+    ctx.stroke();
 
-  // المنتصف: اسم المنتقل
+    ctx.beginPath();
+    ctx.roundRect(83, 303, 214, 240, 14);
+    ctx.clip();
+    ctx.drawImage(maryImg, 83, 303, 214, 240);
+    ctx.restore();
+
+    ctx.fillStyle = '#4a0e13';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillText('السيدة العذراء مريم', 190, 570);
+  } else {
+    drawVirginMaryIllustrationOnCanvas(ctx, 75, 295, 230, 290);
+  }
+
+  // المنتصف: ذكرى الأربعين واسم المنتقل
+  ctx.fillStyle = '#7a1c24';
+  ctx.font = 'bold 32px sans-serif';
+  ctx.fillText(m.memorial_type || 'ذكرى الأربعين', canvas.width / 2, 345);
+
   ctx.fillStyle = '#4a0e13';
   ctx.font = 'bold 48px sans-serif';
   const nameLines = wrapCanvasText(ctx, m.deceased_name || '', 440);
-  let y = 415;
+  let y = 420;
   nameLines.forEach(line => {
     ctx.fillText(line, canvas.width / 2, y);
     y += 58;
   });
 
+  // الجنب اليمين: الصليب والترحيم
+  ctx.fillStyle = '#fff9eb';
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.roundRect(775, 295, 230, 290, 20);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = '#7a1c24';
+  ctx.font = 'bold 54px sans-serif';
+  ctx.fillText('✝', 890, 415);
+  ctx.fillStyle = '#4a0e13';
+  ctx.font = 'bold 22px sans-serif';
+  ctx.fillText('صلاة وترحيم', 890, 475);
+  ctx.font = 'bold 18px sans-serif';
+  ctx.fillText('على المذبح المقدس', 890, 512);
+
+  // تفاصيل القداس الإلهي والكنيسة والقداس والمذبح والساعة
   ctx.fillStyle = '#1f2937';
-  ctx.font = 'bold 28px sans-serif';
-  let infoY = 685;
+  ctx.font = 'bold 27px sans-serif';
+  let infoY = 665;
+
+  if (m.church_name) {
+    ctx.fillText(`الكنيسة: ${m.church_name}`, canvas.width / 2, infoY);
+    infoY += 46;
+  }
+
+  const massDetails = [
+    m.mass_order || 'القداس الأول',
+    m.altar_name ? `على ${m.altar_name}` : ''
+  ].filter(Boolean).join(' — ');
+  ctx.fillText(`القداس الإلهي: ${massDetails}`, canvas.width / 2, infoY);
+  infoY += 46;
 
   if (m.mass_date || m.mass_time) {
     ctx.fillText(
-      `القداس الإلهي: ${m.mass_date || ''} ${m.mass_time ? `— الساعة ${m.mass_time}` : ''}`.trim(),
+      `التاريخ والساعة: ${m.mass_date || ''} ${m.mass_time ? `— الساعة ${m.mass_time}` : ''}`.trim(),
       canvas.width / 2,
       infoY
     );
-    infoY += 48;
+    infoY += 46;
   }
 
   if (m.needs_hall && m.hall_name) {
@@ -327,18 +453,51 @@ function downloadMemorialCardImage(m) {
       canvas.width / 2,
       infoY
     );
-    infoY += 48;
   }
 
   ctx.fillStyle = '#7a1c24';
   ctx.font = 'bold 26px sans-serif';
-  ctx.fillText('اذكرونا في صلواتكم • المسيح يعزي الأسرة وجميع محبيهم', canvas.width / 2, canvas.height - 75);
+  ctx.fillText('اذكرونا في صلواتكم • المسيح يعزي الأسرة وجميع محبيهم', canvas.width / 2, canvas.height - 68);
 
   const link = document.createElement('a');
   const safeName = (m.deceased_name || 'memorial').replace(/[^\u0600-\u06FFa-zA-Z0-9_-]+/g, '_');
   link.download = `ترحيم_${safeName}.png`;
   link.href = canvas.toDataURL('image/png');
   link.click();
+}
+
+function VirginMaryCardBox({ compact = false }) {
+  const [imgIndex, setImgIndex] = useState(0);
+  const [fallbackMode, setFallbackMode] = useState(false);
+
+  const currentSrc = !fallbackMode ? VIRGIN_MARY_IMAGE_CANDIDATES[imgIndex] : null;
+
+  return (
+    <div className="bg-[#fff8ea] border-2 border-amber-400 rounded-2xl p-3 flex flex-col items-center justify-center text-center shadow-sm">
+      {currentSrc ? (
+        <img
+          src={currentSrc}
+          alt="السيدة العذراء مريم"
+          onError={() => {
+            if (imgIndex + 1 < VIRGIN_MARY_IMAGE_CANDIDATES.length) {
+              setImgIndex(imgIndex + 1);
+            } else {
+              setFallbackMode(true);
+            }
+          }}
+          className={`${compact ? 'w-20 h-24' : 'w-28 h-32'} object-cover rounded-xl border border-amber-300 mb-1.5`}
+        />
+      ) : (
+        <div className={`${compact ? 'w-20 h-24' : 'w-28 h-32'} rounded-xl bg-gradient-to-b from-amber-100 to-blue-100 border border-amber-300 flex flex-col items-center justify-center mb-1.5 relative`}>
+          <span className="text-lg">✨👑✨</span>
+          <span className="text-2xl font-black text-blue-900">✝</span>
+          <span className="text-[10px] font-bold text-amber-950 mt-0.5">أيقونة العذراء</span>
+        </div>
+      )}
+      <div className="font-black text-xs md:text-sm text-[#4a0e13]">السيدة العذراء مريم</div>
+      <div className="text-[11px] font-bold text-amber-900">والدة الإله</div>
+    </div>
+  );
 }
 
 export default function JosephArimatheaManager({
@@ -497,6 +656,9 @@ export default function JosephArimatheaManager({
   const emptyMemorial = {
     deceased_name: '',
     memorial_type: 'ذكرى الأربعين',
+    church_name: 'كنيسة السيدة العذراء مريم',
+    mass_order: 'القداس الأول',
+    altar_name: 'المذبح الرئيسي',
     mass_date: todayISO,
     mass_time: '08:00',
     requester_name: currentUser?.full_name || '',
@@ -678,7 +840,7 @@ export default function JosephArimatheaManager({
           if (!row || row.created_by === currentUser.id) return;
           handleIncomingAlert({
             id: `case_${row.id}`,
-            title: row.is_night_death ? '🌙 بلاغ وفاة ليلية جديد' : '🕊️ بلاغ حالة وفاة جديد',
+            title: row.is_night_death ? '🌙 وفاة ليلية جديدة' : '🕊️ بلاغ حالة وفاة جديد',
             message: `المنتقل: ${row.deceased_name} • المُبلّغ: ${row.reported_by_name || 'عضو بالسيستم'}`,
             type: 'cases',
             senderId: row.created_by,
@@ -1168,6 +1330,9 @@ export default function JosephArimatheaManager({
     setMemForm({
       ...emptyMemorial,
       ...item,
+      church_name: item.church_name || 'كنيسة السيدة العذراء مريم',
+      mass_order: item.mass_order || 'القداس الأول',
+      altar_name: item.altar_name || 'المذبح الرئيسي',
       mass_time: item.mass_time || '08:00',
       hall_id: item.hall_id || '',
       hall_name: item.hall_name || '',
@@ -1208,6 +1373,9 @@ export default function JosephArimatheaManager({
     const payload = {
       deceased_name: memForm.deceased_name.trim(),
       memorial_type: memForm.memorial_type,
+      church_name: memForm.church_name?.trim() || 'كنيسة السيدة العذراء مريم',
+      mass_order: memForm.mass_order || 'القداس الأول',
+      altar_name: memForm.altar_name?.trim() || 'المذبح الرئيسي',
       mass_date: memForm.mass_date,
       mass_time: memForm.mass_time || '08:00',
       requester_name: memForm.requester_name || '',
@@ -1250,7 +1418,7 @@ export default function JosephArimatheaManager({
         description: `تعديل ترحيم: ${payload.deceased_name} (${payload.memorial_type}) • الإيصال: ${serial}`
       });
 
-      const updatedItem = { ...(data || payload), id: editingMemorialId, mass_time: data?.mass_time || memForm.mass_time || '08:00' };
+      const updatedItem = { ...(data || payload), id: editingMemorialId };
       setMemorialRequests(prev => prev.map(m => (m.id === editingMemorialId ? updatedItem : m)));
       setMemorialCardItem(updatedItem);
       setEditingMemorialId(null);
@@ -1288,8 +1456,7 @@ export default function JosephArimatheaManager({
 
     const createdItem = {
       ...(data || payload),
-      id: data?.id || `mem_${Date.now()}`,
-      mass_time: data?.mass_time || memForm.mass_time || '08:00'
+      id: data?.id || `mem_${Date.now()}`
     };
     setMemorialRequests(prev => [createdItem, ...prev]);
     setMemorialCardItem(createdItem);
@@ -1772,7 +1939,7 @@ export default function JosephArimatheaManager({
             </div>
           )}
 
-          {/* كارت الترحيم (ذكرى الأربعين / ذكرى سنوية / ترحيم وتذكار) بالصليب والجانبين وموعد القداس */}
+          {/* كارت الترحيم (ذكرى الأربعين / ذكرى سنوية) مع صورة العذراء على الشمال، والاسم، والكنيسة، والقداس الأول/الثاني، والمذبح، والساعة */}
           {memorialCardItem && (
             <div className="bg-amber-50/80 border-2 border-amber-400 p-5 rounded-3xl space-y-4 shadow-md print:hidden">
               <div className="flex flex-wrap justify-between items-center gap-2 border-b border-amber-300 pb-3">
@@ -1803,15 +1970,12 @@ export default function JosephArimatheaManager({
                 </div>
 
                 <div className="p-5 grid grid-cols-1 sm:grid-cols-3 items-center gap-3 text-center">
-                  <div className="bg-[#fff9eb] border-2 border-amber-400 rounded-2xl p-3 space-y-1 shadow-sm">
-                    <div className="text-2xl">👑</div>
-                    <div className="font-black text-xs md:text-sm text-[#4a0e13]">السيدة العذراء</div>
-                    <div className="text-[11px] font-bold text-amber-900">والدة الإله</div>
-                  </div>
+                  {/* الشمال: صورة السيدة العذراء مريم */}
+                  <VirginMaryCardBox />
 
+                  {/* المنتصف: ذكرى الأربعين واسم المنتقل */}
                   <div className="space-y-2 py-2">
-                    <div className="text-3xl text-[#7a1c24] font-black">✝</div>
-                    <div className="text-xs font-black text-amber-900">
+                    <div className="text-sm font-black text-[#7a1c24]">
                       {memorialCardItem.memorial_type || 'ذكرى الأربعين'}
                     </div>
                     <h3 className="text-lg md:text-xl font-black text-[#4a0e13] border-y border-amber-300 py-2">
@@ -1819,17 +1983,29 @@ export default function JosephArimatheaManager({
                     </h3>
                   </div>
 
+                  {/* اليمين: الصليب والترحيم على المذبح */}
                   <div className="bg-[#fff9eb] border-2 border-amber-400 rounded-2xl p-3 space-y-1 shadow-sm">
-                    <div className="text-2xl text-[#7a1c24] font-black">✝</div>
+                    <div className="text-3xl text-[#7a1c24] font-black">✝</div>
                     <div className="font-black text-xs md:text-sm text-[#4a0e13]">صلاة وترحيم</div>
-                    <div className="text-[11px] font-bold text-amber-900">على المذبح المقدس</div>
+                    <div className="text-[11px] font-bold text-amber-900">
+                      {memorialCardItem.altar_name || 'على المذبح المقدس'}
+                    </div>
                   </div>
                 </div>
 
                 <div className="px-5 pb-5 text-center space-y-1.5 text-xs md:text-sm font-bold text-gray-800">
+                  {memorialCardItem.church_name && (
+                    <p>
+                      ⛪ <strong>الكنيسة:</strong> {memorialCardItem.church_name}
+                    </p>
+                  )}
+                  <p>
+                    ✝ <strong>القداس:</strong> {memorialCardItem.mass_order || 'القداس الأول'}
+                    {memorialCardItem.altar_name ? ` — على ${memorialCardItem.altar_name}` : ''}
+                  </p>
                   {(memorialCardItem.mass_date || memorialCardItem.mass_time) && (
                     <p>
-                      ⛪ <strong>القداس الإلهي:</strong> {memorialCardItem.mass_date || ''}{' '}
+                      🕒 <strong>الميعاد:</strong> {memorialCardItem.mass_date || ''}{' '}
                       {memorialCardItem.mass_time ? `— الساعة ${memorialCardItem.mass_time}` : ''}
                     </p>
                   )}
@@ -2206,6 +2382,50 @@ export default function JosephArimatheaManager({
                     value={memForm.mass_time}
                     onChange={e => setMemForm({ ...memForm, mass_time: e.target.value })}
                   />
+                </div>
+              </div>
+
+              <div className="grid sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-700 font-bold mb-1">اسم الكنيسة *</label>
+                  <input
+                    required
+                    placeholder="مثال: كنيسة السيدة العذراء مريم..."
+                    className="w-full p-2.5 border rounded-xl bg-white text-xs font-bold"
+                    value={memForm.church_name}
+                    onChange={e => setMemForm({ ...memForm, church_name: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-700 font-bold mb-1">القداس (الأول / الثاني / الثالث) *</label>
+                  <select
+                    className="w-full p-2.5 border rounded-xl bg-white text-xs font-bold"
+                    value={memForm.mass_order}
+                    onChange={e => setMemForm({ ...memForm, mass_order: e.target.value })}
+                  >
+                    {MASS_ORDER_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-700 font-bold mb-1">على مذبح إيه؟ *</label>
+                  <select
+                    className="w-full p-2.5 border rounded-xl bg-white text-xs font-bold"
+                    value={ALTAR_OPTIONS.includes(memForm.altar_name) ? memForm.altar_name : 'مذبح آخر'}
+                    onChange={e => {
+                      const val = e.target.value;
+                      setMemForm({ ...memForm, altar_name: val === 'مذبح آخر' ? '' : val });
+                    }}
+                  >
+                    {ALTAR_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                  </select>
+                  {!ALTAR_OPTIONS.slice(0, -1).includes(memForm.altar_name) && (
+                    <input
+                      placeholder="اكتب اسم المذبح..."
+                      className="w-full p-2 border rounded-xl bg-white text-xs font-bold mt-1.5"
+                      value={memForm.altar_name}
+                      onChange={e => setMemForm({ ...memForm, altar_name: e.target.value })}
+                    />
+                  )}
                 </div>
               </div>
 
@@ -2802,7 +3022,7 @@ export default function JosephArimatheaManager({
                         <span className="px-2 py-0.5 bg-purple-100 text-purple-950 rounded-lg text-xs font-black">{m.memorial_type}</span>
                       </div>
                       <p className="text-xs text-gray-600">
-                        قداس: <strong>{m.mass_date}</strong> {m.mass_time ? `الساعة ${m.mass_time}` : ''} • مقدم الطلب: {m.requester_name}
+                        قداس: <strong>{m.mass_date}</strong> {m.mass_time ? `الساعة ${m.mass_time}` : ''} • {m.mass_order || 'القداس الأول'} • {m.altar_name || 'المذبح الرئيسي'} • مقدم الطلب: {m.requester_name}
                       </p>
 
                       {m.receipt_image_url && (
@@ -2920,6 +3140,7 @@ export default function JosephArimatheaManager({
                           <th className="p-3">#</th>
                           <th className="p-3">اسم المنتقل</th>
                           <th className="p-3">نوع التذكار</th>
+                          <th className="p-3">القداس والمذبح</th>
                           <th className="p-3">مقدم الطلب</th>
                           <th className="p-3">الحالة / الاعتماد</th>
                           <th className="p-3 text-center">ملاحظات الكاهن على المذبح</th>
@@ -2931,6 +3152,7 @@ export default function JosephArimatheaManager({
                             <td className="p-3 font-bold">{idx + 1}</td>
                             <td className="p-3 font-black text-base text-gray-900">{item.deceased_name}</td>
                             <td className="p-3"><span className="px-2 py-0.5 bg-gray-100 rounded text-xs font-bold">{item.memorial_type}</span></td>
+                            <td className="p-3 text-xs font-bold">{item.mass_order || 'القداس الأول'} • {item.altar_name || 'المذبح الرئيسي'}</td>
                             <td className="p-3 text-gray-600">{item.requester_name} ({item.relationship})</td>
                             <td className="p-3">
                               {item.is_mercy_case ? (
@@ -3084,13 +3306,18 @@ export default function JosephArimatheaManager({
                 <p className="text-xs text-gray-700">«طُوبَى لِلَّذِينَ يَمُوتُونَ فِي الرَّبِّ مُنْذُ الآنَ» (رؤ 14: 13)</p>
               </div>
               <div className="grid grid-cols-3 items-center text-center gap-3 py-2">
-                <div className="border p-2 rounded-xl text-xs font-bold">👑 السيدة العذراء والدة الإله</div>
-                <div className="text-xl font-black">{printMemorialCard.deceased_name}</div>
-                <div className="border p-2 rounded-xl text-xs font-bold">✝ صلاة وترحيم على المذبح</div>
+                <VirginMaryCardBox compact />
+                <div>
+                  <div className="text-sm font-bold text-gray-700">{printMemorialCard.memorial_type || 'ذكرى الأربعين'}</div>
+                  <div className="text-xl font-black mt-1">{printMemorialCard.deceased_name}</div>
+                </div>
+                <div className="border p-2 rounded-xl text-xs font-bold">✝ صلاة وترحيم على {printMemorialCard.altar_name || 'المذبح المقدس'}</div>
               </div>
               <div className="space-y-1.5 text-sm text-center">
+                {printMemorialCard.church_name && <p><strong>الكنيسة:</strong> {printMemorialCard.church_name}</p>}
+                <p><strong>القداس:</strong> {printMemorialCard.mass_order || 'القداس الأول'} {printMemorialCard.altar_name ? `— على ${printMemorialCard.altar_name}` : ''}</p>
                 {(printMemorialCard.mass_date || printMemorialCard.mass_time) && (
-                  <p><strong>القداس الإلهي:</strong> {printMemorialCard.mass_date || ''} {printMemorialCard.mass_time ? `— الساعة ${printMemorialCard.mass_time}` : ''}</p>
+                  <p><strong>التاريخ والساعة:</strong> {printMemorialCard.mass_date || ''} {printMemorialCard.mass_time ? `— الساعة ${printMemorialCard.mass_time}` : ''}</p>
                 )}
                 {printMemorialCard.needs_hall && printMemorialCard.hall_name && (
                   <p><strong>الاستقبال / القاعة:</strong> {printMemorialCard.hall_name} {printMemorialCard.hall_slot ? `(${printMemorialCard.hall_slot})` : ''}</p>
@@ -3137,13 +3364,15 @@ export default function JosephArimatheaManager({
             <div className="hidden print:block p-8 border-2 border-gray-900 rounded-3xl max-w-lg mx-auto space-y-4">
               <div className="text-center border-b-2 border-gray-900 pb-3">
                 <h2 className="text-lg font-black">✝ إيصال ترحيم رسمي وتبرع</h2>
-                <p className="text-xs text-gray-600">كنيسة السيدة العذراء مريم — خدمة يوسف الرامي</p>
+                <p className="text-xs text-gray-600">{printMemorialReceipt.church_name || 'كنيسة السيدة العذراء مريم'} — خدمة يوسف الرامي</p>
               </div>
               <div className="space-y-2 text-sm">
                 <p className="flex justify-between"><span>رقم الإيصال:</span> <strong className="font-mono">{printMemorialReceipt.receipt_serial}</strong></p>
                 <p className="flex justify-between"><span>اسم المنتقل:</span> <strong className="font-bold text-base">{printMemorialReceipt.deceased_name}</strong></p>
                 <p className="flex justify-between"><span>المناسبة:</span> <span>{printMemorialReceipt.memorial_type}</span></p>
-                <p className="flex justify-between"><span>تاريخ القداس الإلهي:</span> <strong>{printMemorialReceipt.mass_date}</strong></p>
+                <p className="flex justify-between"><span>الكنيسة:</span> <span>{printMemorialReceipt.church_name || 'كنيسة السيدة العذراء مريم'}</span></p>
+                <p className="flex justify-between"><span>القداس والمذبح:</span> <span>{printMemorialReceipt.mass_order || 'القداس الأول'} — {printMemorialReceipt.altar_name || 'المذبح الرئيسي'}</span></p>
+                <p className="flex justify-between"><span>تاريخ القداس الإلهي:</span> <strong>{printMemorialReceipt.mass_date} {printMemorialReceipt.mass_time ? `(${printMemorialReceipt.mass_time})` : ''}</strong></p>
                 {printMemorialReceipt.needs_hall && (
                   <p className="flex justify-between"><span>قاعة الكنيسة:</span> <span>{printMemorialReceipt.hall_name} ({printMemorialReceipt.hall_slot})</span></p>
                 )}
