@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { uploadChurchMedia } from '../lib/mediaUpload';
 import AdminLogsAndWaWidget from '../components/AdminLogsAndWaWidget';
@@ -6,6 +6,7 @@ import AdminChurchSettingsAndBurial from '../components/AdminChurchSettingsAndBu
 import AdminPageDesigner from '../components/AdminPageDesigner';
 import EducationalCenterManager from '../components/EducationalCenterManager';
 import JosephArimatheaManager from '../components/JosephArimatheaManager';
+import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
 import PermissionsPage, {
   DEFAULT_ROLE_TEMPLATES,
   buildScreenPermissionsMap,
@@ -19,8 +20,9 @@ import {
 
 const emptyUser = {
   first_name: '', second_name: '', third_name: '', fourth_name: '',
-  username: '', password: '', role: 'member',
+  username: '', password: '', role: 'member', guardian_type: '',
   sector: '', detailed_stage: 'أولى ابتدائي', assigned_class: '', family_role: 'ابن/ابنة',
+  member_status: 'active',
   phone: '', whatsapp_sender_phone: '', can_manage_wa_templates: true,
   dob: '', address: '', job_title: '',
   parent_id: '', father_id: '', mother_id: '', family_tree_id: '', confession_father_id: '',
@@ -84,6 +86,13 @@ const STAGE_OPTIONS = [
   'أصحاب معاشات'
 ];
 
+const detectGuardianType = (u) => {
+  if (!u) return 'father';
+  if (u.guardian_type === 'mother' || u.guardian_type === 'father') return u.guardian_type;
+  if (['الأم', 'أم', 'والدة'].includes(String(u.family_role || '').trim())) return 'mother';
+  return 'father';
+};
+
 export default function AdminDashboard({
   users = [], events = [], services = [], caseCategories = [], customCards = [],
   familiesTree = [], roleScreens = [], currentUserId, currentUser = null,
@@ -97,6 +106,7 @@ export default function AdminDashboard({
 }) {
   const effectiveUser = currentUser || users.find(u => u.id === currentUserId) || null;
   const isAdmin = effectiveUser?.role === 'admin';
+  const canExtractSheet = canExtractMasterSheet(effectiveUser);
   const todayISO = new Date().toISOString().split('T')[0];
 
   const [activeCard, setActiveCard] = useState('hub');
@@ -126,7 +136,6 @@ export default function AdminDashboard({
     }))
   );
 
-  // هوية الكنيسة واللوجو وصورة العذراء ورقم الطوارئ
   const [logoRowId, setLogoRowId] = useState(null);
   const [settingsRowId, setSettingsRowId] = useState(null);
   const [churchSettingsForm, setChurchSettingsForm] = useState({
@@ -321,6 +330,9 @@ export default function AdminDashboard({
     setFormData({
       ...emptyUser,
       role: presetRole,
+      guardian_type: presetRole === 'parent' ? 'father' : '',
+      family_role: presetRole === 'parent' ? 'الأب' : 'ابن/ابنة',
+      member_status: 'active',
       is_deacon: userSubTab === 'deacons'
     });
     setShowModal(true);
@@ -333,6 +345,7 @@ export default function AdminDashboard({
     const rawPerms = u.permissions || {};
     const existingScreens = Array.isArray(rawPerms.allowed_screens) ? rawPerms.allowed_screens : [];
     const normalizedMap = buildScreenPermissionsMap(existingScreens, rawPerms, rawPerms.screen_permissions);
+    const resolvedGuardianType = u.role === 'parent' ? detectGuardianType(u) : (u.guardian_type || '');
 
     setFormData({
       ...emptyUser,
@@ -345,10 +358,14 @@ export default function AdminDashboard({
       username: u.username || '',
       password: u.password || '',
       role: u.role || 'member',
+      guardian_type: resolvedGuardianType,
       sector: u.sector || '',
       detailed_stage: u.detailed_stage || u.service_stage || 'أولى ابتدائي',
       assigned_class: u.assigned_class || '',
-      family_role: u.family_role || 'ابن/ابنة',
+      family_role: u.role === 'parent'
+        ? (resolvedGuardianType === 'mother' ? 'الأم' : 'الأب')
+        : (u.family_role || 'ابن/ابنة'),
+      member_status: u.member_status || 'active',
       phone: u.phone || '',
       whatsapp_sender_phone: u.whatsapp_sender_phone || '',
       can_manage_wa_templates: u.can_manage_wa_templates !== false,
@@ -402,10 +419,19 @@ export default function AdminDashboard({
 
     const chosenFatherId = formData.parent_id || formData.father_id || '';
     const chosenMotherId = formData.mother_id || '';
+    const isParentRole = formData.role === 'parent';
+    const normalizedGuardianType = isParentRole
+      ? (formData.guardian_type === 'mother' ? 'mother' : 'father')
+      : (formData.guardian_type || '');
 
     const payload = {
       ...formData,
       full_name,
+      guardian_type: normalizedGuardianType,
+      family_role: isParentRole
+        ? (normalizedGuardianType === 'mother' ? 'الأم' : 'الأب')
+        : (formData.family_role || 'ابن/ابنة'),
+      member_status: formData.member_status || 'active',
       service_stage: formData.detailed_stage,
       dob: formData.dob || null,
       ordination_date: formData.ordination_date || null,
@@ -461,7 +487,7 @@ export default function AdminDashboard({
           <ArrowRight size={15} /> رجوع لكروت الإدارة
         </button>
         <h2 className="text-base md:text-lg font-black text-[#7a1c24]">{title}</h2>
-        {!isAdmin && (
+        {!isAdmin && !canExtractSheet && (
           <span className="px-2.5 py-1 bg-red-100 text-red-800 rounded-full text-[10px] font-black flex items-center gap-1">
             <Lock size={11} /> قراءة فقط
           </span>
@@ -475,14 +501,19 @@ export default function AdminDashboard({
     </div>
   );
 
-  // ==============================================================
-  // HUB: الكروت الكبيرة للوحة الإدارة
-  // ==============================================================
   if (activeCard === 'hub') {
     const adminCards = [
       { id: 'users', icon: '👥', title: 'حسابات الكنيسة', desc: 'إدارة الكهنة، الخدام، الشمامسة، المخدومين، وأولياء الأمور ومنح الصلاحيات', count: `${users.length} فرد`, color: 'border-red-200 bg-white' },
+      ...(canExtractSheet ? [{
+        id: 'master_sheet',
+        icon: '📋',
+        title: 'شيت التسلسل والافتقاد والترحيم',
+        desc: 'سحب الشيت الرسمي بالترقيم التسلسلي للخدام والمخدومين والرعايا + حالة الافتقاد وذكرى الترحيم + تصدير وطباعة (أدمن / أب كاهن / أمين خدمة)',
+        count: `${users.length} مسجل`,
+        color: 'border-teal-300 bg-teal-50/30'
+      }] : []),
       { id: 'roles_permissions', icon: '🔐', title: 'المركز الموحد للصلاحيات والأدوار', desc: 'إنشاء قوالب صلاحيات (الشعب، الكاهن، الخادم، المخدوم...) وتحديد مين يشوف ومين يعدل لكل شاشة ولكل فرد', count: `${roleTemplates.length} قالب • موحّد`, color: 'border-emerald-300 bg-emerald-50/30' },
-      { id: 'page_designer', icon: '🎨', title: 'تصميم وتعديل الصفحة الرئيسية', desc: 'ترتيب الأقسام فوق وتحت (نقل مكان مكان)، إخفاء/إظهار، ألوان، وتعديل المحتوى', count: 'تحكم كامل', color: 'border-pink-300 bg-pink-50/30' },
+      { id: 'page_designer', icon: '🎨', title: 'تصميم وتعديل الصفحة الرئيسية والصفحات', desc: 'ترتيب الأقسام، إضافة ونشر الأخبار والقداسات والرحلات والفيديوهات والكهنة وروابط يوتيوب وفيسبوك', count: 'تحكم كامل', color: 'border-pink-300 bg-pink-50/30' },
       { id: 'events', icon: '⛪', title: 'مواعيد القداسات والاجتماعات', desc: 'إضافة وتعديل مواعيد القداسات، العشيات، والاجتماعات العامة', count: `${events.length} موعد`, color: 'border-amber-200 bg-white' },
       { id: 'services', icon: '🏫', title: 'الفصول والخدمات', desc: 'تنظيم المراحل والفصول وأمناء الخدمة والكاهن المشرف', count: `${services.length} فصل`, color: 'border-blue-200 bg-white' },
       { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل، المواد، الأسعار، حضور الطلاب والمدرسين، وشيت المحاسبة', count: 'إدارة الدروس', color: 'border-indigo-200 bg-white' },
@@ -540,12 +571,21 @@ export default function AdminDashboard({
     );
   }
 
-  // ==============================================================
-  // بقية الشاشات الفرعية داخل الكروت
-  // ==============================================================
   return (
     <div className="space-y-4">
-      {/* 0. مركز الصلاحيات الموحد */}
+      {activeCard === 'master_sheet' && canExtractSheet && (
+        <div className="space-y-4">
+          {renderTopBack('📋 شيت التسلسل والافتقاد والترحيم')}
+          <MasterCongregationSheet
+            users={users}
+            currentUser={effectiveUser}
+            churchName={churchName}
+            onUpdateUser={onUpdateUser}
+            onRefresh={onRefresh}
+          />
+        </div>
+      )}
+
       {activeCard === 'roles_permissions' && (
         <div className="space-y-4 text-xs md:text-sm">
           {renderTopBack('🔐 المركز الموحد للصلاحيات والأدوار المخصصة')}
@@ -562,15 +602,13 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* 1. تصميم وتعديل الصفحة الرئيسية */}
       {activeCard === 'page_designer' && (
         <div className="space-y-4">
-          {renderTopBack('🎨 تصميم وتعديل الصفحة الرئيسية')}
+          {renderTopBack('🎨 تصميم وتعديل الصفحة الرئيسية والصفحات')}
           <AdminPageDesigner currentUser={effectiveUser} onSaved={onRefresh} />
         </div>
       )}
 
-      {/* 2. حسابات الكنيسة */}
       {activeCard === 'users' && (
         <div className="space-y-3">
           {renderTopBack('👥 حسابات الكنيسة')}
@@ -610,12 +648,18 @@ export default function AdminDashboard({
                 filteredUsers.map(u => {
                   const famTree = u.family_tree_id ? familiesTree.find(f => f.id === u.family_tree_id) : null;
                   const isParentOfChild = parentIdsFromMembers.includes(u.id);
+                  const guardianKind = detectGuardianType(u);
                   return (
                     <div key={u.id} className="bg-white p-4 rounded-3xl border text-xs flex flex-wrap justify-between items-center gap-3 shadow-sm">
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <strong className="text-sm text-gray-950">{u.full_name}</strong>
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-50 text-[#7a1c24]">{u.permissions?.custom_role_label || ROLE_LABELS[u.role] || u.role}</span>
+                          {u.role === 'parent' && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-950">
+                              {guardianKind === 'mother' ? '👩 الأم' : '👨 الأب'}
+                            </span>
+                          )}
                           {isParentOfChild && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-950">👨‍👦 ولي أمر مسجل</span>}
                           {u.role === 'priest' && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900">{u.priest_degree} {u.ordination_date ? `(سيامة: ${u.ordination_date})` : ''}</span>}
                           {u.is_deacon && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800">شماس ({u.deacon_rank})</span>}
@@ -659,7 +703,6 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* 3. مواعيد القداسات والاجتماعات */}
       {activeCard === 'events' && (
         <div className="space-y-4 text-xs">
           {renderTopBack('⛪ مواعيد القداسات والاجتماعات')}
@@ -699,7 +742,6 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* 4. الفصول والخدمات */}
       {activeCard === 'services' && (
         <div className="space-y-4 text-xs">
           {renderTopBack('🏫 الفصول والخدمات')}
@@ -755,7 +797,6 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* 5. المركز التعليمي */}
       {activeCard === 'edu_center' && (
         <div className="space-y-4">
           {renderTopBack('🎓 المركز التعليمي الكنسي')}
@@ -763,7 +804,6 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* 6. خدمة يوسف الرامي */}
       {activeCard === 'joseph_arimathea' && (
         <div className="space-y-4">
           {renderTopBack('🕊️ خدمة يوسف الرامي')}
@@ -771,7 +811,6 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* 7. جدول أماكن الدفن وأسعار الانتقال والصناديق وألحان يوسف الرامي */}
       {activeCard === 'burial_and_caskets' && (
         <div className="space-y-4">
           {renderTopBack('⚰️ أماكن الدفن وأسعار الانتقال والصناديق وألحان يوسف الرامي')}
@@ -779,7 +818,6 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* 8. كروت بحث الحالة */}
       {activeCard === 'categories' && (
         <div className="space-y-4 text-xs">
           {renderTopBack('📂 كروت بحث الحالة')}
@@ -828,7 +866,6 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* 9. كروت إضافية للكاهن */}
       {activeCard === 'custom_cards' && (
         <div className="space-y-4 text-xs">
           {renderTopBack('📌 كروت إضافية للكاهن')}
@@ -879,7 +916,6 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* 10. سجل النشاطات واللوجات والواتساب */}
       {activeCard === 'logs' && isAdmin && (
         <div className="space-y-4 text-xs">
           {renderTopBack('📊 سجل النشاطات والجلسات وصلاحيات الواتساب')}
@@ -892,7 +928,6 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* 11. إعدادات وهوية الكنيسة، اللوجو، وصورة العذراء، وأرقام الطوارئ (للأدمن فقط) */}
       {activeCard === 'settings' && (
         <div className="space-y-4 text-xs">
           {renderTopBack('🏛️ إعدادات وهوية الكنيسة، اللوجو، وصورة العذراء، وأرقام الطوارئ')}
@@ -1009,7 +1044,6 @@ export default function AdminDashboard({
         </div>
       )}
 
-      {/* MODAL: ADD / EDIT USER */}
       {showModal && isAdmin && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto">
@@ -1033,7 +1067,20 @@ export default function AdminDashboard({
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block mb-1">الدور والصلاحية *</label>
-                  <select className="w-full p-2.5 border rounded-xl" value={formData.role} onChange={e => setFormData({ ...formData, role: e.target.value })}>
+                  <select
+                    className="w-full p-2.5 border rounded-xl"
+                    value={formData.role}
+                    onChange={e => {
+                      const nextRole = e.target.value;
+                      const nextGuardianType = nextRole === 'parent' ? (formData.guardian_type === 'mother' ? 'mother' : 'father') : '';
+                      setFormData({
+                        ...formData,
+                        role: nextRole,
+                        guardian_type: nextGuardianType,
+                        family_role: nextRole === 'parent' ? (nextGuardianType === 'mother' ? 'الأم' : 'الأب') : formData.family_role
+                      });
+                    }}
+                  >
                     <option value="priest">أب كاهن</option>
                     <option value="head_servant">أمين الخدمة</option>
                     <option value="vice_head_servant">مساعد أمين الخدمة</option>
@@ -1047,6 +1094,42 @@ export default function AdminDashboard({
                   </select>
                 </div>
                 <div><label className="block mb-1">تاريخ الميلاد</label><input type="date" className="w-full p-2.5 border rounded-xl" value={formData.dob} onChange={e => setFormData({ ...formData, dob: e.target.value })} /></div>
+              </div>
+
+              {formData.role === 'parent' && (
+                <div className="bg-amber-50 p-3 rounded-2xl border border-amber-200 space-y-1.5">
+                  <label className="block text-[#7a1c24] font-extrabold">نوع ولي الأمر (الأب / الأم) *</label>
+                  <select
+                    className="w-full p-2.5 border border-amber-300 rounded-xl bg-white"
+                    value={formData.guardian_type || 'father'}
+                    onChange={e => {
+                      const nextG = e.target.value === 'mother' ? 'mother' : 'father';
+                      setFormData({
+                        ...formData,
+                        guardian_type: nextG,
+                        family_role: nextG === 'mother' ? 'الأم' : 'الأب'
+                      });
+                    }}
+                  >
+                    <option value="father">👨 الأب</option>
+                    <option value="mother">👩 الأم</option>
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block mb-1">حالة الفرد (افتقاد / متابعة / ترحيم)</label>
+                <select
+                  className="w-full p-2.5 border rounded-xl bg-[#fbfaf7]"
+                  value={formData.member_status || 'active'}
+                  onChange={e => setFormData({ ...formData, member_status: e.target.value })}
+                >
+                  <option value="active">نشط / موجود</option>
+                  <option value="needs_visitation">محتاج افتقاد</option>
+                  <option value="inactive">منقطع / غياب</option>
+                  <option value="transferred">منتقل خارج الكنيسة</option>
+                  <option value="departed">منتقل للسماء (ذكرى ترحيم)</option>
+                </select>
               </div>
 
               {formData.role === 'priest' && (
@@ -1141,7 +1224,7 @@ export default function AdminDashboard({
                       >
                         <option value="">-- اختر الأب (اختياري) --</option>
                         {parentsList
-                          .filter(p => p.parent_type !== 'mother' && p.family_role !== 'أم')
+                          .filter(p => detectGuardianType(p) !== 'mother')
                           .map(p => (
                             <option key={p.id} value={p.id}>
                               {p.full_name} {p.phone ? `(${p.phone})` : ''}
@@ -1162,7 +1245,7 @@ export default function AdminDashboard({
                       >
                         <option value="">-- اختر الأم (اختياري) --</option>
                         {parentsList
-                          .filter(p => p.parent_type !== 'father' && p.family_role !== 'أب')
+                          .filter(p => detectGuardianType(p) === 'mother' || p.guardian_type === 'mother' || ['الأم', 'أم', 'والدة'].includes(String(p.family_role || '').trim()))
                           .map(p => (
                             <option key={p.id} value={p.id}>
                               {p.full_name} {p.phone ? `(${p.phone})` : ''}
