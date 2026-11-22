@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLogger';
@@ -177,6 +176,7 @@ export default function JosephArimatheaManager({
   const [showDeathForm, setShowDeathForm] = useState(isLoggedIn && !isStaff && canReport);
   const [showMemorialForm, setShowMemorialForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [editingMemorialId, setEditingMemorialId] = useState(null);
   const [printCase, setPrintCase] = useState(null);
   const [printMemorialReceipt, setPrintMemorialReceipt] = useState(null);
   const [filterMassDate, setFilterMassDate] = useState(todayISO);
@@ -345,7 +345,6 @@ export default function JosephArimatheaManager({
       created_at: new Date().toISOString()
     };
 
-    // 1) بث مباشر فوري عبر قناة Realtime ليصل لشاشة الكاهن فوراً بدون ريفريش
     try {
       const channel = supabase.channel('joseph-realtime-notifications');
       await channel.subscribe();
@@ -359,7 +358,6 @@ export default function JosephArimatheaManager({
       console.warn('Realtime broadcast error:', e);
     }
 
-    // 2) حفظ في جدول إشعارات الكنيسة للكهنة
     const priests = systemUsers.filter(u => u.role === 'priest');
     if (priests.length > 0) {
       try {
@@ -382,7 +380,6 @@ export default function JosephArimatheaManager({
   useEffect(() => {
     if (!currentUser?.id || (!isPriest && !isStaff && !isChurchCouncil)) return;
 
-    // جلب الإشعارات غير المقروءة المحفوظة في قاعدة البيانات للكاهن
     const fetchStoredNotifications = async () => {
       try {
         const { data } = await supabase
@@ -408,15 +405,13 @@ export default function JosephArimatheaManager({
       setLiveToast(alertObj);
       setTimeout(() => setLiveToast(null), 9000);
 
-      // إشعار المتصفح إن تم السماح به
       if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
         new Notification(alertObj.title, { body: alertObj.message });
       }
 
-      loadData(); // تحديث فوري للقوائم والكشوفات على شاشة الكاهن
+      loadData();
     };
 
-    // القناة اللحظية (Broadcast + استماع لجدول الحالات وجدول التراحيم)
     const channel = supabase
       .channel('joseph-realtime-notifications')
       .on('broadcast', { event: 'new_joseph_alert' }, ({ payload }) => {
@@ -757,6 +752,30 @@ export default function JosephArimatheaManager({
     setDeathForm({ ...deathForm, assistants: updated });
   };
 
+  // بدء تعديل حالة وفاة موجودة
+  const handleStartEditCase = (c) => {
+    const parsedAssistants = Array.isArray(c.assistants) && c.assistants.length > 0
+      ? c.assistants
+      : c.assistant_worker_name
+        ? [{ id: '', name: c.assistant_worker_name, phone: c.assistant_worker_phone || '' }]
+        : [{ id: '', name: '', phone: '' }];
+
+    setEditingId(c.id);
+    setDeathForm({
+      ...emptyDeathCase,
+      ...c,
+      deceased_user_id: c.deceased_user_id || '',
+      casket_id: c.casket_id || '',
+      burial_location_id: c.burial_location_id || '',
+      hall_id: c.hall_id || '',
+      assistants: parsedAssistants,
+      is_confirmed: true
+    });
+    setActiveMainTab('cases');
+    setShowMemorialForm(false);
+    setShowDeathForm(true);
+  };
+
   // حفظ حالة الوفاة
   const handleSaveCase = async (e) => {
     e.preventDefault();
@@ -769,8 +788,8 @@ export default function JosephArimatheaManager({
     const oldCase = editingId ? cases.find(c => c.id === editingId) : null;
     const payload = {
       ...deathForm,
-      reported_by_user_id: currentUser.id,
-      reported_by_name: currentUser.full_name || currentUser.username,
+      reported_by_user_id: oldCase?.reported_by_user_id || currentUser.id,
+      reported_by_name: oldCase?.reported_by_name || currentUser.full_name || currentUser.username,
       deceased_user_id: deathForm.deceased_user_id || null,
       casket_id: deathForm.casket_id || null,
       burial_location_id: deathForm.burial_location_id || null,
@@ -779,7 +798,6 @@ export default function JosephArimatheaManager({
       assistants: validAssistants,
       assistant_worker_name: validAssistants.length > 0 ? validAssistants.map(a => a.name).join('، ') : deathForm.assistant_worker_name || '',
       assistant_worker_phone: validAssistants.length > 0 ? validAssistants[0].phone : deathForm.assistant_worker_phone || '',
-      // حجز القاعة بشكل آمن كـ null إذا لم يتم الاختيار
       needs_hall: Boolean(deathForm.needs_hall),
       hall_id: (deathForm.needs_hall && deathForm.hall_id) ? deathForm.hall_id : null,
       hall_name: (deathForm.needs_hall && deathForm.hall_name) ? deathForm.hall_name : null,
@@ -787,8 +805,8 @@ export default function JosephArimatheaManager({
       hall_purpose: deathForm.needs_hall ? deathForm.hall_purpose : null,
       hall_date: deathForm.needs_hall ? deathForm.hall_date : null,
       hall_slot: deathForm.needs_hall ? deathForm.hall_slot : null,
-      priest_id: currentUser.role === 'priest' ? currentUser.id : null,
-      created_by: currentUser.id
+      priest_id: oldCase?.priest_id ?? (currentUser.role === 'priest' ? currentUser.id : null),
+      created_by: oldCase?.created_by || currentUser.id
     };
 
     let saved;
@@ -821,7 +839,6 @@ export default function JosephArimatheaManager({
       description: `${deathForm.is_night_death ? '🌙 وفاة بالليل' : 'بيان انتقال'}: ${deathForm.deceased_name} • حجز القاعة: (${deathForm.needs_hall ? deathForm.hall_name : 'بدون'})`
     });
 
-    // إرسال الإشعار الفوري للكاهن ولجنة الكنيسة
     if (!editingId) {
       await notifyPriestsAndCouncil({
         title: deathForm.is_night_death ? '🌙 وفاة ليلية جديدة مسجلة' : '🕊️ بيان حالة انتقال جديدة',
@@ -843,7 +860,12 @@ export default function JosephArimatheaManager({
     if (c.casket_id) {
       await supabase.from('funeral_caskets').update({ status: 'متاح' }).eq('id', c.casket_id);
     }
-    await supabase.from('joseph_arimathea_cases').delete().eq('id', c.id);
+    const { error } = await supabase.from('joseph_arimathea_cases').delete().eq('id', c.id);
+    if (error) return alert('خطأ أثناء الحذف: ' + error.message);
+    if (editingId === c.id) {
+      setEditingId(null);
+      setDeathForm(emptyDeathCase);
+    }
     loadData();
   };
 
@@ -881,14 +903,47 @@ export default function JosephArimatheaManager({
     return `REC-${d.getFullYear()}${(d.getMonth() + 1).toString().padStart(2, '0')}-${rand}`;
   };
 
+  // بدء تعديل كارت ترحيم موجود
+  const handleStartEditMemorial = (item) => {
+    setEditingMemorialId(item.id);
+    setMemForm({
+      ...emptyMemorial,
+      ...item,
+      hall_id: item.hall_id || '',
+      hall_name: item.hall_name || '',
+      instapay_ref: item.instapay_ref || '',
+      receipt_image_url: item.receipt_image_url || ''
+    });
+    setActiveMainTab('memorials');
+    setShowDeathForm(false);
+    setShowMemorialForm(true);
+  };
+
+  // حذف كارت ترحيم موجود
+  const handleDeleteMemorial = async (item) => {
+    if (!isStaff && !isChurchCouncil && !isPriest && item.created_by !== currentUser?.id) {
+      return alert('لا تملك صلاحية حذف هذا الكارت.');
+    }
+    if (!confirm(`حذف كارت الترحيم الخاص بالمنتقل "${item.deceased_name}"؟`)) return;
+    const { error } = await supabase.from('joseph_memorial_requests').delete().eq('id', item.id);
+    if (error) return alert('خطأ أثناء الحذف: ' + error.message);
+    setMemorialRequests(prev => prev.filter(m => m.id !== item.id));
+    if (editingMemorialId === item.id) {
+      setEditingMemorialId(null);
+      setMemForm(emptyMemorial);
+      setShowMemorialForm(false);
+    }
+  };
+
   // حفظ كارت الترحيم ومعالجة حقول الـ UUID لتفادي أخطاء قاعدة البيانات تماماً
   const handleSaveMemorial = async (e) => {
     e.preventDefault();
     if (!memForm.deceased_name.trim()) return alert('اكتب اسم المنتقل للترحيم.');
     if (!memForm.mass_date) return alert('حدد موعد القداس الإلهي لذكر الاسم.');
 
-    const serial = generateReceiptSerial();
-    
+    const existingMemorial = editingMemorialId ? memorialRequests.find(m => m.id === editingMemorialId) : null;
+    const serial = existingMemorial?.receipt_serial || memForm.receipt_serial || generateReceiptSerial();
+
     const payload = {
       deceased_name: memForm.deceased_name.trim(),
       memorial_type: memForm.memorial_type,
@@ -902,9 +957,8 @@ export default function JosephArimatheaManager({
       instapay_ref: memForm.instapay_ref?.trim() ? memForm.instapay_ref.trim() : null,
       receipt_image_url: memForm.receipt_image_url || null,
       receipt_serial: serial,
-      created_by: currentUser?.id || null,
-      status: (isPriest || isChurchCouncil) ? 'مقبول (معتمد للمذبح)' : 'معلق',
-      // معالجة القاعة: إرسال null صريح لمنع خطأ type uuid
+      created_by: existingMemorial?.created_by || currentUser?.id || null,
+      status: existingMemorial ? (memForm.status || existingMemorial.status) : ((isPriest || isChurchCouncil) ? 'مقبول (معتمد للمذبح)' : 'معلق'),
       needs_hall: Boolean(memForm.needs_hall),
       hall_id: (memForm.needs_hall && memForm.hall_id) ? memForm.hall_id : null,
       hall_name: (memForm.needs_hall && memForm.hall_name) ? memForm.hall_name : null,
@@ -912,6 +966,30 @@ export default function JosephArimatheaManager({
       hall_purpose: memForm.needs_hall ? (memForm.hall_purpose || 'استقبال المعزين بعد قداس الأربعين') : null,
       hall_slot: memForm.needs_hall ? (memForm.hall_slot || null) : null
     };
+
+    if (editingMemorialId) {
+      const { id, created_at, ...clean } = payload;
+      const { data, error } = await supabase.from('joseph_memorial_requests').update(clean).eq('id', editingMemorialId).select().single();
+      if (error) {
+        console.error(error);
+        return alert('خطأ في تعديل طلب الترحيم: ' + error.message);
+      }
+
+      logActivity({
+        user: currentUser,
+        actionType: 'تعديل_طلب_ترحيم',
+        targetTable: 'joseph_memorial_requests',
+        targetId: data.id,
+        description: `تعديل ترحيم: ${data.deceased_name} (${data.memorial_type}) • الإيصال: ${serial}`
+      });
+
+      setMemorialRequests(prev => prev.map(m => (m.id === editingMemorialId ? data : m)));
+      setEditingMemorialId(null);
+      setShowMemorialForm(false);
+      setMemForm(emptyMemorial);
+      alert('✅ تم تعديل طلب الترحيم بنجاح!');
+      return;
+    }
 
     const { data, error } = await supabase.from('joseph_memorial_requests').insert([payload]).select().single();
     if (error) {
@@ -927,7 +1005,6 @@ export default function JosephArimatheaManager({
       description: `طلب ترحيم: ${data.deceased_name} (${data.memorial_type}) • الإيصال: ${serial}`
     });
 
-    // إرسال الإشعار الفوري للكاهن لتحديث ورقة المذبح
     await notifyPriestsAndCouncil({
       title: '🕯️ طلب ترحيم جديد بالقداس الإلهي',
       message: `المنتقل: ${data.deceased_name} (${data.memorial_type}) • قداس: ${data.mass_date} • سجله: ${currentUser.full_name || currentUser.username}`,
@@ -1175,7 +1252,7 @@ export default function JosephArimatheaManager({
 
           <button
             type="button"
-            onClick={() => { setShowMemorialForm(true); setShowDeathForm(false); }}
+            onClick={() => { setEditingMemorialId(null); setMemForm(emptyMemorial); setShowMemorialForm(true); setShowDeathForm(false); }}
             className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-amber-950 font-black rounded-xl text-xs flex items-center gap-1.5 shadow cursor-pointer"
           >
             <HeartHandshake size={15} /> تقديم كارت ترحيم
@@ -1590,9 +1667,9 @@ export default function JosephArimatheaManager({
             <form onSubmit={handleSaveMemorial} className="bg-amber-50/60 p-5 rounded-3xl border-2 border-amber-300 space-y-4 print:hidden">
               <div className="flex justify-between items-center border-b border-amber-200 pb-2">
                 <h4 className="font-black text-amber-950 text-base flex items-center gap-2">
-                  <HeartHandshake size={18} className="text-[#7a1c24]" /> تسجيل كارت ترحيم جديد (أربعين / سنوية)
+                  <HeartHandshake size={18} className="text-[#7a1c24]" /> {editingMemorialId ? 'تعديل كارت الترحيم' : 'تسجيل كارت ترحيم جديد (أربعين / سنوية)'}
                 </h4>
-                <button type="button" onClick={() => setShowMemorialForm(false)} className="text-gray-500 hover:text-black text-xs font-bold">✕ إغلاق</button>
+                <button type="button" onClick={() => { setShowMemorialForm(false); setEditingMemorialId(null); setMemForm(emptyMemorial); }} className="text-gray-500 hover:text-black text-xs font-bold">✕ إغلاق</button>
               </div>
 
               <div className="grid sm:grid-cols-3 gap-3">
@@ -1777,7 +1854,6 @@ export default function JosephArimatheaManager({
                           </span>
                         </div>
 
-                        {/* خانة إرفاق صورة الإيصال */}
                         <div className="pt-2 border-t border-emerald-200 flex flex-wrap items-center gap-3">
                           <label className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
                             <UploadCloud size={15} />
@@ -1813,7 +1889,7 @@ export default function JosephArimatheaManager({
                 type="submit"
                 className="w-full py-3 bg-[#7a1c24] hover:bg-[#5b141a] text-white rounded-2xl font-black text-xs md:text-sm cursor-pointer shadow transition"
               >
-                إرسال طلب الترحيم للجنة الكنيسة والآباء الكهنة 🕊️
+                {editingMemorialId ? 'حفظ تعديلات كارت الترحيم ✅' : 'إرسال طلب الترحيم للجنة الكنيسة والآباء الكهنة 🕊️'}
               </button>
             </form>
           )}
@@ -1824,11 +1900,22 @@ export default function JosephArimatheaManager({
               {showDeathForm && canReport && (!isStaff || canEditCases) && (
                 <form onSubmit={handleSaveCase} className="bg-white p-5 rounded-3xl border-2 border-[#7a1c24]/30 space-y-4 font-bold shadow-sm print:hidden">
                   <div className="flex flex-wrap justify-between items-center border-b pb-2 gap-2">
-                    <h4 className="text-base font-black text-[#7a1c24]">📋 اختيار المنتقل، خط السير، وحجز قاعة العزاء</h4>
-                    <label className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-950 cursor-pointer">
-                      <input type="checkbox" checked={deathForm.is_night_death} onChange={e => setDeathForm({ ...deathForm, is_night_death: e.target.checked })} />
-                      <Moon size={14} /> حالة وفاة بالليل
-                    </label>
+                    <h4 className="text-base font-black text-[#7a1c24]">📋 {editingId ? 'تعديل بيان حالة الوفاة' : 'اختيار المنتقل، خط السير، وحجز قاعة العزاء'}</h4>
+                    <div className="flex items-center gap-2">
+                      {editingId && (
+                        <button
+                          type="button"
+                          onClick={() => { setEditingId(null); setDeathForm(emptyDeathCase); setShowDeathForm(false); }}
+                          className="px-2.5 py-1 bg-gray-100 text-gray-700 rounded-xl text-xs cursor-pointer"
+                        >
+                          إلغاء التعديل
+                        </button>
+                      )}
+                      <label className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-950 cursor-pointer">
+                        <input type="checkbox" checked={deathForm.is_night_death} onChange={e => setDeathForm({ ...deathForm, is_night_death: e.target.checked })} />
+                        <Moon size={14} /> حالة وفاة بالليل
+                      </label>
+                    </div>
                   </div>
 
                   <div className="grid sm:grid-cols-3 gap-2.5">
@@ -2082,8 +2169,34 @@ export default function JosephArimatheaManager({
                           <p className="text-xs text-gray-500 mt-1">تاريخ الوفاة: {c.death_date} • مكان الدفن: {c.burial_location_name}</p>
                         </div>
                         {isStaff && (
-                          <div className="flex gap-2">
+                          <div className="flex flex-wrap gap-2">
+                            {canEditCases && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditCase(c)}
+                                  className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-950 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Edit3 size={13} /> تعديل
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteCase(c)}
+                                  className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Trash2 size={13} /> حذف
+                                </button>
+                              </>
+                            )}
                             <button
+                              type="button"
+                              onClick={() => sendDriverWhatsApp(c)}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <MessageCircle size={13} /> واتساب السائق
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => { setPrintCase(c); setTimeout(() => window.print(), 100); }}
                               className="px-3 py-1.5 bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
                             >
@@ -2132,7 +2245,7 @@ export default function JosephArimatheaManager({
                   <p className="text-xs text-gray-500">الطلبات المعلقة تتطلب اعتماد لجنة الكنيسة أو أبونا الكاهن لتظهر في ورقة المذبح.</p>
                 </div>
                 <button
-                  onClick={() => setShowMemorialForm(true)}
+                  onClick={() => { setEditingMemorialId(null); setMemForm(emptyMemorial); setShowMemorialForm(true); }}
                   className="px-4 py-2 bg-[#7a1c24] text-white rounded-xl text-xs font-black cursor-pointer shadow"
                 >
                   + إضافة اسم للترحيم
@@ -2149,8 +2262,7 @@ export default function JosephArimatheaManager({
                         <span className="text-xs text-gray-500 font-bold">({m.memorial_type})</span>
                       </div>
                       <p className="text-xs text-gray-600">قداس: <strong>{m.mass_date}</strong> • مقدم الطلب: {m.requester_name}</p>
-                      
-                      {/* زر فتح ومعاينة صورة الإيصال المرفقة */}
+
                       {m.receipt_image_url && (
                         <div className="pt-1">
                           <button
@@ -2164,7 +2276,7 @@ export default function JosephArimatheaManager({
                       )}
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       {(isChurchCouncil || isPriest) && m.status === 'معلق' && (
                         <>
                           <button
@@ -2178,6 +2290,25 @@ export default function JosephArimatheaManager({
                             className="px-3 py-1.5 bg-purple-700 text-white rounded-xl text-xs font-bold cursor-pointer"
                           >
                             قبول كإخوة رب (مجاني)
+                          </button>
+                        </>
+                      )}
+
+                      {(isChurchCouncil || isPriest || isStaff || m.created_by === currentUser?.id) && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditMemorial(m)}
+                            className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-950 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Edit3 size={13} /> تعديل
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMemorial(m)}
+                            className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Trash2 size={13} /> حذف
                           </button>
                         </>
                       )}
