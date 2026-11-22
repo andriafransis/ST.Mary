@@ -12,7 +12,7 @@ import PermissionsPage from './PermissionsPage';
 import {
   UserPlus, Edit3, Trash2, CalendarPlus, BookOpen,
   Search, RefreshCw, FolderEdit, Sparkles, ArrowRight,
-  Users, Settings, Save, Upload, ShieldCheck, Lock, Layers, X, UserCheck
+  Users, Settings, Save, Upload, ShieldCheck, Lock, Layers, X, UserCheck, ArrowLeftRight
 } from 'lucide-react';
 
 // توحيد وتنسيق رتب الشمامسة لضمان التطابق الكامل بين الداتابيز والشاشات
@@ -74,6 +74,7 @@ const emptyUser = {
     manage_joseph: false,
     can_edit_public: false,
     extra_services: [],
+    supervised_services: [],
     service_gender_scope: 'الكل'
   }
 };
@@ -169,6 +170,34 @@ export default function AdminDashboard({
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState(emptyUser);
 
+  // مودال النقل الفردي والجماعي للخدام والمخدومين
+  const [transferModal, setTransferModal] = useState({
+    open: false,
+    mode: 'single', // 'single' | 'bulk'
+    targetKind: 'servant', // 'servant' | 'member'
+    singleUser: null,
+    selectedUserIds: [],
+    filterSourceService: '',
+    filterSourceClass: '',
+    transferAction: 'move', // 'move' | 'add'
+    targetService: '',
+    targetClasses: [],
+    targetSingleClass: '',
+    targetGenderScope: ''
+  });
+  const [savingTransfer, setSavingTransfer] = useState(false);
+
+  // نقل وتعديل الأب الكاهن المسؤول عن خدمة أو فصل أو مجموعة فصول
+  const [priestTransferForm, setPriestTransferForm] = useState({
+    fromPriestId: '',
+    toPriestId: '',
+    serviceName: '',
+    classId: '',
+    mode: 'by_service', // 'by_service' | 'by_class' | 'replace_priest'
+    syncPriestSupervisedServices: true
+  });
+  const [savingPriestTransfer, setSavingPriestTransfer] = useState(false);
+
   const [evForm, setEvForm] = useState(emptyEvent);
   const [editingEvId, setEditingEvId] = useState(null);
 
@@ -236,6 +265,326 @@ export default function AdminDashboard({
     loadServiceGroups();
   }, []);
 
+  const effectiveGroups = dbServiceGroups.length > 0 ? dbServiceGroups : DEFAULT_SERVICE_GROUPS;
+
+  const availableServantServices = [...new Set([
+    ...effectiveGroups.map(g => g.group_name).filter(Boolean),
+    ...services.map(s => s.stage_name).filter(Boolean)
+  ])];
+
+  const getClassesForService = (serviceName) => {
+    if (!serviceName) return [];
+    const grpObj = effectiveGroups.find(g => g.group_name === serviceName);
+    const subStages = grpObj ? normalizeGroupStages(grpObj.stages) : [];
+
+    const matchedFromDb = services.filter(
+      s =>
+        s.stage_name === serviceName ||
+        subStages.includes(s.stage_name) ||
+        (grpObj && grpObj.group_name.includes(s.stage_name))
+    );
+
+    if (matchedFromDb.length > 0) return matchedFromDb;
+
+    return subStages.map((st, idx) => ({
+      id: `stage-${serviceName}-${idx}`,
+      class_name: st,
+      stage_name: serviceName,
+      isVirtualStage: true
+    }));
+  };
+
+  const persistUserUpdate = async (updatedPayload) => {
+    if (onUpdateUser) {
+      await onUpdateUser(updatedPayload);
+    } else {
+      const { id, created_at, ...clean } = updatedPayload;
+      const { error } = await supabase.from('church_users').update(clean).eq('id', id);
+      if (error) throw new Error(error.message);
+      if (onRefresh) await onRefresh();
+    }
+  };
+
+  const persistServiceUpdate = async (updatedServicePayload) => {
+    if (onUpdateService) {
+      await onUpdateService(updatedServicePayload);
+    } else {
+      const { id, created_at, ...clean } = updatedServicePayload;
+      const { error } = await supabase.from('services').update(clean).eq('id', id);
+      if (error) throw new Error(error.message);
+      if (onRefresh) await onRefresh();
+    }
+  };
+
+  // حساب الخدمات والفصول التي يشرف عليها كل أب كاهن حالياً
+  const getPriestCoverage = (priestId) => {
+    const supervisedClasses = services.filter(s => s.priest_id === priestId);
+    const priestObj = users.find(u => u.id === priestId);
+    const explicitSupervised = Array.isArray(priestObj?.permissions?.supervised_services)
+      ? priestObj.permissions.supervised_services
+      : [];
+
+    const stageNamesFromClasses = supervisedClasses.map(s => s.stage_name).filter(Boolean);
+    const groupNamesFromClasses = effectiveGroups
+      .filter(g => supervisedClasses.some(sc => sc.stage_name === g.group_name || normalizeGroupStages(g.stages).includes(sc.stage_name)))
+      .map(g => g.group_name);
+
+    const assignedServices = [...new Set([
+      ...explicitSupervised,
+      ...stageNamesFromClasses,
+      ...groupNamesFromClasses
+    ])];
+
+    const unassignedServices = availableServantServices.filter(srv => !assignedServices.includes(srv));
+
+    return {
+      supervisedClasses,
+      assignedServices,
+      unassignedServices
+    };
+  };
+
+  // تنفيذ نقل أو تعديل الكاهن المسؤول عن خدمة أو فصل أو استبدال كاهن بكاهن آخر
+  const handlePriestServiceTransfer = async (e) => {
+    e.preventDefault();
+    if (!requireAdminGuard()) return;
+    if (!priestTransferForm.toPriestId) {
+      alert('اختر الأب الكاهن الجديد المسؤول');
+      return;
+    }
+
+    setSavingPriestTransfer(true);
+    try {
+      let affectedClasses = [];
+
+      if (priestTransferForm.mode === 'by_class') {
+        if (!priestTransferForm.classId) {
+          alert('اختر الفصل المطلوب تعديل كاهنه');
+          return;
+        }
+        affectedClasses = services.filter(s => s.id === priestTransferForm.classId);
+      } else if (priestTransferForm.mode === 'replace_priest') {
+        if (!priestTransferForm.fromPriestId) {
+          alert('اختر الأب الكاهن الحالي المراد نقله/استبداله');
+          return;
+        }
+        affectedClasses = services.filter(s => s.priest_id === priestTransferForm.fromPriestId);
+      } else {
+        // by_service
+        if (!priestTransferForm.serviceName) {
+          alert('اختر الخدمة المطلوب نقل أو تعديل الكاهن المسؤول عنها');
+          return;
+        }
+        const matched = getClassesForService(priestTransferForm.serviceName).filter(c => !c.isVirtualStage);
+        affectedClasses = priestTransferForm.fromPriestId
+          ? matched.filter(c => c.priest_id === priestTransferForm.fromPriestId)
+          : matched;
+      }
+
+      for (const cls of affectedClasses) {
+        await persistServiceUpdate({
+          ...cls,
+          priest_id: priestTransferForm.toPriestId
+        });
+      }
+
+      if (priestTransferForm.syncPriestSupervisedServices) {
+        const toPriest = users.find(u => u.id === priestTransferForm.toPriestId);
+        if (toPriest) {
+          const prevSup = Array.isArray(toPriest.permissions?.supervised_services)
+            ? toPriest.permissions.supervised_services
+            : [];
+          const nextSup = priestTransferForm.serviceName
+            ? [...new Set([...prevSup, priestTransferForm.serviceName])]
+            : prevSup;
+
+          await persistUserUpdate({
+            ...toPriest,
+            permissions: {
+              ...(toPriest.permissions || {}),
+              supervised_services: nextSup
+            }
+          });
+        }
+
+        if (priestTransferForm.fromPriestId && priestTransferForm.fromPriestId !== priestTransferForm.toPriestId && priestTransferForm.serviceName) {
+          const fromPriest = users.find(u => u.id === priestTransferForm.fromPriestId);
+          if (fromPriest) {
+            const remainingForFrom = services.filter(
+              s => s.priest_id === fromPriest.id &&
+                !affectedClasses.some(ac => ac.id === s.id) &&
+                s.stage_name === priestTransferForm.serviceName
+            );
+            if (remainingForFrom.length === 0) {
+              const prevFromSup = Array.isArray(fromPriest.permissions?.supervised_services)
+                ? fromPriest.permissions.supervised_services
+                : [];
+              await persistUserUpdate({
+                ...fromPriest,
+                permissions: {
+                  ...(fromPriest.permissions || {}),
+                  supervised_services: prevFromSup.filter(srv => srv !== priestTransferForm.serviceName)
+                }
+              });
+            }
+          }
+        }
+      }
+
+      if (onRefresh) await onRefresh();
+      alert(`تم تحديث مسؤولية الكاهن بنجاح على ${affectedClasses.length} ${affectedClasses.length === 1 ? 'فصل' : 'فصول'} ✅`);
+    } catch (err) {
+      alert('تعذر تحديث الكاهن: ' + err.message);
+    } finally {
+      setSavingPriestTransfer(false);
+    }
+  };
+
+  const openSingleTransferModal = (u) => {
+    if (!requireAdminGuard()) return;
+    const isServant = SERVANT_ROLES.includes(u.role);
+    const currentStages = splitList(u.detailed_stage || u.service_stage);
+    const currentClasses = splitList(u.assigned_class);
+    const defaultService = currentStages[0] || availableServantServices[0] || 'أولى ابتدائي';
+
+    setTransferModal({
+      open: true,
+      mode: 'single',
+      targetKind: isServant ? 'servant' : 'member',
+      singleUser: u,
+      selectedUserIds: [u.id],
+      filterSourceService: '',
+      filterSourceClass: '',
+      transferAction: 'move',
+      targetService: defaultService,
+      targetClasses: isServant ? currentClasses : [],
+      targetSingleClass: !isServant ? (currentClasses[0] || '') : '',
+      targetGenderScope: u.permissions?.service_gender_scope || ''
+    });
+  };
+
+  const openBulkTransferModal = (kind = 'servant') => {
+    if (!requireAdminGuard()) return;
+    const pool = kind === 'servant'
+      ? users.filter(u => SERVANT_ROLES.includes(u.role))
+      : users.filter(u => u.role === 'member');
+    const defaultService = availableServantServices[0] || 'أولى ابتدائي';
+
+    setTransferModal({
+      open: true,
+      mode: 'bulk',
+      targetKind: kind,
+      singleUser: null,
+      selectedUserIds: pool.length === 1 ? [pool[0].id] : [],
+      filterSourceService: '',
+      filterSourceClass: '',
+      transferAction: 'move',
+      targetService: defaultService,
+      targetClasses: [],
+      targetSingleClass: '',
+      targetGenderScope: ''
+    });
+  };
+
+  const applyTransferToSingleUser = (u, cfg) => {
+    const isServant = SERVANT_ROLES.includes(u.role);
+    const prevStages = splitList(u.detailed_stage || u.service_stage);
+    const prevClasses = splitList(u.assigned_class);
+    const prevExtra = Array.isArray(u.permissions?.extra_services) ? u.permissions.extra_services : [];
+
+    let nextStages = [...prevStages];
+    let nextClasses = [...prevClasses];
+    let nextExtra = [...prevExtra];
+
+    if (isServant) {
+      const chosenClasses = Array.isArray(cfg.targetClasses) ? cfg.targetClasses : [];
+      if (cfg.transferAction === 'add') {
+        if (cfg.targetService && !nextStages.includes(cfg.targetService)) nextStages.push(cfg.targetService);
+        chosenClasses.forEach(c => {
+          if (!nextClasses.includes(c)) nextClasses.push(c);
+        });
+      } else {
+        const classesOfOldService = cfg.filterSourceService
+          ? getClassesForService(cfg.filterSourceService).map(c => c.class_name)
+          : [];
+        if (cfg.filterSourceService) {
+          nextStages = nextStages.filter(st => st !== cfg.filterSourceService);
+          nextExtra = nextExtra.filter(st => st !== cfg.filterSourceService);
+          nextClasses = nextClasses.filter(c => !classesOfOldService.includes(c));
+        } else {
+          nextStages = [];
+          nextClasses = [];
+        }
+        if (cfg.targetService && !nextStages.includes(cfg.targetService)) nextStages.push(cfg.targetService);
+        chosenClasses.forEach(c => {
+          if (!nextClasses.includes(c)) nextClasses.push(c);
+        });
+      }
+
+      if (cfg.targetService && !nextExtra.includes(cfg.targetService)) {
+        nextExtra.push(cfg.targetService);
+      }
+
+      const finalStageStr = nextStages.join(', ');
+      return {
+        ...u,
+        detailed_stage: finalStageStr,
+        service_stage: finalStageStr,
+        assigned_class: nextClasses.join(', '),
+        permissions: {
+          ...(u.permissions || {}),
+          extra_services: nextExtra,
+          ...(cfg.targetGenderScope ? { service_gender_scope: cfg.targetGenderScope } : {})
+        }
+      };
+    } else {
+      const newStage = cfg.targetService || u.detailed_stage || '';
+      const newClass = cfg.targetSingleClass || '';
+      return {
+        ...u,
+        detailed_stage: newStage,
+        service_stage: newStage,
+        assigned_class: newClass,
+        permissions: {
+          ...(u.permissions || {}),
+          extra_services: newStage ? [newStage] : []
+        }
+      };
+    }
+  };
+
+  const handleConfirmTransfer = async (e) => {
+    e.preventDefault();
+    if (!requireAdminGuard()) return;
+    if (!transferModal.targetService) {
+      alert('اختر الخدمة أو المرحلة الهدف أولاً');
+      return;
+    }
+
+    const targets = transferModal.mode === 'single'
+      ? (transferModal.singleUser ? [transferModal.singleUser] : [])
+      : users.filter(u => transferModal.selectedUserIds.includes(u.id));
+
+    if (targets.length === 0) {
+      alert('اختر فرداً واحداً على الأقل للنقل');
+      return;
+    }
+
+    setSavingTransfer(true);
+    try {
+      for (const person of targets) {
+        const updated = applyTransferToSingleUser(person, transferModal);
+        await persistUserUpdate(updated);
+      }
+      setTransferModal(prev => ({ ...prev, open: false }));
+      alert(`تم نقل ${targets.length} ${targets.length === 1 ? 'فرد' : 'أفراد'} بنجاح ✅`);
+    } catch (err) {
+      alert('حدث خطأ أثناء النقل: ' + err.message);
+    } finally {
+      setSavingTransfer(false);
+    }
+  };
+
   const handleSaveServiceGroup = async (e) => {
     e.preventDefault();
     if (!requireAdminGuard()) return;
@@ -290,7 +639,6 @@ export default function AdminDashboard({
     }
   };
 
-  // ربط أو فك ربط مستخدم بخدمة/اجتماع محدد مباشرة
   const handleToggleUserServiceAssignment = async (targetUserId, serviceName, shouldAssign = true, groupKey = '') => {
     if (!requireAdminGuard()) return;
     const targetUser = users.find(u => u.id === targetUserId);
@@ -321,18 +669,7 @@ export default function AdminDashboard({
 
     setAssigningGroupKey(groupKey);
     try {
-      if (onUpdateUser) {
-        await onUpdateUser(updatedPayload);
-      } else {
-        const { id, created_at, ...clean } = updatedPayload;
-        const { error } = await supabase.from('church_users').update({
-          detailed_stage: clean.detailed_stage,
-          service_stage: clean.service_stage,
-          permissions: clean.permissions
-        }).eq('id', id);
-        if (error) return alert('خطأ في ربط المستخدم بالخدمة: ' + error.message);
-        if (onRefresh) await onRefresh();
-      }
+      await persistUserUpdate(updatedPayload);
     } finally {
       setAssigningGroupKey('');
     }
@@ -603,13 +940,7 @@ export default function AdminDashboard({
     };
 
     if (isEditing) {
-      if (onUpdateUser) await onUpdateUser(payload);
-      else {
-        const { id, created_at, ...clean } = payload;
-        const { error } = await supabase.from('church_users').update(clean).eq('id', id);
-        if (error) return alert(error.message);
-        if (onRefresh) await onRefresh();
-      }
+      await persistUserUpdate(payload);
     } else {
       if (onAddUser) await onAddUser(payload);
       else {
@@ -656,7 +987,7 @@ export default function AdminDashboard({
 
   if (activeCard === 'hub') {
     const adminCards = [
-      { id: 'users', icon: '👥', title: 'حسابات الكنيسة', desc: 'إدارة الكهنة، الخدام، الشمامسة، المخدومين، وأولياء الأمور ومنح الصلاحيات', count: `${users.length} فرد`, color: 'border-red-200 bg-white' },
+      { id: 'users', icon: '👥', title: 'حسابات الكنيسة', desc: 'إدارة الكهنة، الخدام، الشمامسة، المخدومين، وأولياء الأمور ونقلهم فردي وجماعي', count: `${users.length} فرد`, color: 'border-red-200 bg-white' },
       ...(canExtractSheet ? [{
         id: 'master_sheet',
         icon: '📋',
@@ -668,7 +999,7 @@ export default function AdminDashboard({
       { id: 'roles_permissions', icon: '🔐', title: 'المركز الموحد للصلاحيات والأدوار', desc: 'إنشاء قوالب صلاحيات (الشعب، الكاهن، الخادم، المخدوم...) وتحديد مين يشوف ومين يعدل لكل شاشة ولكل فرد', count: `${roleTemplatesCount} قالب • موحّد`, color: 'border-emerald-300 bg-emerald-50/30' },
       { id: 'page_designer', icon: '🎨', title: 'تصميم وتعديل الصفحة الرئيسية والصفحات', desc: 'ترتيب الأقسام، إضافة ونشر الأخبار والقداسات والرحلات والفيديوهات والكهنة وروابط يوتيوب وفيسبوك', count: 'تحكم كامل', color: 'border-pink-300 bg-pink-50/30' },
       { id: 'events', icon: '⛪', title: 'مواعيد القداسات والاجتماعات', desc: 'إضافة وتعديل مواعيد القداسات، العشيات، والاجتماعات العامة', count: `${events.length} موعد`, color: 'border-amber-200 bg-white' },
-      { id: 'services', icon: '🏫', title: 'الخدمات والاجتماعات والفصول', desc: 'إضافة خدمة بفصول أو اجتماع عام بدون فصول، تحديد (عام/بنين/بنات/مقسمة)، الأمين والخدام، وربط المستخدمين بالخدمات', count: `${dbServiceGroups.length} خدمة • ${services.length} فصل`, color: 'border-blue-200 bg-white' },
+      { id: 'services', icon: '🏫', title: 'الخدمات والاجتماعات والفصول', desc: 'إضافة خدمة بفصول أو اجتماع عام بدون فصول، نقل وتعديل الكاهن والخدام، وربط المستخدمين بالخدمات', count: `${dbServiceGroups.length} خدمة • ${services.length} فصل`, color: 'border-blue-200 bg-white' },
       { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل، المواد، الأسعار، حضور الطلاب والمدرسين، وشيت المحاسبة', count: 'إدارة الدروس', color: 'border-indigo-200 bg-white' },
       { id: 'joseph_arimathea', icon: '🕊️', title: 'خدمة يوسف الرامي', desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، خط سير السائق، ومتابعة المرافقين', count: 'خدمة المنتقلين', color: 'border-slate-300 bg-white' },
       { id: 'burial_and_caskets', icon: '⚰️', title: 'أماكن الدفن والصناديق وألحان يوسف الرامي', desc: 'جدول أماكن الدفن بالترقيم المتسلسل ورسوم الانتقال + مخزون الصناديق + ألحان يوسف الرامي وسلايدر الصوت', count: 'جداول وألحان', color: 'border-cyan-200 bg-white' },
@@ -724,7 +1055,6 @@ export default function AdminDashboard({
     );
   }
 
-  const effectiveGroups = dbServiceGroups.length > 0 ? dbServiceGroups : DEFAULT_SERVICE_GROUPS;
   const groupsWithClasses = effectiveGroups.filter(g => g.has_classes !== false);
   const selectedClassServiceObj = groupsWithClasses.find(g => g.group_name === (srvForm.stage_name || groupsWithClasses[0]?.group_name));
   const selectedServantTagsInForm = splitList(grpForm.servants_names);
@@ -738,8 +1068,19 @@ export default function AdminDashboard({
   const isServantRoleSelected = SERVANT_ROLES.includes(formData.role);
   const selectedServantStages = splitList(formData.detailed_stage);
   const selectedServantClasses = splitList(formData.assigned_class);
-  const dynamicExtraStages = [...new Set(services.map(s => s.stage_name).filter(Boolean))]
-    .filter(st => !effectiveGroups.some(g => g.group_name === st || normalizeGroupStages(g.stages).includes(st)));
+
+  const bulkPoolUsers = (transferModal.targetKind === 'servant' ? servantsList : membersList).filter(u => {
+    if (transferModal.filterSourceService) {
+      const stages = splitList(`${u.detailed_stage || ''} ${u.service_stage || ''}`);
+      const extra = Array.isArray(u.permissions?.extra_services) ? u.permissions.extra_services : [];
+      if (![...stages, ...extra].includes(transferModal.filterSourceService)) return false;
+    }
+    if (transferModal.filterSourceClass) {
+      const classes = splitList(u.assigned_class);
+      if (!classes.includes(transferModal.filterSourceClass)) return false;
+    }
+    return true;
+  });
 
   return (
     <div className="space-y-4">
@@ -798,9 +1139,25 @@ export default function AdminDashboard({
               <input type="text" placeholder="بحث بالاسم، اليوزر، التليفون، الفصل، أو القطاع..." className="w-full pr-9 pl-3 py-2.5 bg-white border rounded-xl outline-none focus:border-[#7a1c24]" value={searchQ} onChange={e => setSearchQ(e.target.value)} />
             </div>
             {isAdmin && (
-              <button onClick={openAdd} className="px-4 py-2.5 bg-[#7a1c24] text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow cursor-pointer">
-                <UserPlus size={16} /> {addButtonLabel}
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => openBulkTransferModal('servant')}
+                  className="px-3.5 py-2.5 bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 text-xs font-black rounded-xl flex items-center gap-1 shadow-2xs cursor-pointer"
+                >
+                  <ArrowLeftRight size={15} /> نقل جماعي للخدام
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openBulkTransferModal('member')}
+                  className="px-3.5 py-2.5 bg-blue-100 hover:bg-blue-200 text-blue-950 border border-blue-300 text-xs font-black rounded-xl flex items-center gap-1 shadow-2xs cursor-pointer"
+                >
+                  <ArrowLeftRight size={15} /> نقل جماعي للمخدومين
+                </button>
+                <button onClick={openAdd} className="px-4 py-2.5 bg-[#7a1c24] text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow cursor-pointer">
+                  <UserPlus size={16} /> {addButtonLabel}
+                </button>
+              </div>
             )}
           </div>
 
@@ -819,9 +1176,11 @@ export default function AdminDashboard({
                   const famTree = u.family_tree_id ? familiesTree.find(f => f.id === u.family_tree_id) : null;
                   const isParentOfChild = parentIdsFromMembers.includes(u.id);
                   const guardianKind = detectGuardianType(u);
+                  const canTransferUser = SERVANT_ROLES.includes(u.role) || u.role === 'member';
+                  const priestCoverage = u.role === 'priest' ? getPriestCoverage(u.id) : null;
                   return (
                     <div key={u.id} className="bg-white p-4 rounded-3xl border text-xs flex flex-wrap justify-between items-center gap-3 shadow-sm">
-                      <div>
+                      <div className="space-y-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <strong className="text-sm text-gray-950">{u.full_name}</strong>
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-50 text-[#7a1c24]">{u.permissions?.custom_role_label || ROLE_LABELS[u.role] || u.role}</span>
@@ -842,7 +1201,7 @@ export default function AdminDashboard({
                             </span>
                           )}
 
-                          {u.detailed_stage && SERVANT_ROLES.includes(u.role) && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-900">خادم: {u.detailed_stage}</span>}
+                          {u.detailed_stage && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-900">{SERVANT_ROLES.includes(u.role) ? 'خادم' : 'مرحلة'}: {u.detailed_stage}</span>}
                           {u.permissions?.service_gender_scope && SERVANT_ROLES.includes(u.role) && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-50 text-cyan-900">نطاق: {u.permissions.service_gender_scope}</span>}
                           {u.assigned_class && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800">فصل: {u.assigned_class}</span>}
                           {u.permissions?.manage_edu_center && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-900">🎓 مدير مركز تعليمي</span>}
@@ -850,7 +1209,21 @@ export default function AdminDashboard({
                           {u.permissions?.manage_joseph && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-900">🕊️ لجنة يوسف الرامي</span>}
                           {u.permissions?.can_edit_members && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900">✏️ يقدر يعدل</span>}
                         </div>
-                        <p className="text-gray-500 mt-1">
+
+                        {priestCoverage && (
+                          <div className="text-[11px] bg-amber-50/70 border border-amber-200 px-2.5 py-1.5 rounded-xl text-amber-950 space-y-0.5">
+                            <div>
+                              <strong>✝ خدمات ماسكها ({priestCoverage.assignedServices.length}):</strong>{' '}
+                              {priestCoverage.assignedServices.length > 0 ? priestCoverage.assignedServices.join('، ') : 'غير محدد بعد'}
+                            </div>
+                            <div>
+                              <strong>⏳ خدمات غير ماسكها ({priestCoverage.unassignedServices.length}):</strong>{' '}
+                              {priestCoverage.unassignedServices.length > 0 ? priestCoverage.unassignedServices.join('، ') : 'ماسك كل الخدمات'}
+                            </div>
+                          </div>
+                        )}
+
+                        <p className="text-gray-500">
                           يوزر: <code className="text-red-700 font-bold bg-red-50 px-1 rounded">{u.username}</code>
                           {u.phone && ` • 📞 ${u.phone}`}
                           {u.sector && ` • 📍 ${u.sector}`}
@@ -859,7 +1232,32 @@ export default function AdminDashboard({
                         </p>
                       </div>
                       {isAdmin && (
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {u.role === 'priest' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPriestTransferForm(prev => ({
+                                  ...prev,
+                                  fromPriestId: u.id,
+                                  mode: 'replace_priest'
+                                }));
+                                setActiveCard('services');
+                              }}
+                              className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 rounded-xl font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <ArrowLeftRight size={13} /> نقل / تعديل الكاهن
+                            </button>
+                          )}
+                          {canTransferUser && (
+                            <button
+                              type="button"
+                              onClick={() => openSingleTransferModal(u)}
+                              className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-200 rounded-xl font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <ArrowLeftRight size={13} /> نقل
+                            </button>
+                          )}
                           <button
                             onClick={() => {
                               setPermTargetUserId(u.id);
@@ -926,6 +1324,137 @@ export default function AdminDashboard({
       {activeCard === 'services' && (
         <div className="space-y-4 text-xs">
           {renderTopBack('🏫 الخدمات والاجتماعات والفصول التابعة لها')}
+
+          {/* كارت نقل وتعديل الأب الكاهن المسؤول عن خدمة أو فصل */}
+          {isAdmin && (
+            <div className="bg-purple-50/50 p-4 rounded-3xl border-2 border-purple-200 space-y-3 font-bold shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-black flex items-center gap-1.5 text-purple-950">
+                  <ArrowLeftRight size={16} /> ✝ نقل وتعديل الكاهن المسؤول عن خدمة أو فصل (عند تغير السنة أو المسؤوليات)
+                </h3>
+                <div className="flex gap-1 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setPriestTransferForm(prev => ({ ...prev, mode: 'by_service' }))}
+                    className={`px-2.5 py-1 rounded-lg cursor-pointer ${priestTransferForm.mode === 'by_service' ? 'bg-purple-800 text-white' : 'bg-white border text-gray-700'}`}
+                  >
+                    حسب الخدمة
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPriestTransferForm(prev => ({ ...prev, mode: 'by_class' }))}
+                    className={`px-2.5 py-1 rounded-lg cursor-pointer ${priestTransferForm.mode === 'by_class' ? 'bg-purple-800 text-white' : 'bg-white border text-gray-700'}`}
+                  >
+                    حسب فصل محدد
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPriestTransferForm(prev => ({ ...prev, mode: 'replace_priest' }))}
+                    className={`px-2.5 py-1 rounded-lg cursor-pointer ${priestTransferForm.mode === 'replace_priest' ? 'bg-purple-800 text-white' : 'bg-white border text-gray-700'}`}
+                  >
+                    نقل كل فصول كاهن لكاهن
+                  </button>
+                </div>
+              </div>
+
+              <form onSubmit={handlePriestServiceTransfer} className="space-y-2.5">
+                <div className="grid md:grid-cols-4 gap-2">
+                  {priestTransferForm.mode === 'by_service' && (
+                    <div>
+                      <label className="block text-[10px] text-gray-600 mb-0.5">① الخدمة المستهدفة *</label>
+                      <select
+                        className="w-full p-2.5 border rounded-xl bg-white"
+                        value={priestTransferForm.serviceName}
+                        onChange={e => setPriestTransferForm(prev => ({ ...prev, serviceName: e.target.value }))}
+                      >
+                        <option value="">-- اختر الخدمة --</option>
+                        {availableServantServices.map((s, idx) => <option key={idx} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                  )}
+
+                  {priestTransferForm.mode === 'by_class' && (
+                    <div>
+                      <label className="block text-[10px] text-gray-600 mb-0.5">① الفصل المحدد *</label>
+                      <select
+                        className="w-full p-2.5 border rounded-xl bg-white"
+                        value={priestTransferForm.classId}
+                        onChange={e => setPriestTransferForm(prev => ({ ...prev, classId: e.target.value }))}
+                      >
+                        <option value="">-- اختر الفصل --</option>
+                        {services.map(s => <option key={s.id} value={s.id}>{s.class_name} ({s.stage_name})</option>)}
+                      </select>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-[10px] text-gray-600 mb-0.5">
+                      {priestTransferForm.mode === 'replace_priest' ? '① الكاهن الحالي المراد نقله *' : 'الكاهن السابق (اختياري)'}
+                    </label>
+                    <select
+                      className="w-full p-2.5 border rounded-xl bg-white"
+                      value={priestTransferForm.fromPriestId}
+                      onChange={e => setPriestTransferForm(prev => ({ ...prev, fromPriestId: e.target.value }))}
+                    >
+                      <option value="">-- الكل / غير محدد --</option>
+                      {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] text-gray-600 mb-0.5">② الأب الكاهن الجديد المسؤول *</label>
+                    <select
+                      required
+                      className="w-full p-2.5 border rounded-xl bg-white"
+                      value={priestTransferForm.toPriestId}
+                      onChange={e => setPriestTransferForm(prev => ({ ...prev, toPriestId: e.target.value }))}
+                    >
+                      <option value="">-- اختر الأب الكاهن --</option>
+                      {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="flex items-end">
+                    <button
+                      type="submit"
+                      disabled={savingPriestTransfer}
+                      className="w-full p-2.5 bg-purple-800 hover:bg-purple-900 text-white rounded-xl cursor-pointer shadow"
+                    >
+                      {savingPriestTransfer ? 'جاري التحديث...' : 'تطبيق نقل / تعديل الكاهن'}
+                    </button>
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2 text-[11px] text-purple-950 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={priestTransferForm.syncPriestSupervisedServices}
+                    onChange={e => setPriestTransferForm(prev => ({ ...prev, syncPriestSupervisedServices: e.target.checked }))}
+                  />
+                  تحديث قائمة الخدمات المسندة للكاهن تلقائياً (اللي ماسكها واللي مش ماسكها)
+                </label>
+
+                {priestsList.length > 0 && (
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
+                    {priestsList.map(pr => {
+                      const cov = getPriestCoverage(pr.id);
+                      return (
+                        <div key={pr.id} className="bg-white p-2.5 rounded-2xl border space-y-1 text-[11px]">
+                          <div className="font-black text-gray-900">✝ {pr.full_name}</div>
+                          <div className="text-emerald-900">
+                            <strong>ماسك:</strong> {cov.assignedServices.length > 0 ? cov.assignedServices.join('، ') : 'لا يوجد'}
+                          </div>
+                          <div className="text-gray-500">
+                            <strong>مش ماسك:</strong> {cov.unassignedServices.length > 0 ? cov.unassignedServices.join('، ') : 'ماسك الكل'}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </form>
+            </div>
+          )}
 
           {isAdmin && (
             <div className="bg-amber-50/50 p-4 rounded-3xl border-2 border-amber-300 space-y-3 font-bold shadow-sm">
@@ -1193,6 +1722,10 @@ export default function AdminDashboard({
                 s => s.stage_name === grp.group_name || grp.group_name.includes(s.stage_name)
               );
 
+              const priestsInThisService = [...new Set(
+                classesInThisService.map(c => c.priest_id).filter(Boolean)
+              )].map(pid => priestsList.find(p => p.id === pid)).filter(Boolean);
+
               return (
                 <div key={groupKey} className="bg-white p-4 rounded-3xl border-2 border-gray-200 space-y-3 shadow-2xs">
                   <div className="flex flex-wrap justify-between items-start gap-2 border-b pb-2.5">
@@ -1212,6 +1745,11 @@ export default function AdminDashboard({
                           ⏰ {grp.service_day} {grp.start_time && `من ${grp.start_time}`} {grp.end_time && `إلى ${grp.end_time}`}
                         </p>
                       )}
+                      {priestsInThisService.length > 0 && (
+                        <p className="text-[11px] text-purple-900">
+                          ✝ <strong>الكاهن المسؤول:</strong> {priestsInThisService.map(p => p.full_name).join('، ')}
+                        </p>
+                      )}
                       {grp.head_servant_name && (
                         <p className="text-[11px] text-gray-800">⭐ <strong>الأمين:</strong> {grp.head_servant_name}</p>
                       )}
@@ -1225,6 +1763,17 @@ export default function AdminDashboard({
 
                     {isAdmin && (
                       <div className="flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setPriestTransferForm(prev => ({
+                            ...prev,
+                            mode: 'by_service',
+                            serviceName: grp.group_name
+                          }))}
+                          className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-950 rounded-lg font-bold cursor-pointer"
+                        >
+                          ✝ نقل كاهن الخدمة
+                        </button>
                         {grp.has_classes !== false && (
                           <button
                             type="button"
@@ -1275,7 +1824,6 @@ export default function AdminDashboard({
                     )}
                   </div>
 
-                  {/* ربط مستخدمين محددين بهذه الخدمة أو بأحد أقسامها مباشرة */}
                   {isAdmin && (
                     <div className="bg-emerald-50/50 p-2.5 rounded-2xl border border-emerald-200 space-y-2">
                       <div className="flex items-center justify-between gap-2">
@@ -1359,6 +1907,14 @@ export default function AdminDashboard({
                                 <span className="text-gray-400">({matchingScopes.join('، ') || grp.group_name})</span>
                                 <button
                                   type="button"
+                                  onClick={() => openSingleTransferModal(u)}
+                                  className="text-amber-800 hover:underline mr-0.5 cursor-pointer"
+                                  title="نقل هذا المستخدم لخدمة أو فصل آخر"
+                                >
+                                  نقل
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => {
                                     setPermTargetUserId(u.id);
                                     setActiveCard('roles_permissions');
@@ -1404,6 +1960,19 @@ export default function AdminDashboard({
                               </div>
                               {isAdmin && (
                                 <div className="flex gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => setPriestTransferForm(prev => ({
+                                      ...prev,
+                                      mode: 'by_class',
+                                      classId: srv.id,
+                                      fromPriestId: srv.priest_id || ''
+                                    }))}
+                                    className="px-2 py-1 bg-purple-50 text-purple-900 rounded-lg text-[10px] font-bold cursor-pointer"
+                                    title="نقل / تعديل كاهن الفصل"
+                                  >
+                                    ✝ كاهن
+                                  </button>
                                   <button onClick={() => { setEditingSrvId(srv.id); setSrvForm({ ...emptyService, ...srv, class_gender: 'عام' }); document.getElementById('add-class-form')?.scrollIntoView({ behavior: 'smooth' }); }} className="p-1.5 bg-white border rounded-lg cursor-pointer"><Edit3 size={12} /></button>
                                   <button onClick={() => onDeleteService(srv.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer"><Trash2 size={12} /></button>
                                 </div>
@@ -1674,6 +2243,255 @@ export default function AdminDashboard({
         </div>
       )}
 
+      {/* مودال النقل الفردي والجماعي للخدام والمخدومين */}
+      {transferModal.open && isAdmin && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b pb-2">
+              <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5">
+                <ArrowLeftRight size={16} />
+                {transferModal.mode === 'single'
+                  ? `نقل فردي: ${transferModal.singleUser?.full_name || ''}`
+                  : transferModal.targetKind === 'servant'
+                    ? 'نقل جماعي للخدام'
+                    : 'نقل جماعي للمخدومين'}
+              </h3>
+              <button type="button" onClick={() => setTransferModal(prev => ({ ...prev, open: false }))} className="p-1 text-gray-500 hover:text-gray-800 cursor-pointer">
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmTransfer} className="space-y-3">
+              {transferModal.mode === 'bulk' && (
+                <div className="bg-gray-50 p-3 rounded-2xl border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-800">اختر الفئة للنقل الجماعي:</span>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setTransferModal(prev => ({
+                          ...prev,
+                          targetKind: 'servant',
+                          selectedUserIds: [],
+                          filterSourceService: '',
+                          filterSourceClass: '',
+                          targetClasses: [],
+                          targetSingleClass: ''
+                        }))}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] cursor-pointer ${transferModal.targetKind === 'servant' ? 'bg-[#7a1c24] text-white' : 'bg-white border'}`}
+                      >
+                        الخدام ({servantsList.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTransferModal(prev => ({
+                          ...prev,
+                          targetKind: 'member',
+                          selectedUserIds: [],
+                          filterSourceService: '',
+                          filterSourceClass: '',
+                          targetClasses: [],
+                          targetSingleClass: ''
+                        }))}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] cursor-pointer ${transferModal.targetKind === 'member' ? 'bg-[#7a1c24] text-white' : 'bg-white border'}`}
+                      >
+                        المخدومين ({membersList.length})
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block mb-1 text-[10px] text-gray-600">تصفية بالخدمة/المرحلة الحالية:</label>
+                      <select
+                        className="w-full p-2 border rounded-xl bg-white text-[11px]"
+                        value={transferModal.filterSourceService}
+                        onChange={e => setTransferModal(prev => ({ ...prev, filterSourceService: e.target.value, filterSourceClass: '' }))}
+                      >
+                        <option value="">-- الكل --</option>
+                        {availableServantServices.map((s, idx) => <option key={idx} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block mb-1 text-[10px] text-gray-600">تصفية بالفصل الحالي:</label>
+                      <select
+                        className="w-full p-2 border rounded-xl bg-white text-[11px]"
+                        value={transferModal.filterSourceClass}
+                        onChange={e => setTransferModal(prev => ({ ...prev, filterSourceClass: e.target.value }))}
+                      >
+                        <option value="">-- الكل --</option>
+                        {getClassesForService(transferModal.filterSourceService || availableServantServices[0]).map((c, idx) => (
+                          <option key={c.id || idx} value={c.class_name}>{c.class_name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[11px] text-gray-700">المحدد: {transferModal.selectedUserIds.length} من {bulkPoolUsers.length}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allIds = bulkPoolUsers.map(u => u.id);
+                        const allChecked = allIds.length > 0 && allIds.every(id => transferModal.selectedUserIds.includes(id));
+                        setTransferModal(prev => ({ ...prev, selectedUserIds: allChecked ? [] : allIds }));
+                      }}
+                      className="text-[11px] text-[#7a1c24] hover:underline cursor-pointer"
+                    >
+                      تحديد / إلغاء الكل
+                    </button>
+                  </div>
+
+                  <div className="max-h-36 overflow-y-auto bg-white p-2 rounded-xl border space-y-1">
+                    {bulkPoolUsers.length === 0 ? (
+                      <p className="text-[11px] text-gray-400 text-center py-2">لا يوجد أفراد مطابقون للتصفية</p>
+                    ) : (
+                      bulkPoolUsers.map(person => {
+                        const checked = transferModal.selectedUserIds.includes(person.id);
+                        return (
+                          <label key={person.id} className="flex items-center justify-between gap-2 p-1.5 rounded-lg hover:bg-gray-50 cursor-pointer text-[11px]">
+                            <span className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  setTransferModal(prev => ({
+                                    ...prev,
+                                    selectedUserIds: checked
+                                      ? prev.selectedUserIds.filter(id => id !== person.id)
+                                      : [...prev.selectedUserIds, person.id]
+                                  }));
+                                }}
+                              />
+                              <span>{person.full_name}</span>
+                            </span>
+                            <span className="text-[10px] text-gray-500">{person.detailed_stage || '-'} {person.assigned_class ? `(${person.assigned_class})` : ''}</span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {transferModal.targetKind === 'servant' && (
+                <div className="bg-amber-50/60 p-3 rounded-2xl border border-amber-200 space-y-2">
+                  <label className="block text-amber-950">نوع النقل للخادم:</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTransferModal(prev => ({ ...prev, transferAction: 'move' }))}
+                      className={`p-2 rounded-xl border text-[11px] cursor-pointer ${transferModal.transferAction === 'move' ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-gray-800'}`}
+                    >
+                      🔄 نقل للخدمة / الفصول الجديدة
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTransferModal(prev => ({ ...prev, transferAction: 'add' }))}
+                      className={`p-2 rounded-xl border text-[11px] cursor-pointer ${transferModal.transferAction === 'add' ? 'bg-emerald-700 text-white border-emerald-700' : 'bg-white text-gray-800'}`}
+                    >
+                      ➕ إضافة خدمة / فصل بجانب الحالي
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block mb-1 text-[#7a1c24]">① اختر الخدمة / المرحلة الهدف *</label>
+                <select
+                  required
+                  className="w-full p-2.5 border rounded-xl bg-amber-50/40"
+                  value={transferModal.targetService}
+                  onChange={e => setTransferModal(prev => ({
+                    ...prev,
+                    targetService: e.target.value,
+                    targetClasses: [],
+                    targetSingleClass: ''
+                  }))}
+                >
+                  <option value="">-- اختر الخدمة أو المرحلة --</option>
+                  {availableServantServices.map((srvName, idx) => (
+                    <option key={idx} value={srvName}>{srvName}</option>
+                  ))}
+                </select>
+              </div>
+
+              {transferModal.targetKind === 'servant' ? (
+                <div className="bg-blue-50/40 p-3 rounded-2xl border border-blue-200 space-y-2">
+                  <label className="block text-blue-950">② اختر الفصول التابعة لـ ({transferModal.targetService || 'الخدمة'}):</label>
+                  {getClassesForService(transferModal.targetService).length === 0 ? (
+                    <p className="text-[11px] text-gray-400">لا توجد فصول مسجلة تحت هذه الخدمة بعد.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {getClassesForService(transferModal.targetService).map((clsItem) => {
+                        const clsName = clsItem.class_name;
+                        const checked = transferModal.targetClasses.includes(clsName);
+                        return (
+                          <button
+                            key={clsItem.id || clsName}
+                            type="button"
+                            onClick={() => setTransferModal(prev => ({
+                              ...prev,
+                              targetClasses: checked
+                                ? prev.targetClasses.filter(c => c !== clsName)
+                                : [...prev.targetClasses, clsName]
+                            }))}
+                            className={`px-2.5 py-1.5 rounded-xl border text-[11px] cursor-pointer ${
+                              checked ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-gray-800'
+                            }`}
+                          >
+                            {checked ? '✓ ' : '+ '}{clsName}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="pt-1">
+                    <label className="block mb-1 text-[11px] text-cyan-950">نطاق النوع للخادم (اختياري):</label>
+                    <select
+                      className="w-full p-2 border rounded-xl bg-white text-[11px]"
+                      value={transferModal.targetGenderScope}
+                      onChange={e => setTransferModal(prev => ({ ...prev, targetGenderScope: e.target.value }))}
+                    >
+                      <option value="">-- الإبقاء على النطاق الحالي --</option>
+                      <option value="الكل">👥 الكل (بنين وبنات / عام)</option>
+                      <option value="بنين">♂️ بنين فقط (ذكور)</option>
+                      <option value="بنات">♀️ بنات فقط (إناث)</option>
+                    </select>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="block mb-1 text-blue-950">② الفصل التابع للمرحلة الهدف</label>
+                  <select
+                    className="w-full p-2.5 border rounded-xl bg-white"
+                    value={transferModal.targetSingleClass}
+                    onChange={e => setTransferModal(prev => ({ ...prev, targetSingleClass: e.target.value }))}
+                  >
+                    <option value="">-- اختر الفصل --</option>
+                    {getClassesForService(transferModal.targetService).map((clsItem) => (
+                      <option key={clsItem.id || clsItem.class_name} value={clsItem.class_name}>
+                        {clsItem.class_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setTransferModal(prev => ({ ...prev, open: false }))} className="px-4 py-2 border rounded-xl cursor-pointer">
+                  إلغاء
+                </button>
+                <button type="submit" disabled={savingTransfer} className="px-5 py-2 bg-[#7a1c24] text-white rounded-xl shadow cursor-pointer">
+                  {savingTransfer ? 'جاري التنفيذ...' : 'تأكيد النقل ✅'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {showModal && isAdmin && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto">
@@ -1831,18 +2649,39 @@ export default function AdminDashboard({
 
               {formData.role === 'member' && (
                 <>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
-                      <label className="block mb-1">المرحلة / الخدمة</label>
-                      <select className="w-full p-2.5 border rounded-xl bg-amber-50/40" value={formData.detailed_stage} onChange={e => setFormData({ ...formData, detailed_stage: e.target.value })}>
+                      <label className="block mb-1">① المرحلة / الخدمة</label>
+                      <select
+                        className="w-full p-2.5 border rounded-xl bg-amber-50/40"
+                        value={formData.detailed_stage}
+                        onChange={e => {
+                          const nextStage = e.target.value;
+                          const nextStageClasses = getClassesForService(nextStage);
+                          const keepCurrentClass = nextStageClasses.some(c => c.class_name === formData.assigned_class);
+                          setFormData({
+                            ...formData,
+                            detailed_stage: nextStage,
+                            assigned_class: keepCurrentClass ? formData.assigned_class : ''
+                          });
+                        }}
+                      >
                         {allGroupStagesFlat.map((st, i) => <option key={i} value={st}>{st}</option>)}
                       </select>
                     </div>
                     <div>
-                      <label className="block mb-1">الفصل المسجل به</label>
-                      <select className="w-full p-2.5 border rounded-xl bg-white" value={formData.assigned_class || ''} onChange={e => setFormData({ ...formData, assigned_class: e.target.value })}>
+                      <label className="block mb-1">② الفصل التابع للمرحلة</label>
+                      <select
+                        className="w-full p-2.5 border rounded-xl bg-white"
+                        value={formData.assigned_class || ''}
+                        onChange={e => setFormData({ ...formData, assigned_class: e.target.value })}
+                      >
                         <option value="">-- اختر الفصل --</option>
-                        {services.map(srv => <option key={srv.id} value={srv.class_name}>{srv.class_name} ({srv.stage_name})</option>)}
+                        {getClassesForService(formData.detailed_stage).map((srv) => (
+                          <option key={srv.id || srv.class_name} value={srv.class_name}>
+                            {srv.class_name}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   </div>
@@ -1878,115 +2717,70 @@ export default function AdminDashboard({
 
                   <div>
                     <label className="block mb-1.5 text-[#7a1c24] font-extrabold">
-                      📖 جروبات ومراحل الخدمة للخادم (يمكن اختيار خدمة واحدة أو أكثر كابتدائي + إعدادي أو ثانوي + اجتماع):
+                      ① اختر الخدمة التابعة للخادم (يمكن اختيار أكثر من خدمة):
                     </label>
-                    <div className="space-y-2 max-h-56 overflow-y-auto bg-white p-2.5 rounded-xl border">
-                      {effectiveGroups.map((grp, gIdx) => {
-                        const gName = grp.group_name;
-                        const stagesArr = normalizeGroupStages(grp.stages);
-                        const groupMainSelected = selectedServantStages.includes(gName);
-                        const allGroupSelected = stagesArr.length > 0
-                          ? stagesArr.every(st => selectedServantStages.includes(st)) && groupMainSelected
-                          : groupMainSelected;
-
+                    <div className="flex flex-wrap gap-1.5 bg-white p-2.5 rounded-xl border max-h-36 overflow-y-auto">
+                      {availableServantServices.map((srvName, idx) => {
+                        const isSelected = selectedServantStages.includes(srvName);
                         return (
-                          <div key={grp.id || gIdx} className="p-2 bg-gray-50 rounded-xl border space-y-1.5">
-                            <div className="flex justify-between items-center gap-2">
-                              <label className="flex items-center gap-1.5 text-[11px] text-[#7a1c24] font-black cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={groupMainSelected}
-                                  onChange={() => toggleMultiFieldValue('detailed_stage', gName)}
-                                />
-                                <span>{grp.icon || '📌'} {gName}</span>
-                              </label>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const next = allGroupSelected
-                                    ? selectedServantStages.filter(x => !stagesArr.includes(x) && x !== gName)
-                                    : [...new Set([...selectedServantStages, ...stagesArr, gName])];
-                                  setFormData({ ...formData, detailed_stage: next.join(', ') });
-                                }}
-                                className={`px-2 py-0.5 rounded-lg text-[10px] font-black cursor-pointer ${allGroupSelected ? 'bg-[#7a1c24] text-white' : 'bg-amber-100 text-amber-950'}`}
-                              >
-                                {allGroupSelected ? '✓ الجروب كله محدد' : '+ تحديد الجروب كله'}
-                              </button>
-                            </div>
-                            {stagesArr.length > 0 && (
-                              <div className="flex flex-wrap gap-1.5">
-                                {stagesArr.map((st, i) => {
-                                  const checked = selectedServantStages.includes(st);
-                                  return (
-                                    <label
-                                      key={i}
-                                      className={`flex items-center gap-1 px-2 py-1 rounded-lg border cursor-pointer text-[11px] ${
-                                        checked ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-gray-800'
-                                      }`}
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        className="hidden"
-                                        checked={checked}
-                                        onChange={() => toggleMultiFieldValue('detailed_stage', st)}
-                                      />
-                                      {checked ? '✓ ' : ''}{st}
-                                    </label>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => toggleMultiFieldValue('detailed_stage', srvName)}
+                            className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold cursor-pointer transition ${
+                              isSelected
+                                ? 'bg-[#7a1c24] text-white border-[#7a1c24]'
+                                : 'bg-gray-50 text-gray-800 hover:bg-amber-50'
+                            }`}
+                          >
+                            {isSelected ? '✓ ' : '+ '}{srvName}
+                          </button>
                         );
                       })}
-
-                      {dynamicExtraStages.length > 0 && (
-                        <div className="p-2 bg-amber-50/50 rounded-xl border space-y-1.5">
-                          <strong className="text-[11px] text-amber-950 block">✨ خدمات مضافة أخرى:</strong>
-                          <div className="flex flex-wrap gap-1.5">
-                            {dynamicExtraStages.map((st, i) => {
-                              const checked = selectedServantStages.includes(st);
-                              return (
-                                <label
-                                  key={i}
-                                  className={`flex items-center gap-1 px-2 py-1 rounded-lg border cursor-pointer text-[11px] ${
-                                    checked ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-gray-800'
-                                  }`}
-                                >
-                                  <input type="checkbox" className="hidden" checked={checked} onChange={() => toggleMultiFieldValue('detailed_stage', st)} />
-                                  {checked ? '✓ ' : ''}{st}
-                                </label>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
                     </div>
                   </div>
 
-                  {services.length > 0 && (
-                    <div>
-                      <label className="block mb-1.5 text-blue-950 font-extrabold">
-                        🏫 الفصول التي يخدم بها (يمكنك اختيار أكثر من فصل):
+                  {selectedServantStages.length > 0 && (
+                    <div className="space-y-2">
+                      <label className="block text-blue-950 font-extrabold">
+                        ② اختر الفصول التابعة لكل خدمة للخادم:
                       </label>
-                      <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto bg-white p-2 rounded-xl border">
-                        {services.map(srv => {
-                          const checked = selectedServantClasses.includes(srv.class_name);
+                      <div className="space-y-2 max-h-56 overflow-y-auto">
+                        {selectedServantStages.map((srvName, sIdx) => {
+                          const srvClasses = getClassesForService(srvName);
                           return (
-                            <label
-                              key={srv.id}
-                              className={`flex items-center gap-1 px-2 py-1 rounded-lg border cursor-pointer text-[11px] ${
-                                checked ? 'bg-blue-700 text-white border-blue-700' : 'bg-gray-50 text-gray-800'
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                className="hidden"
-                                checked={checked}
-                                onChange={() => toggleMultiFieldValue('assigned_class', srv.class_name)}
-                              />
-                              {checked ? '✓ ' : ''}{srv.class_name}
-                            </label>
+                            <div key={sIdx} className="bg-white p-2.5 rounded-xl border space-y-1.5">
+                              <div className="text-[11px] font-black text-[#7a1c24] flex items-center justify-between">
+                                <span>📌 فصول خدمة: {srvName}</span>
+                                <span className="text-[10px] text-gray-400">{srvClasses.length} خيار</span>
+                              </div>
+                              {srvClasses.length === 0 ? (
+                                <p className="text-[11px] text-gray-400">لا توجد فصول مسجلة تحت هذه الخدمة بعد.</p>
+                              ) : (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {srvClasses.map((clsItem) => {
+                                    const clsName = clsItem.class_name;
+                                    const checked = selectedServantClasses.includes(clsName);
+                                    return (
+                                      <label
+                                        key={clsItem.id || clsName}
+                                        className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border cursor-pointer text-[11px] ${
+                                          checked ? 'bg-blue-700 text-white border-blue-700' : 'bg-gray-50 text-gray-800'
+                                        }`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          className="hidden"
+                                          checked={checked}
+                                          onChange={() => toggleMultiFieldValue('assigned_class', clsName)}
+                                        />
+                                        {checked ? '✓ ' : ''}{clsName}
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
                           );
                         })}
                       </div>
