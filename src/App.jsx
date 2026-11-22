@@ -38,10 +38,21 @@ const ROLE_TEXT = {
   worker: '🛠️ عامل / فراش الكنيسة'
 };
 
+// تحديد الشاشة الافتراضية بعد تسجيل الدخول بحيث تفتح التابات واللوحة الرئيسية ولا تُجبر على صفحة الكنيسة العامة
+function getPostLoginScreen(user, roleScreens) {
+  const { allowed, defaultScreen } = resolveScreens(user, roleScreens);
+  if (defaultScreen && defaultScreen !== 'public_page' && allowed.has(defaultScreen)) {
+    return defaultScreen;
+  }
+  const nonPublicTab = Array.from(allowed).find(scr => scr !== 'public_page');
+  return nonPublicTab || defaultScreen || '';
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [authView, setAuthView] = useState('public'); // 'public' | 'login' | 'edu_public' | 'joseph_public'
   const [loginError, setLoginError] = useState('');
+  const [registerMessage, setRegisterMessage] = useState('');
   const [activeScreen, setActiveScreen] = useState('');
   const [extraScreen, setExtraScreen] = useState(''); // '' | 'edu_center' | 'joseph_arimathea'
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -130,21 +141,22 @@ export default function App() {
     return () => stopSession();
   }, [currentUser?.id]);
 
+  // ضبط الشاشة الافتراضية على لوحة التابات والاختيارات بدون إجبار الدخول على صفحة الكنيسة العامة
   useEffect(() => {
     if (!currentUser) {
       setActiveScreen('');
       setExtraScreen('');
       return;
     }
-    const { allowed, defaultScreen } = resolveScreens(currentUser, roleScreens);
-    const startScr = allowed.has('public_page') ? 'public_page' : defaultScreen;
+    const { allowed } = resolveScreens(currentUser, roleScreens);
     if (!activeScreen || !allowed.has(activeScreen)) {
-      setActiveScreen(startScr || '');
+      setActiveScreen(getPostLoginScreen(currentUser, roleScreens));
     }
   }, [currentUser, roleScreens]);
 
   const handleLogin = async (username, password) => {
     setLoginError('');
+    setRegisterMessage('');
     const { data: user, error } = await supabase
       .from('church_users').select('*')
       .eq('username', username.trim().toLowerCase())
@@ -163,9 +175,7 @@ export default function App() {
       setCurrentUser(user);
       setExtraScreen('');
       setMobileMenuOpen(false);
-      const { allowed, defaultScreen } = resolveScreens(user, roleScreens);
-      const startScr = allowed.has('public_page') ? 'public_page' : defaultScreen;
-      setActiveScreen(startScr || '');
+      setActiveScreen(getPostLoginScreen(user, roleScreens));
       fetchData();
     } else {
       setLoginError('اسم المستخدم أو كلمة المرور غير صحيحة.');
@@ -182,52 +192,108 @@ export default function App() {
     setMobileMenuOpen(false);
   };
 
-  const buildUserPayload = (u) => ({
-    username: u.username.trim().toLowerCase(),
-    password: u.password,
-    full_name: u.full_name,
-    first_name: u.first_name || '', second_name: u.second_name || '',
-    third_name: u.third_name || '', fourth_name: u.fourth_name || '',
-    role: u.role, sector: u.sector || '',
-    detailed_stage: u.detailed_stage || u.service_stage || 'أولى ابتدائي',
-    service_stage: u.detailed_stage || u.service_stage || 'أولى ابتدائي',
-    assigned_class: u.assigned_class || u.assigned_service_class || '',
-    servant_training_status: u.servant_training_status || 'خادم متكلم (اجتاز إعداد خدام)',
-    family_role: u.family_role || 'ابن/ابنة',
-    phone: u.phone || '',
-    whatsapp_sender_phone: u.whatsapp_sender_phone || '',
-    can_manage_wa_templates: u.can_manage_wa_templates !== false,
-    is_church_member: u.is_church_member !== false,
-    dob: u.dob || null, address: u.address || '',
-    job_title: u.job_title || '',
-    housing_type: u.housing_type || 'تمليك',
-    is_studying: Boolean(u.is_studying),
-    marital_status: u.marital_status || 'أعزب',
-    spouse_name: u.spouse_name || '',
-    spouse_phone: u.spouse_phone || '',
-    children_names: u.children_names || '',
-    parent_id: u.parent_id || null,
-    father_id: u.father_id || null,
-    confession_father_id: u.confession_father_id || null,
-    confession_father: u.confession_father || '',
-    confession_status: u.confession_status || 'مخدوم جديد',
-    has_communion: u.has_communion ?? true,
-    father_full_name: u.father_full_name || '',
-    mother_full_name: u.mother_full_name || '',
-    father_phone: u.father_phone || '',
-    mother_phone: u.mother_phone || '',
-    is_deacon: Boolean(u.is_deacon),
-    deacon_rank: u.deacon_rank || '',
-    priest_degree: u.priest_degree || 'قس',
-    ordination_date: u.ordination_date || null,
-    promotion_date: u.promotion_date || null,
-    priest_family_notes: u.priest_family_notes || '',
-    priest_wife_full_name: u.priest_wife_full_name || '',
-    priest_wife_phone: u.priest_wife_phone || '',
-    church_job: u.church_job || '',
-    permissions: u.permissions || {},
-    status: u.status || 'approved'
-  });
+  const buildUserPayload = (u) => {
+    // توحيد نوع ولي الأمر: 'father' (الأب) أو 'mother' (الأم)
+    const normalizedGuardianType =
+      u.guardian_type === 'father' || u.guardian_type === 'الأب' || u.guardian_type === 'أب'
+        ? 'father'
+        : u.guardian_type === 'mother' || u.guardian_type === 'الأم' || u.guardian_type === 'أم'
+          ? 'mother'
+          : (u.role === 'parent'
+              ? (u.family_role === 'أم' || u.family_role === 'الأم' ? 'mother' : 'father')
+              : (u.guardian_type || ''));
+
+    const resolvedFamilyRole =
+      u.family_role ||
+      (normalizedGuardianType === 'father' ? 'الأب' : normalizedGuardianType === 'mother' ? 'الأم' : 'ابن/ابنة');
+
+    const resolvedFatherId =
+      u.father_id || (normalizedGuardianType === 'father' && u.parent_id ? u.parent_id : null);
+
+    const resolvedMotherId =
+      u.mother_id || (normalizedGuardianType === 'mother' && u.parent_id ? u.parent_id : null);
+
+    return {
+      username: u.username.trim().toLowerCase(),
+      password: u.password,
+      full_name: u.full_name,
+      first_name: u.first_name || '',
+      second_name: u.second_name || '',
+      third_name: u.third_name || '',
+      fourth_name: u.fourth_name || '',
+      role: u.role,
+      sector: u.sector || '',
+      detailed_stage: u.detailed_stage || u.service_stage || 'أولى ابتدائي',
+      service_stage: u.detailed_stage || u.service_stage || 'أولى ابتدائي',
+      assigned_class: u.assigned_class || u.assigned_service_class || '',
+      servant_training_status: u.servant_training_status || 'خادم متكلم (اجتاز إعداد خدام)',
+      family_role: resolvedFamilyRole,
+      guardian_type: normalizedGuardianType,
+      phone: u.phone || '',
+      whatsapp_sender_phone: u.whatsapp_sender_phone || '',
+      can_manage_wa_templates: u.can_manage_wa_templates !== false,
+      is_church_member: u.is_church_member !== false,
+      dob: u.dob || null,
+      address: u.address || '',
+      job_title: u.job_title || '',
+      housing_type: u.housing_type || 'تمليك',
+      is_studying: Boolean(u.is_studying),
+      marital_status: u.marital_status || 'أعزب',
+      spouse_name: u.spouse_name || '',
+      spouse_phone: u.spouse_phone || '',
+      children_names: u.children_names || '',
+      parent_id: u.parent_id || resolvedFatherId || resolvedMotherId || null,
+      father_id: resolvedFatherId,
+      mother_id: resolvedMotherId,
+      confession_father_id: u.confession_father_id || null,
+      confession_father: u.confession_father || '',
+      confession_status: u.confession_status || 'مخدوم جديد',
+      has_communion: u.has_communion ?? true,
+      father_full_name: u.father_full_name || '',
+      mother_full_name: u.mother_full_name || '',
+      father_phone: u.father_phone || '',
+      mother_phone: u.mother_phone || '',
+      is_deacon: Boolean(u.is_deacon),
+      deacon_rank: u.deacon_rank || '',
+      priest_degree: u.priest_degree || 'قس',
+      ordination_date: u.ordination_date || null,
+      promotion_date: u.promotion_date || null,
+      priest_family_notes: u.priest_family_notes || '',
+      priest_wife_full_name: u.priest_wife_full_name || '',
+      priest_wife_phone: u.priest_wife_phone || '',
+      church_job: u.church_job || '',
+      permissions: {
+        ...(u.permissions || {}),
+        ...(normalizedGuardianType ? { guardian_type: normalizedGuardianType } : {})
+      },
+      status: u.status || 'approved'
+    };
+  };
+
+  // تسجيل اشتراك جديد من صفحة الدخول مع تحديد ولي الأمر (الأب / الأم)
+  const handleRegisterFromLogin = async (newUserData) => {
+    setLoginError('');
+    setRegisterMessage('');
+    const payload = buildUserPayload({
+      ...newUserData,
+      status: newUserData.status || 'pending'
+    });
+    const { data, error } = await supabase.from('church_users').insert([payload]).select().single();
+    if (!error && data) {
+      setUsers(prev => [...prev, data]);
+      const guardianLabel =
+        payload.guardian_type === 'father'
+          ? ' (ولي الأمر: الأب)'
+          : payload.guardian_type === 'mother'
+            ? ' (ولي الأمر: الأم)'
+            : '';
+      setRegisterMessage(`✅ تم إرسال طلب الاشتراك بنجاح${guardianLabel} وهو قيد مراجعة الإدارة.`);
+      return true;
+    } else {
+      setLoginError('خطأ في تسجيل الاشتراك: ' + (error?.message || 'تأكد من عدم تكرار اسم الدخول'));
+      return false;
+    }
+  };
 
   // ====== CRUD Users ======
   const handleAddUser = async (u) => {
@@ -237,8 +303,11 @@ export default function App() {
   };
   const handleUpdateUser = async (updated) => {
     const { data, error } = await supabase.from('church_users').update(buildUserPayload(updated)).eq('id', updated.id).select().single();
-    if (!error && data) { setUsers(users.map(item => (item.id === updated.id ? data : item))); alert('تم التعديل بنجاح!'); }
-    else alert('خطأ في التعديل: ' + error?.message);
+    if (!error && data) {
+      setUsers(users.map(item => (item.id === updated.id ? data : item)));
+      if (currentUser?.id === updated.id) setCurrentUser(data);
+      alert('تم التعديل بنجاح!');
+    } else alert('خطأ في التعديل: ' + error?.message);
   };
   const handleDeleteUser = async (id) => {
     if (id === currentUser.id) return alert('لا يمكنك حذف حسابك الحالي!');
@@ -247,12 +316,28 @@ export default function App() {
     if (!error) setUsers(users.filter(u => u.id !== id));
   };
 
-  // ====== ربط / فك ربط الأبناء بولي الأمر (على نفس عمود parent_id في church_users) ======
-  const handleLinkChild = async (childId, shouldLink = true) => {
-    const newParentId = shouldLink ? currentUser.id : null;
+  // ====== ربط / فك ربط الأبناء بولي الأمر (الأب أو الأم) ======
+  const handleLinkChild = async (childId, shouldLink = true, guardianRole = null) => {
+    const resolvedType =
+      guardianRole === 'mother' || guardianRole === 'الأم'
+        ? 'mother'
+        : guardianRole === 'father' || guardianRole === 'الأب'
+          ? 'father'
+          : (currentUser.guardian_type === 'mother' || currentUser.family_role === 'الأم' ? 'mother' : 'father');
+
+    const updateFields = shouldLink
+      ? {
+          parent_id: currentUser.id,
+          ...(resolvedType === 'mother' ? { mother_id: currentUser.id } : { father_id: currentUser.id })
+        }
+      : {
+          parent_id: null,
+          ...(resolvedType === 'mother' ? { mother_id: null } : { father_id: null })
+        };
+
     const { data, error } = await supabase
       .from('church_users')
-      .update({ parent_id: newParentId })
+      .update(updateFields)
       .eq('id', childId)
       .select()
       .single();
@@ -357,9 +442,12 @@ export default function App() {
       return (
         <LoginPage
           churchName={churchName}
+          users={users}
           onLogin={handleLogin}
+          onRegister={handleRegisterFromLogin}
           error={loginError}
-          onBackToPublic={() => { setLoginError(''); setAuthView('public'); }}
+          successMessage={registerMessage}
+          onBackToPublic={() => { setLoginError(''); setRegisterMessage(''); setAuthView('public'); }}
         />
       );
     }
@@ -438,10 +526,11 @@ export default function App() {
   }
 
   // ==============================================================
-  // 2) شاشة المستخدم بعد تسجيل الدخول
+  // 2) شاشة المستخدم بعد تسجيل الدخول (التابات أمامه والاختيار بيده)
   // ==============================================================
   const { allowed, defaultScreen } = resolveScreens(currentUser, roleScreens);
-  const currentScr = activeScreen && allowed.has(activeScreen) ? activeScreen : defaultScreen;
+  const fallbackTab = getPostLoginScreen(currentUser, roleScreens);
+  const currentScr = activeScreen && allowed.has(activeScreen) ? activeScreen : fallbackTab;
 
   const isAdmin = currentUser.role === 'admin';
   const isPriest = currentUser.role === 'priest';
@@ -476,7 +565,10 @@ export default function App() {
 
   const allServants = users.filter(u => ['servant', 'head_servant', 'vice_head_servant', 'meeting_servant', 'mercy_servant'].includes(u.role));
   const myChildrenAsParent = users.filter(
-    u => u.parent_id === currentUser.id || u.father_id === currentUser.id
+    u =>
+      u.parent_id === currentUser.id ||
+      u.father_id === currentUser.id ||
+      u.mother_id === currentUser.id
   );
   const priestFamilies = families.filter(f => f.priest_id === currentUser.id);
   const upcomingBirthdays = getUpcomingBirthdays(users, isPriest ? priestFamilies : families);
@@ -487,6 +579,7 @@ export default function App() {
     ...memberActivities.map(a => ({ id: a.id, member_id: a.member_id, event_date: a.activity_date, event_type: a.activity_type, present: a.attended }))
   ];
 
+  // يدخل صفحة الكنيسة فقط عندما يختارها المستخدم صراحةً من التابات
   if (!extraScreen && currentScr === 'public_page') {
     return (
       <PublicPage
@@ -502,12 +595,13 @@ export default function App() {
         onOpenJoseph={() => setExtraScreen('joseph_arimathea')}
         onBackToApp={() => {
           setExtraScreen('');
-          setActiveScreen(defaultScreen !== 'public_page' ? defaultScreen : (Array.from(allowed).find(s => s !== 'public_page') || 'public_page'));
+          setActiveScreen(fallbackTab !== 'public_page' ? fallbackTab : (Array.from(allowed).find(s => s !== 'public_page') || 'public_page'));
         }}
       />
     );
   }
 
+  // ترتيب التابات بحيث تظهر التابات أولاً ويختار منها المستخدم ما يشاء
   const navScreens = Array.from(new Set(SCREEN_ORDER)).filter(s => {
     if (s === 'edu_center' || s === 'joseph_arimathea') return false;
     if (s === 'public_editor') return canEditPublic;
@@ -551,6 +645,11 @@ export default function App() {
                 {currentUser.is_deacon && (
                   <span className="hidden sm:inline-block px-2 py-0.5 bg-amber-400/20 text-amber-200 rounded-full text-[10px] font-bold">
                     شماس ({currentUser.deacon_rank})
+                  </span>
+                )}
+                {(currentUser.guardian_type || currentUser.family_role === 'الأب' || currentUser.family_role === 'الأم') && (
+                  <span className="px-2 py-0.5 bg-emerald-400/20 text-emerald-200 rounded-full text-[10px] font-bold">
+                    {currentUser.guardian_type === 'mother' || currentUser.family_role === 'الأم' ? 'ولي الأمر: الأم' : 'ولي الأمر: الأب'}
                   </span>
                 )}
               </div>
@@ -741,6 +840,7 @@ export default function App() {
             activities={memberActivities} memberNotes={memberNotes}
             birthdays={upcomingBirthdays}
             onAddMember={handleAddMemberByServant} onSaveActivity={handleSaveActivity} onSaveMemberNote={handleSaveMemberNote}
+            onUpdateMember={handleUpdateUser}
           />
         )}
 
@@ -772,11 +872,12 @@ export default function App() {
             events={churchEvents}
             services={churchServices}
             onLinkChild={handleLinkChild}
+            onUpdateParent={handleUpdateUser}
           />
         )}
 
         {!extraScreen && currentScr === 'approvals' && (
-          <ApprovalsPage users={users} services={churchServices} onRefresh={fetchData} />
+          <ApprovalsPage users={users} services={churchServices} onRefresh={fetchData} onUpdateUser={handleUpdateUser} />
         )}
 
         {!extraScreen && currentScr === 'permissions' && (
