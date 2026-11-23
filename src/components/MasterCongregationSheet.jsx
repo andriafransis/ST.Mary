@@ -90,6 +90,8 @@ export default function MasterCongregationSheet({
   const canAccess = canExtractMasterSheet(currentUser);
   const canEditStatus = ['admin', 'priest', 'head_servant'].includes(currentUser?.role) ||
     Boolean(currentUser?.permissions?.can_edit_members);
+  // تغيير الخدمة مسموح للأدمن فقط
+  const canReassignService = currentUser?.role === 'admin';
 
   const [serviceTab, setServiceTab] = useState('all');
   const [roleFilter, setRoleFilter] = useState('all');
@@ -232,22 +234,28 @@ export default function MasterCongregationSheet({
     );
   }
 
-  const persistUserPatch = async (row, patch) => {
-    if (!canEditStatus) return;
+  const persistUserPatch = async (row, patch, allowAction) => {
+    if (!allowAction) return;
     setSavingRowId(row.id);
     try {
-      if (onUpdateUser) {
-        await onUpdateUser({ ...row, ...patch });
-      } else if (supabase && typeof supabase.from === 'function') {
+      if (supabase && typeof supabase.from === 'function') {
         const { error } = await supabase
           .from('church_users')
           .update(patch)
           .eq('id', row.id);
+
         if (error) {
-          alert('تعذر تحديث البيانات: ' + error.message);
+          alert('تعذر حفظ التعديل في قاعدة البيانات: ' + error.message);
           return;
         }
-        if (onRefresh) await onRefresh();
+      }
+
+      if (typeof onUpdateUser === 'function') {
+        await onUpdateUser({ ...row, ...patch });
+      }
+
+      if (typeof onRefresh === 'function') {
+        await onRefresh();
       }
     } finally {
       setSavingRowId(null);
@@ -255,15 +263,20 @@ export default function MasterCongregationSheet({
   };
 
   const handleStatusChange = (row, nextStatus) =>
-    persistUserPatch(row, { member_status: nextStatus });
+    persistUserPatch(row, { member_status: nextStatus }, canEditStatus);
 
   const handleServiceChange = (row, nextService) => {
+    if (!canReassignService) return;
     const noClass = NO_CLASS_SERVICES.some(name => nextService.includes(name));
-    return persistUserPatch(row, {
-      service_stage: nextService,
-      detailed_stage: noClass ? null : nextService,
-      assigned_class: noClass ? null : row.assigned_class
-    });
+    return persistUserPatch(
+      row,
+      {
+        service_stage: nextService,
+        detailed_stage: noClass ? null : nextService,
+        assigned_class: noClass ? null : row.assigned_class
+      },
+      true
+    );
   };
 
   const handleExportCSV = () => {
@@ -349,7 +362,6 @@ export default function MasterCongregationSheet({
           </div>
         </div>
 
-        {/* تبويبات الخدمات: كل خدمة تعرض حاجتها لوحدها */}
         <div className="flex flex-wrap gap-1.5 bg-[#fbfaf7] p-2.5 rounded-2xl border border-gray-200 print:hidden">
           <button
             type="button"
@@ -389,7 +401,6 @@ export default function MasterCongregationSheet({
           })}
         </div>
 
-        {/* بطاقات إحصائية سريعة */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
           <div className="bg-[#fbfaf7] border border-gray-200 rounded-2xl p-3">
             <div className="flex items-center justify-between text-gray-500 font-bold">
@@ -440,7 +451,6 @@ export default function MasterCongregationSheet({
           </div>
         </div>
 
-        {/* الفلاتر */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-2.5 print:hidden">
           <div className="relative lg:col-span-2">
             <Search size={15} className="absolute right-3 top-2.5 text-gray-400" />
@@ -522,7 +532,6 @@ export default function MasterCongregationSheet({
         </div>
       </div>
 
-      {/* جدول التسلسل */}
       <div className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="hidden print:block p-4 border-b text-center">
           <h3 className="text-base font-black text-[#7a1c24]">{sheetTitleNote} — {churchName}</h3>
@@ -577,7 +586,7 @@ export default function MasterCongregationSheet({
                         )}
                       </td>
                       <td className="p-3 whitespace-nowrap">
-                        {canEditStatus ? (
+                        {canReassignService ? (
                           <select
                             disabled={savingRowId === row.id}
                             value={row.detectedService}
