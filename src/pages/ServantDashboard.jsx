@@ -3,7 +3,7 @@ import {
   Phone, Search, UserPlus, Calendar, MessageSquareText, Layers,
   MessageCircle, AlertTriangle, Users, MapPin, X, FileSpreadsheet,
   ArrowRight, BookOpen, Plus, Pencil, Trash2, Check, LayoutGrid, List,
-  ClipboardCheck, HeartHandshake, CheckCircle2, SlidersHorizontal, Camera, Clock
+  ClipboardCheck, HeartHandshake, CheckCircle2, SlidersHorizontal, Camera, Cake, Award
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BirthdayBanner from '../components/BirthdayBanner';
@@ -87,6 +87,17 @@ const parseTimeToMinutes = (timeStr = '') => {
   return hrs * 60 + mins;
 };
 
+const getBirthMonthDay = (dobStr) => {
+  if (!dobStr) return null;
+  const parts = String(dobStr).trim().split(/[-/]/);
+  if (parts.length < 3) return null;
+  // يدعم YYYY-MM-DD أو DD/MM/YYYY
+  if (parts[0].length === 4) {
+    return { month: Number(parts[1]), day: Number(parts[2]) };
+  }
+  return { month: Number(parts[1]), day: Number(parts[0]) };
+};
+
 const compressPhotoFile = (file, maxSide = 480, quality = 0.72) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -163,6 +174,9 @@ export default function ServantDashboard({
   const cameraInputRef = useRef(null);
   const pendingPhotoMemberRef = useRef(null);
 
+  // إشعارات أعياد الميلاد جوه شاشة الخادم: 'members' | 'servants'
+  const [birthdayTab, setBirthdayTab] = useState('members');
+
   const [noteTags, setNoteTags] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(CUSTOM_ITEMS_STORAGE_KEY) || '{}');
@@ -210,7 +224,16 @@ export default function ServantDashboard({
     }
   });
 
-  // المواعيد الرسمية وفترة السماح التي يحددها الأدمن أو أبونا
+  // حد المواظبة لاستحقاق رحلة مجانية أو مكافأة
+  const [rewardStreakThreshold, setRewardStreakThreshold] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CUSTOM_ITEMS_STORAGE_KEY) || '{}');
+      return Number(saved.rewardStreakThreshold) > 0 ? Number(saved.rewardStreakThreshold) : 4;
+    } catch {
+      return 4;
+    }
+  });
+
   const [officialStartTime, setOfficialStartTime] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(CUSTOM_ITEMS_STORAGE_KEY) || '{}');
@@ -245,7 +268,8 @@ export default function ServantDashboard({
     nextIrregularThreshold = irregularThreshold,
     nextAbsenceDaysThreshold = absenceDaysThreshold,
     nextOfficialStartTime = officialStartTime,
-    nextGraceMinutes = graceMinutes
+    nextGraceMinutes = graceMinutes,
+    nextRewardStreakThreshold = rewardStreakThreshold
   ) => {
     const payload = {
       noteTags: nextNoteTags,
@@ -254,7 +278,8 @@ export default function ServantDashboard({
       irregularThreshold: nextIrregularThreshold,
       absenceDaysThreshold: nextAbsenceDaysThreshold,
       officialStartTime: nextOfficialStartTime,
-      graceMinutes: nextGraceMinutes
+      graceMinutes: nextGraceMinutes,
+      rewardStreakThreshold: nextRewardStreakThreshold
     };
     try {
       localStorage.setItem(CUSTOM_ITEMS_STORAGE_KEY, JSON.stringify(payload));
@@ -313,6 +338,9 @@ export default function ServantDashboard({
         if (Number.isFinite(Number(data.value.graceMinutes)) && Number(data.value.graceMinutes) >= 0) {
           setGraceMinutes(Number(data.value.graceMinutes));
         }
+        if (Number(data.value.rewardStreakThreshold) > 0) {
+          setRewardStreakThreshold(Number(data.value.rewardStreakThreshold));
+        }
       } catch {
         // تجاهل إذا لم يكن الجدول موجوداً
       }
@@ -363,12 +391,6 @@ export default function ServantDashboard({
     if (activityTypes.length <= 1) return alert('يجب الإبقاء على نوع واحد على الأقل.');
     const updated = activityTypes.filter(t => t !== typeToRemove);
     setActivityTypes(updated);
-    if (batchActForm.activity_type === typeToRemove) {
-      setBatchActForm(prev => ({ ...prev, activity_type: updated[0] }));
-    }
-    if (actForm.activity_type === typeToRemove) {
-      setActForm(prev => ({ ...prev, activity_type: updated[0] }));
-    }
     persistCustomItems(noteTags, updated, attendanceStatuses);
   };
 
@@ -395,12 +417,6 @@ export default function ServantDashboard({
     if (attendanceStatuses.length <= 1) return alert('يجب الإبقاء على حالة واحدة على الأقل.');
     const updated = attendanceStatuses.filter(s => s.code !== codeToRemove);
     setAttendanceStatuses(updated);
-    if (batchActForm.status_code === codeToRemove) {
-      setBatchActForm(prev => ({ ...prev, status_code: updated[0].code }));
-    }
-    if (actForm.status_code === codeToRemove) {
-      setActForm(prev => ({ ...prev, status_code: updated[0].code, attended: updated[0].attended }));
-    }
     persistCustomItems(noteTags, activityTypes, updated);
   };
 
@@ -646,17 +662,7 @@ export default function ServantDashboard({
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
 
-  const [batchActForm, setBatchActForm] = useState({
-    activity_date: getTodayLocalDate(),
-    activity_type: activityTypes[0] || 'مدارس أحد',
-    status_code: 'present',
-    expected_time: officialStartTime,
-    check_in_time: getNowHHMM(),
-    check_out_time: '',
-    notes: ''
-  });
-
-  // نافذة تفصيلية تفتح تلقائياً عند الضغط على (تأخير / انصراف مبكر / معتذر) مع أخذ تاريخ اليوم والوقت الحالي
+  // نافذة فورية تفتح تلقائياً عند الضغط على (تأخير / انصراف مبكر / معتذر) مع تاريخ اليوم مقفول والتوقيت الفعلي
   const [quickStatusModal, setQuickStatusModal] = useState({
     open: false,
     member: null,
@@ -668,6 +674,16 @@ export default function ServantDashboard({
     check_in_time: getNowHHMM(),
     check_out_time: getNowHHMM(),
     reason: ''
+  });
+
+  // نافذة تسجيل رحلة مجانية / مكافأة للمخدوم المواظب
+  const [rewardModal, setRewardModal] = useState({
+    open: false,
+    member: null,
+    streakCount: 0,
+    reward_type: 'رحلة مجانية',
+    reward_title: 'رحلة مجانية للمواظبين',
+    notes: ''
   });
 
   const [actModal, setActModal] = useState(false);
@@ -1049,6 +1065,31 @@ export default function ServantDashboard({
     : (servantBoundMainGroups.length > 0 ? servantBoundMainGroups : availableServicesList);
 
   const allMembers = users.filter(u => u.role === 'member');
+  const allServants = users.filter(u => u.role && u.role !== 'member');
+
+  // إشعارات أعياد الميلاد في الشهر الحالي: للمخدومين وللخدام
+  const currentMonth = new Date().getMonth() + 1;
+  const currentToday = new Date().getDate();
+
+  const currentMonthMemberBirthdays = allMembers
+    .map(m => {
+      const md = getBirthMonthDay(m.dob);
+      if (!md || md.month !== currentMonth) return null;
+      return { ...m, birthDay: md.day, birthMonth: md.month };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.birthDay - b.birthDay);
+
+  const currentMonthServantBirthdays = allServants
+    .filter(s => s.id !== servant?.id)
+    .map(s => {
+      const md = getBirthMonthDay(s.dob);
+      if (!md || md.month !== currentMonth) return null;
+      return { ...s, birthDay: md.day, birthMonth: md.month };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.birthDay - b.birthDay);
+
   const scopeMembers = allMembers.filter(m =>
     memberMatchesScope(m, selectedScope, selectedGenderFilter, selectedYearFilter, selectedClassFilter)
   );
@@ -1073,6 +1114,9 @@ export default function ServantDashboard({
     const mActs = activities
       .filter(a => a.member_id === memberId)
       .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
+
+    const attendedCount = mActs.filter(a => Boolean(a.attended)).length;
+    const isRegularAndRewardEligible = attendedCount >= rewardStreakThreshold;
 
     const recent30DaysActs = mActs.filter(a => {
       const diffDays = Math.floor((Date.now() - new Date(a.activity_date).getTime()) / 86400000);
@@ -1100,6 +1144,8 @@ export default function ServantDashboard({
         unrecordedYet: true,
         hasQuestionMarks,
         irregularCount,
+        attendedCount,
+        isRegularAndRewardEligible: false,
         label: 'لم يُسجل حضور بعد',
         badgeColor: 'bg-gray-100 text-gray-700',
         accentBar: hasQuestionMarks ? 'border-r-4 border-r-amber-600' : 'border-r-4 border-r-gray-400',
@@ -1118,6 +1164,8 @@ export default function ServantDashboard({
         unrecordedYet: false,
         hasQuestionMarks,
         irregularCount,
+        attendedCount,
+        isRegularAndRewardEligible: false,
         label: `غائب آخر لقاء (${lastAct.activity_date || '—'}) ⚠️`,
         badgeColor: 'bg-red-100 text-red-800',
         accentBar: 'border-r-4 border-r-red-600',
@@ -1131,6 +1179,8 @@ export default function ServantDashboard({
         unrecordedYet: false,
         hasQuestionMarks,
         irregularCount,
+        attendedCount,
+        isRegularAndRewardEligible: false,
         label: `منقطع منذ ${daysSinceLast} يوم ⚠️`,
         badgeColor: 'bg-red-100 text-red-800',
         accentBar: 'border-r-4 border-r-red-600',
@@ -1148,9 +1198,13 @@ export default function ServantDashboard({
       unrecordedYet: false,
       hasQuestionMarks,
       irregularCount,
+      attendedCount,
+      isRegularAndRewardEligible,
       label: `حضر آخر لقاء${timeBadge} ✅`,
       badgeColor: 'bg-green-100 text-green-800',
-      accentBar: hasQuestionMarks ? 'border-r-4 border-r-amber-600' : 'border-r-4 border-r-emerald-600',
+      accentBar: isRegularAndRewardEligible
+        ? 'border-r-4 border-r-amber-500'
+        : (hasQuestionMarks ? 'border-r-4 border-r-amber-600' : 'border-r-4 border-r-emerald-600'),
       avatarTone: 'bg-emerald-50 text-emerald-800 border-emerald-200'
     };
   };
@@ -1167,7 +1221,7 @@ export default function ServantDashboard({
     const activeNotes = getMemberActiveNotes(m.id);
     const insights = getMemberInsights(m.id);
     if (selectedCaseTagFilter === 'الكل') {
-      return activeNotes.length > 0 || insights.hasQuestionMarks;
+      return activeNotes.length > 0 || insights.hasQuestionMarks || insights.isRegularAndRewardEligible;
     }
     return activeNotes.some(n => (n.behavior_tag || noteTags[0] || 'عادي') === selectedCaseTagFilter);
   });
@@ -1196,11 +1250,12 @@ export default function ServantDashboard({
       DEFAULT_ATTENDANCE_STATUSES.find(s => s.code === formObj.status_code) ||
       attendanceStatuses[0] || { code: 'present', label: 'حاضر', attended: true };
 
-    const effectiveDate = formObj.activity_date || getTodayLocalDate();
+    // التاريخ دائماً تاريخ اليوم الفعلي غير قابل للتعديل من الخادم
+    const lockedTodayDate = getTodayLocalDate();
     const nowTime = getNowHHMM();
     const effectiveCheckIn = formObj.check_in_time || nowTime;
     const effectiveExpected = formObj.expected_time || officialStartTime || '10:00';
-    const effectiveCheckOut = formObj.check_out_time || '';
+    const effectiveCheckOut = formObj.check_out_time || nowTime;
 
     const expectedMins = parseTimeToMinutes(effectiveExpected);
     const checkInMins = parseTimeToMinutes(effectiveCheckIn);
@@ -1233,7 +1288,7 @@ export default function ServantDashboard({
     } else if (formObj.status_code === 'absent') {
       notesParts.push('غائب');
     } else if (formObj.status_code === 'early_leave') {
-      notesParts.push(`انصراف مبكر الساعة ${effectiveCheckOut || nowTime}`);
+      notesParts.push(`انصراف مبكر الساعة ${effectiveCheckOut}`);
     } else if (formObj.status_code === 'late') {
       notesParts.push(`تأخير — وصل الساعة ${effectiveCheckIn}${countedDelayMinutes > 0 ? ` (${countedDelayMinutes} د)` : ''}`);
     } else if (formObj.status_code === 'excused') {
@@ -1247,20 +1302,21 @@ export default function ServantDashboard({
     }
 
     return {
-      activity_date: effectiveDate,
+      activity_date: lockedTodayDate,
       activity_type: formObj.activity_type || activityTypes[0] || 'مدارس أحد',
       status_code: statusObj.code,
       expected_time: effectiveExpected,
       check_in_time: formObj.status_code === 'absent' || formObj.status_code === 'excused' ? null : effectiveCheckIn,
-      check_out_time: formObj.status_code === 'early_leave' ? (effectiveCheckOut || nowTime) : (effectiveCheckOut || null),
+      check_out_time: formObj.status_code === 'early_leave' ? effectiveCheckOut : null,
       delay_minutes: countedDelayMinutes,
       early_leave_minutes: earlyLeaveMinutes,
       attended: Boolean(statusObj.attended),
+      reason: cleanReason || null,
       notes: notesParts.join(' — ')
     };
   };
 
-  // عند الضغط على حاضر أو غائب أو أي تاب حالة في الكارت
+  // تسجيل مباشر وفوري بتاريخ اليوم وتوقيت اللحظة الفعلية
   const handleQuickMemberAttendance = (member, statusCode) => {
     const todayStr = getTodayLocalDate();
     const nowStr = getNowHHMM();
@@ -1269,7 +1325,6 @@ export default function ServantDashboard({
       DEFAULT_ATTENDANCE_STATUSES.find(s => s.code === statusCode) ||
       { code: statusCode, label: statusCode, attended: true };
 
-    // إذا ضغط على (تأخير / انصراف مبكر / معتذر) يفتح له نافذة فورية لتحديد التوقيت والسبب
     if (statusCode === 'late' || statusCode === 'early_leave' || statusCode === 'excused') {
       setQuickStatusModal({
         open: true,
@@ -1277,25 +1332,24 @@ export default function ServantDashboard({
         statusCode,
         statusLabel: statusObj.label,
         activity_date: todayStr,
-        activity_type: batchActForm.activity_type || activityTypes[0] || 'مدارس أحد',
-        expected_time: batchActForm.expected_time || officialStartTime || '10:00',
+        activity_type: activityTypes[0] || 'مدارس أحد',
+        expected_time: officialStartTime || '10:00',
         check_in_time: nowStr,
         check_out_time: nowStr,
-        reason: batchActForm.notes || ''
+        reason: ''
       });
       return;
     }
 
-    // حاضر أو غائب يسجل فوراً بتاريخ اليوم والتوقيت الفعلي
     if (typeof onSaveActivity === 'function') {
       const payload = buildActivityPayload({
         activity_date: todayStr,
-        activity_type: batchActForm.activity_type || activityTypes[0] || 'مدارس أحد',
+        activity_type: activityTypes[0] || 'مدارس أحد',
         status_code: statusCode,
-        expected_time: batchActForm.expected_time || officialStartTime || '10:00',
+        expected_time: officialStartTime || '10:00',
         check_in_time: nowStr,
         check_out_time: '',
-        notes: batchActForm.notes || ''
+        notes: ''
       });
       onSaveActivity(member.id, payload);
     }
@@ -1307,7 +1361,7 @@ export default function ServantDashboard({
 
     const payload = buildActivityPayload(
       {
-        activity_date: quickStatusModal.activity_date || getTodayLocalDate(),
+        activity_date: getTodayLocalDate(),
         activity_type: quickStatusModal.activity_type,
         status_code: quickStatusModal.statusCode,
         expected_time: quickStatusModal.expected_time,
@@ -1320,6 +1374,51 @@ export default function ServantDashboard({
 
     onSaveActivity(quickStatusModal.member.id, payload);
     setQuickStatusModal(prev => ({ ...prev, open: false, reason: '' }));
+  };
+
+  const handleSaveReward = async (e) => {
+    e.preventDefault();
+    if (!rewardModal.member) return;
+
+    const rewardSummary = `🌟 ${rewardModal.reward_type}: ${rewardModal.reward_title} (مواظبة ${rewardModal.streakCount} لقاءات)${rewardModal.notes ? ` — ${rewardModal.notes}` : ''}`;
+
+    if (typeof onSaveMemberNote === 'function') {
+      onSaveMemberNote({
+        member_id: rewardModal.member.id,
+        author_id: servant?.id,
+        note_text: rewardSummary,
+        behavior_tag: 'مجد ومجتهد'
+      });
+    }
+
+    if (supabase && typeof supabase.from === 'function') {
+      try {
+        await supabase.from('member_rewards').insert({
+          member_id: rewardModal.member.id,
+          reward_type: rewardModal.reward_type,
+          reward_title: rewardModal.reward_title,
+          attendance_streak: rewardModal.streakCount,
+          granted_by: servant?.full_name || servant?.username || 'servant',
+          granted_date: getTodayLocalDate(),
+          notes: rewardModal.notes || null
+        });
+
+        await supabase
+          .from('church_users')
+          .update({
+            is_reward_eligible: true,
+            regular_attendance_count: rewardModal.streakCount,
+            last_reward_note: rewardSummary
+          })
+          .eq('id', rewardModal.member.id);
+
+        if (typeof onRefresh === 'function') onRefresh();
+      } catch {
+        // يعمل حتى لو الجدول غير منشأ بعد
+      }
+    }
+
+    setRewardModal(prev => ({ ...prev, open: false, notes: '' }));
   };
 
   const openAddMemberModal = () => {
@@ -1409,6 +1508,8 @@ export default function ServantDashboard({
     );
   }
 
+  const activeBirthdayList = birthdayTab === 'members' ? currentMonthMemberBirthdays : currentMonthServantBirthdays;
+
   return (
     <div className="space-y-4" dir="rtl">
       <input
@@ -1421,6 +1522,102 @@ export default function ServantDashboard({
       />
 
       <BirthdayBanner birthdays={scopeBirthdays} />
+
+      {/* إشعارات أعياد الميلاد جوه شاشة الخادم: تابتين للمخدومين وللخدام */}
+      <div className="bg-white p-4 rounded-3xl border border-pink-200/80 shadow-2xs space-y-3 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 font-black text-gray-900">
+            <Cake size={16} className="text-pink-600" />
+            <span>إشعارات أعياد ميلاد شهر ({currentMonth}) داخل شاشة الخدمة:</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 bg-pink-50/80 p-1 rounded-2xl border border-pink-200 font-black">
+            <button
+              type="button"
+              onClick={() => setBirthdayTab('members')}
+              className={`px-3.5 py-1.5 rounded-xl cursor-pointer transition flex items-center gap-1.5 ${
+                birthdayTab === 'members'
+                  ? 'bg-[#7a1c24] text-white shadow-2xs'
+                  : 'text-gray-800 hover:bg-white'
+              }`}
+            >
+              🎂 أعياد ميلاد المخدومين ({currentMonthMemberBirthdays.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setBirthdayTab('servants')}
+              className={`px-3.5 py-1.5 rounded-xl cursor-pointer transition flex items-center gap-1.5 ${
+                birthdayTab === 'servants'
+                  ? 'bg-amber-800 text-white shadow-2xs'
+                  : 'text-gray-800 hover:bg-white'
+              }`}
+            >
+              🙏 أعياد ميلاد الخدام ({currentMonthServantBirthdays.length})
+            </button>
+          </div>
+        </div>
+
+        {activeBirthdayList.length > 0 ? (
+          <div className="flex gap-2.5 overflow-x-auto pb-1">
+            {activeBirthdayList.map(person => {
+              const isTodayBday = person.birthDay === currentToday;
+              const phoneNum = person.phone || person.father_phone || person.mother_phone;
+              return (
+                <div
+                  key={person.id}
+                  className={`shrink-0 min-w-[230px] p-3 rounded-2xl border flex flex-col justify-between gap-2 ${
+                    isTodayBday
+                      ? 'bg-amber-50 border-amber-400'
+                      : 'bg-[#fbfaf7] border-pink-100'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black inline-block mb-1 ${
+                        isTodayBday ? 'bg-amber-600 text-white' : 'bg-pink-100 text-pink-900'
+                      }`}>
+                        {isTodayBday ? `🎉 النهارده (${person.birthDay}/${person.birthMonth})` : `📅 يوم ${person.birthDay}/${person.birthMonth}`}
+                      </span>
+                      <strong className="block text-xs font-black text-gray-900">{person.full_name}</strong>
+                      <span className="block text-[10px] text-gray-500 font-bold">
+                        {birthdayTab === 'members'
+                          ? (person.assigned_class || person.detailed_stage || 'مخدوم')
+                          : (person.assigned_class || person.service_stage || 'خادم')}
+                      </span>
+                    </div>
+                  </div>
+
+                  {phoneNum && (
+                    <div className="flex items-center gap-1.5 pt-1">
+                      <a
+                        href={`https://wa.me/2${phoneNum.replace(/\D/g, '')}?text=${encodeURIComponent(`كل سنة وأنت طيب يا ${person.full_name} 🎂🎉`)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex-1 px-2.5 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1"
+                      >
+                        <MessageCircle size={12} /> معايدة واتس
+                      </a>
+                      <a
+                        href={`tel:${phoneNum}`}
+                        className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-[11px] font-bold flex items-center justify-center"
+                        title="اتصال"
+                      >
+                        <Phone size={12} />
+                      </a>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-[11px] text-gray-500 font-bold bg-[#fbfaf7] p-3 rounded-2xl border border-gray-100">
+            {birthdayTab === 'members'
+              ? `لا توجد أعياد ميلاد مسجلة للمخدومين في شهر (${currentMonth}) حالياً.`
+              : `لا توجد أعياد ميلاد مسجلة للخدام في شهر (${currentMonth}) حالياً.`}
+          </p>
+        )}
+      </div>
 
       {canExtractSheet && (
         <div className="bg-teal-50/70 border border-teal-200 p-3.5 rounded-2xl flex flex-wrap justify-between items-center gap-2 text-xs">
@@ -1436,7 +1633,7 @@ export default function ServantDashboard({
                   showItemsManager ? 'bg-[#7a1c24] text-white' : 'bg-white text-[#7a1c24] border border-teal-300 hover:bg-teal-100/50'
                 }`}
               >
-                <SlidersHorizontal size={14} /> المواعيد الرسمية والبنود
+                <SlidersHorizontal size={14} /> المواعيد والبنود والمكافآت
               </button>
             )}
             <button
@@ -1454,9 +1651,9 @@ export default function ServantDashboard({
         <div className="bg-white p-4 sm:p-5 rounded-3xl border border-[#7a1c24]/30 shadow-sm space-y-4 text-xs">
           <div className="flex items-center justify-between border-b pb-2.5">
             <div>
-              <h3 className="text-sm font-black text-[#7a1c24]">⚙️ إعداد المواعيد الرسمية وفترة السماح والبنود (أدمن / أبونا)</h3>
+              <h3 className="text-sm font-black text-[#7a1c24]">⚙️ إعداد المواعيد الرسمية وفترة السماح والرحلات/المكافآت (أدمن / أبونا)</h3>
               <p className="text-[11px] text-gray-500 font-bold mt-0.5">
-                حدد الموعد الرسمي ومدة السماح المسموحة للتأخير (بالدقائق) ومدة الانقطاع وعلامات المتابعة.
+                حدد الموعد الرسمي ومدة السماح المسموحة للتأخير، وعدد لقاءات المواظبة لاستحقاق رحلة/مكافأة، ومدة الانقطاع.
               </p>
             </div>
             <button
@@ -1468,9 +1665,9 @@ export default function ServantDashboard({
             </button>
           </div>
 
-          <div className="bg-indigo-50/70 p-3.5 rounded-2xl border border-indigo-200 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="bg-indigo-50/70 p-3.5 rounded-2xl border border-indigo-200 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <label className="font-bold text-indigo-950 space-y-1">
-              <span className="block text-[11px]">⏰ الموعد الرسمي للخدمة/الاجتماع:</span>
+              <span className="block text-[11px]">⏰ الموعد الرسمي:</span>
               <input
                 type="time"
                 className="w-full px-2.5 py-1.5 bg-white border rounded-xl font-black"
@@ -1478,14 +1675,13 @@ export default function ServantDashboard({
                 onChange={e => {
                   const val = e.target.value || '10:00';
                   setOfficialStartTime(val);
-                  setBatchActForm(prev => ({ ...prev, expected_time: val }));
-                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, irregularThreshold, absenceDaysThreshold, val, graceMinutes);
+                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, irregularThreshold, absenceDaysThreshold, val, graceMinutes, rewardStreakThreshold);
                 }}
               />
             </label>
 
             <label className="font-bold text-indigo-950 space-y-1">
-              <span className="block text-[11px]">⏳ سماح التأخير المسموح (دقائق):</span>
+              <span className="block text-[11px]">⏳ سماح التأخير (دقائق):</span>
               <input
                 type="number"
                 min="0"
@@ -1495,13 +1691,29 @@ export default function ServantDashboard({
                 onChange={e => {
                   const val = Math.max(0, Number(e.target.value) || 0);
                   setGraceMinutes(val);
-                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, irregularThreshold, absenceDaysThreshold, officialStartTime, val);
+                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, irregularThreshold, absenceDaysThreshold, officialStartTime, val, rewardStreakThreshold);
+                }}
+              />
+            </label>
+
+            <label className="font-bold text-emerald-950 space-y-1">
+              <span className="block text-[11px]">🌟 مواظبة لرحلة/مكافأة:</span>
+              <input
+                type="number"
+                min="1"
+                max="50"
+                className="w-full px-2.5 py-1.5 bg-white border rounded-xl font-black"
+                value={rewardStreakThreshold}
+                onChange={e => {
+                  const val = Math.max(1, Number(e.target.value) || 4);
+                  setRewardStreakThreshold(val);
+                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, irregularThreshold, absenceDaysThreshold, officialStartTime, graceMinutes, val);
                 }}
               />
             </label>
 
             <label className="font-bold text-amber-950 space-y-1">
-              <span className="block text-[11px]">❓❓ تكرار التأخير/الانصراف لظهور التنبيه:</span>
+              <span className="block text-[11px]">❓❓ تكرار تنبيه التأخير:</span>
               <input
                 type="number"
                 min="1"
@@ -1511,13 +1723,13 @@ export default function ServantDashboard({
                 onChange={e => {
                   const val = Math.max(1, Number(e.target.value) || 2);
                   setIrregularThreshold(val);
-                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, val, absenceDaysThreshold, officialStartTime, graceMinutes);
+                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, val, absenceDaysThreshold, officialStartTime, graceMinutes, rewardStreakThreshold);
                 }}
               />
             </label>
 
             <label className="font-bold text-red-950 space-y-1">
-              <span className="block text-[11px]">📅 أيام الانقطاع للظهور في الافتقاد:</span>
+              <span className="block text-[11px]">📅 أيام الانقطاع للافتقاد:</span>
               <input
                 type="number"
                 min="1"
@@ -1527,7 +1739,7 @@ export default function ServantDashboard({
                 onChange={e => {
                   const val = Math.max(1, Number(e.target.value) || 14);
                   setAbsenceDaysThreshold(val);
-                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, irregularThreshold, val, officialStartTime, graceMinutes);
+                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, irregularThreshold, val, officialStartTime, graceMinutes, rewardStreakThreshold);
                 }}
               />
             </label>
@@ -2098,7 +2310,7 @@ export default function ServantDashboard({
               {selectedGenderFilter !== 'الكل' ? ` (${selectedGenderFilter})` : ''}
             </h2>
             <p className="text-gray-500 font-bold mt-0.5">
-              المسؤول: {servant?.full_name || ''} • الموعد الرسمي: <strong className="text-gray-800">{officialStartTime}</strong> • السماح: <strong className="text-gray-800">{graceMinutes} د</strong>
+              المسؤول: {servant?.full_name || ''} • تاريخ اليوم: <strong className="text-gray-800">{getTodayLocalDate()}</strong> • الموعد: <strong className="text-gray-800">{officialStartTime}</strong> (سماح {graceMinutes} د)
             </p>
           </div>
 
@@ -2171,7 +2383,7 @@ export default function ServantDashboard({
                 <ClipboardCheck size={15} /> حضور وانصراف
               </span>
               <span className={`text-[10px] font-bold block mt-0.5 ${activeServiceModule === 'attendance' ? 'text-emerald-100' : 'text-emerald-700'}`}>
-                تسجيل حضور، أوقات، وانصراف
+                تسجيل فوري بتاريخ اليوم
               </span>
             </div>
             <span className={`px-2.5 py-1 rounded-xl font-black text-xs ${activeServiceModule === 'attendance' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-900'}`}>
@@ -2212,10 +2424,10 @@ export default function ServantDashboard({
           >
             <div>
               <span className="font-black text-xs sm:text-sm block flex items-center gap-1">
-                <HeartHandshake size={15} /> متابعة حالة
+                <HeartHandshake size={15} /> متابعة ومواظبة
               </span>
               <span className={`text-[10px] font-bold block mt-0.5 ${activeServiceModule === 'cases' ? 'text-amber-100' : 'text-amber-800'}`}>
-                ملاحظات وتنبيهات ❓❓
+                ملاحظات، تنبيهات، ورحلات/مكافآت
               </span>
             </div>
             <span className={`px-2.5 py-1 rounded-xl font-black text-xs ${activeServiceModule === 'cases' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-900'}`}>
@@ -2248,65 +2460,6 @@ export default function ServantDashboard({
             النتائج: <strong className="text-gray-900">{displayedMembers.length}</strong>
           </span>
         </div>
-
-        {activeServiceModule === 'attendance' && (
-          <div className="bg-emerald-50/70 p-3.5 rounded-2xl border border-emerald-200 space-y-2.5">
-            <div className="font-black text-emerald-950 text-xs flex items-center gap-1.5">
-              <Clock size={14} /> شريط الحضور والانصراف (يأخذ تاريخ اليوم والتوقيت الفعلي تلقائياً):
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2">
-              <select
-                className="p-2 bg-white border border-emerald-200 rounded-xl text-xs font-bold"
-                value={batchActForm.activity_type}
-                onChange={e => setBatchActForm({ ...batchActForm, activity_type: e.target.value })}
-              >
-                {activityTypes.map((actType, idx) => (
-                  <option key={idx} value={actType}>{actType}</option>
-                ))}
-              </select>
-              <input
-                type="date"
-                className="p-2 bg-white border border-emerald-200 rounded-xl text-xs font-bold"
-                value={batchActForm.activity_date}
-                onChange={e => setBatchActForm({ ...batchActForm, activity_date: e.target.value })}
-              />
-              <div>
-                <label className="text-[10px] font-bold text-emerald-900 block mb-0.5">موعد رسمي/متوقع</label>
-                <input
-                  type="time"
-                  className="w-full p-1.5 bg-white border border-emerald-200 rounded-xl text-xs font-bold"
-                  value={batchActForm.expected_time}
-                  onChange={e => setBatchActForm({ ...batchActForm, expected_time: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-emerald-900 block mb-0.5">وقت الدخول الفعلي</label>
-                <input
-                  type="time"
-                  className="w-full p-1.5 bg-white border border-emerald-200 rounded-xl text-xs font-bold"
-                  value={batchActForm.check_in_time}
-                  onChange={e => setBatchActForm({ ...batchActForm, check_in_time: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-emerald-900 block mb-0.5">وقت الانصراف</label>
-                <input
-                  type="time"
-                  className="w-full p-1.5 bg-white border border-emerald-200 rounded-xl text-xs font-bold"
-                  value={batchActForm.check_out_time}
-                  onChange={e => setBatchActForm({ ...batchActForm, check_out_time: e.target.value })}
-                />
-              </div>
-              <input
-                type="text"
-                placeholder="سبب/ملاحظة عامة..."
-                className="p-2 bg-white border border-emerald-200 rounded-xl text-xs font-bold"
-                value={batchActForm.notes}
-                onChange={e => setBatchActForm({ ...batchActForm, notes: e.target.value })}
-              />
-            </div>
-          </div>
-        )}
 
         {activeServiceModule === 'cases' && (
           <div className="bg-amber-50/70 p-3 rounded-2xl border border-amber-200 flex flex-wrap items-center gap-1.5">
@@ -2407,6 +2560,25 @@ export default function ServantDashboard({
                       <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${insights.badgeColor}`}>
                         {insights.label}
                       </span>
+                      {insights.isRegularAndRewardEligible && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setRewardModal({
+                              open: true,
+                              member: m,
+                              streakCount: insights.attendedCount,
+                              reward_type: 'رحلة مجانية',
+                              reward_title: 'رحلة مجانية للمواظبين',
+                              notes: ''
+                            })
+                          }
+                          className="px-2 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 rounded-lg text-[10px] font-black cursor-pointer inline-flex items-center gap-1"
+                          title="مواظب ومتميز — اضغط لتسجيل رحلة أو مكافأة"
+                        >
+                          <Award size={11} /> مواظب ({insights.attendedCount}) — رحلة/مكافأة
+                        </button>
+                      )}
                       {insights.hasQuestionMarks && (
                         <span className="px-2 py-0.5 bg-amber-100 text-amber-950 border border-amber-300 rounded-lg text-[10px] font-black">
                           ❓❓ تكرار تأخير/انصراف ({insights.irregularCount}) — متابعة
@@ -2549,8 +2721,8 @@ export default function ServantDashboard({
                     </strong>
                   </div>
                   <div>
-                    <span className="text-gray-400 block text-[10px]">الأنشطة:</span>
-                    <strong className="text-blue-700">{mActs.length} نشاط مسجل</strong>
+                    <span className="text-gray-400 block text-[10px]">المواظبة والأنشطة:</span>
+                    <strong className="text-blue-700">{insights.attendedCount} حضور / {mActs.length} سجل</strong>
                   </div>
                 </div>
               </div>
@@ -2559,7 +2731,7 @@ export default function ServantDashboard({
         </div>
       )}
 
-      {/* نافذة فورية عند اختيار (تأخير / انصراف مبكر / معتذر) لتحديد الوقت والسبب */}
+      {/* نافذة فورية عند اختيار (تأخير / انصراف مبكر / معتذر) مع تاريخ اليوم مقفول والتوقيت الفعلي */}
       {quickStatusModal.open && quickStatusModal.member && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-55">
           <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-3 text-xs font-bold">
@@ -2579,12 +2751,12 @@ export default function ServantDashboard({
             <form onSubmit={handleConfirmQuickStatusModal} className="space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
-                  <label className="block mb-1 text-gray-600">تاريخ اليوم</label>
+                  <label className="block mb-1 text-gray-600">تاريخ اليوم (تلقائي)</label>
                   <input
                     type="date"
-                    className="w-full p-2 border rounded-xl bg-white"
-                    value={quickStatusModal.activity_date}
-                    onChange={e => setQuickStatusModal(prev => ({ ...prev, activity_date: e.target.value }))}
+                    readOnly
+                    className="w-full p-2 border rounded-xl bg-gray-100 text-gray-700 cursor-not-allowed"
+                    value={getTodayLocalDate()}
                   />
                 </div>
                 <div>
@@ -2673,6 +2845,84 @@ export default function ServantDashboard({
                   className="px-5 py-2 bg-[#7a1c24] text-white rounded-xl cursor-pointer"
                 >
                   حفظ التسجيل
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* نافذة تسجيل رحلة مجانية أو مكافأة للمخدوم المواظب */}
+      {rewardModal.open && rewardModal.member && (
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-55">
+          <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-3 text-xs font-bold">
+            <div className="flex justify-between items-center border-b pb-2">
+              <h3 className="font-extrabold text-sm text-amber-900">
+                🌟 رحلة / مكافأة مواظبة — {rewardModal.member.full_name}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setRewardModal(prev => ({ ...prev, open: false }))}
+                className="p-1.5 bg-gray-100 rounded-xl cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveReward} className="space-y-3">
+              <div className="bg-amber-50 p-3 rounded-2xl border border-amber-200 text-amber-950">
+                عدد مرات الحضور المواظب: <strong>{rewardModal.streakCount}</strong> لقاءات (الحد المطلوب: {rewardStreakThreshold})
+              </div>
+
+              <div>
+                <label className="block mb-1 text-gray-700">نوع المكافأة / التقدير</label>
+                <select
+                  className="w-full p-2.5 border rounded-xl bg-white"
+                  value={rewardModal.reward_type}
+                  onChange={e => setRewardModal(prev => ({ ...prev, reward_type: e.target.value }))}
+                >
+                  <option value="رحلة مجانية">🚌 رحلة مجانية</option>
+                  <option value="مكافأة">🎁 مكافأة</option>
+                  <option value="هدية تشجيعية">🎀 هدية تشجيعية</option>
+                  <option value="بطاقة تميز">🏅 بطاقة تميز</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block mb-1 text-gray-700">اسم الرحلة أو المكافأة</label>
+                <input
+                  required
+                  type="text"
+                  className="w-full p-2.5 border rounded-xl bg-white"
+                  value={rewardModal.reward_title}
+                  onChange={e => setRewardModal(prev => ({ ...prev, reward_title: e.target.value }))}
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1 text-gray-700">ملاحظات إضافية</label>
+                <input
+                  type="text"
+                  placeholder="مثلاً: مواظب طوال الشهر..."
+                  className="w-full p-2.5 border rounded-xl bg-white"
+                  value={rewardModal.notes}
+                  onChange={e => setRewardModal(prev => ({ ...prev, notes: e.target.value }))}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setRewardModal(prev => ({ ...prev, open: false }))}
+                  className="px-4 py-2 border rounded-xl cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-amber-700 hover:bg-amber-800 text-white rounded-xl cursor-pointer"
+                >
+                  حفظ واعتماد المكافأة
                 </button>
               </div>
             </form>
@@ -2827,8 +3077,8 @@ export default function ServantDashboard({
               </select>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
-                  <label className="block mb-1 text-gray-600">التاريخ</label>
-                  <input type="date" className="w-full p-2 border rounded-xl" value={actForm.activity_date} onChange={e => setActForm({ ...actForm, activity_date: e.target.value })} />
+                  <label className="block mb-1 text-gray-600">تاريخ اليوم (تلقائي)</label>
+                  <input type="date" readOnly className="w-full p-2 border rounded-xl bg-gray-100 text-gray-700 cursor-not-allowed" value={getTodayLocalDate()} />
                 </div>
                 <div>
                   <label className="block mb-1 text-gray-600">الحالة</label>
