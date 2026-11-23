@@ -1132,7 +1132,7 @@ export default function AdminDashboard({
       id: 'nested_cards',
       icon: '🧩',
       title: 'إضافة وتعديل كروت',
-      desc: 'عرض كروت كل الشاشات وإضافة وتعديل وتشغيل وحذف الكروت أو إنشاء كروت متداخلة',
+      desc: 'عرض كروت كل الشاشات وإضافة وتعديل وتشغيل وحذف الكروت وتعديل بياناتها، أو إنشاء كروت متداخلة',
       count: 'كروت الشاشات',
       color: 'border-rose-300 bg-rose-50/30'
     },
@@ -1344,6 +1344,11 @@ export default function AdminDashboard({
           </span>
         )}
       </div>
+      {onRefresh && (
+        <button type="button" onClick={handleFullRefresh} className="px-3 py-2 bg-white border hover:bg-gray-50 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
+          <RefreshCw size={13} /> تحديث
+        </button>
+      )}
     </div>
   );
 
@@ -1356,15 +1361,22 @@ export default function AdminDashboard({
             <h2 className="text-lg font-black text-amber-200">🛡️ لوحة الإدارة — {churchName}</h2>
             <p className="text-xs text-white/85 mt-0.5">اختر الكارت المطلوب للإدارة والتحكم الكامل</p>
           </div>
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => { setNestedRootId(null); setActiveCard('nested_cards'); }}
-              className="px-3.5 py-2 bg-white/15 hover:bg-white/25 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer"
-            >
-              🧩 إدارة وتعديل الكروت
-            </button>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => { setNestedRootId(null); setActiveCard('nested_cards'); }}
+                className="px-3.5 py-2 bg-white/15 hover:bg-white/25 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer"
+              >
+                🧩 إدارة وتعديل الكروت
+              </button>
+            )}
+            {onRefresh && (
+              <button type="button" onClick={handleFullRefresh} className="px-3.5 py-2 bg-white/15 hover:bg-white/25 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
+                <RefreshCw size={14} /> تحديث البيانات
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="max-h-[calc(100vh-250px)] overflow-y-auto pr-1">
@@ -1422,6 +1434,11 @@ export default function AdminDashboard({
             </button>
             <h2 className="text-base font-black text-[#7a1c24]">🛠️ الإعدادات SETUP</h2>
           </div>
+          {onRefresh && (
+            <button type="button" onClick={handleFullRefresh} className="px-3 py-2 bg-white border hover:bg-gray-50 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
+              <RefreshCw size={13} /> تحديث
+            </button>
+          )}
         </div>
 
         <div className="max-h-[calc(100vh-230px)] overflow-y-auto pr-1">
@@ -1764,7 +1781,7 @@ export default function AdminDashboard({
                   { id: 'add', label: '➕ إضافة خدمة أو فصل' },
                   { id: 'priest_transfer', label: '✝ نقل وتعديل الكاهن' }
                 ] : []),
-                { id: 'assign_groups', label: '👥 ربط الخدام والمجموعات' }
+                { id: 'assign_groups', label: '👥 ربط الخدام والمجموعات والسنوات' }
               ].map(st => (
                 <button
                   key={st.id}
@@ -2391,6 +2408,116 @@ export default function AdminDashboard({
                               </div>
                             )}
                           </div>
+                        )}
+
+                        {grp.has_classes !== false ? (
+                          <div className="space-y-2 max-h-48 overflow-y-auto pr-0.5">
+                            {hierarchy.years.map((yr, yIdx) => (
+                              <div key={yIdx} className="p-2.5 bg-[#fbfaf7] rounded-2xl border space-y-1.5">
+                                <div className="flex items-center justify-between gap-2">
+                                  <strong className="text-xs text-[#7a1c24]">📘 {yr.yearName}</strong>
+                                  <span className="text-[10px] text-gray-500">
+                                    {yr.dbClasses.length > 0 ? `${yr.dbClasses.length} فصل` : 'شعبة عامة (بدون فصول مضافة)'}
+                                  </span>
+                                </div>
+                                {yr.dbClasses.length > 0 && (
+                                  <div className="space-y-1">
+                                    {yr.dbClasses.map(srv => {
+                                      const pObj = priestsList.find(p => p.id === srv.priest_id);
+                                      return (
+                                        <div key={srv.id} className="p-2 bg-white rounded-xl border flex justify-between items-center gap-2">
+                                          <div>
+                                            <strong className="text-xs text-gray-900 block">{srv.class_name}</strong>
+                                            <span className="text-[11px] text-gray-500">
+                                              {pObj && `✝ ${pObj.full_name} • `}
+                                              {srv.head_servant_name && `⭐ الأمين: ${srv.head_servant_name} `}
+                                              {srv.vice_head_name && `• الخدام: ${srv.vice_head_name} `}
+                                              {srv.meeting_time && `• ⏰ ${srv.meeting_time}`}
+                                            </span>
+                                          </div>
+                                          {isAdmin && (
+                                            <div className="flex gap-1 shrink-0">
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setPriestTransferForm(prev => ({
+                                                    ...prev,
+                                                    mode: 'by_class',
+                                                    classId: srv.id,
+                                                    fromPriestId: srv.priest_id || ''
+                                                  }));
+                                                  setServicesSubTab('priest_transfer');
+                                                }}
+                                                className="px-2 py-1 bg-purple-50 text-purple-900 rounded-lg text-[10px] font-bold cursor-pointer"
+                                                title="نقل / تعديل كاهن الفصل"
+                                              >
+                                                ✝ كاهن
+                                              </button>
+                                              <button onClick={() => { setEditingSrvId(srv.id); setSrvForm({ ...emptyService, ...srv, stage_name: grp.group_name, academic_year: yr.yearName, class_gender: 'عام' }); setServicesSubTab('add'); }} className="p-1.5 bg-white border rounded-lg cursor-pointer"><Edit3 size={12} /></button>
+                                              <button onClick={() => onDeleteService(srv.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer"><Trash2 size={12} /></button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+
+                            {hierarchy.ungroupedClasses.length > 0 && (
+                              <div className="space-y-1.5">
+                                {hierarchy.ungroupedClasses.map(srv => {
+                                  const pObj = priestsList.find(p => p.id === srv.priest_id);
+                                  return (
+                                    <div key={srv.id} className="p-2.5 bg-[#fbfaf7] rounded-2xl border flex justify-between items-center gap-2">
+                                      <div>
+                                        <strong className="text-xs text-gray-900 block">{srv.class_name}</strong>
+                                        <span className="text-[11px] text-gray-500">
+                                          {pObj && `✝ ${pObj.full_name} • `}
+                                          {srv.head_servant_name && `⭐ الأمين: ${srv.head_servant_name} `}
+                                          {srv.vice_head_name && `• الخدام: ${srv.vice_head_name} `}
+                                          {srv.meeting_time && `• ⏰ ${srv.meeting_time}`}
+                                        </span>
+                                      </div>
+                                      {isAdmin && (
+                                        <div className="flex gap-1 shrink-0">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setPriestTransferForm(prev => ({
+                                                ...prev,
+                                                mode: 'by_class',
+                                                classId: srv.id,
+                                                fromPriestId: srv.priest_id || ''
+                                              }));
+                                              setServicesSubTab('priest_transfer');
+                                            }}
+                                            className="px-2 py-1 bg-purple-50 text-purple-900 rounded-lg text-[10px] font-bold cursor-pointer"
+                                            title="نقل / تعديل كاهن الفصل"
+                                          >
+                                            ✝ كاهن
+                                          </button>
+                                          <button onClick={() => { setEditingSrvId(srv.id); setSrvForm({ ...emptyService, ...srv, stage_name: grp.group_name, academic_year: '', class_gender: 'عام' }); setServicesSubTab('add'); }} className="p-1.5 bg-white border rounded-lg cursor-pointer"><Edit3 size={12} /></button>
+                                          <button onClick={() => onDeleteService(srv.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer"><Trash2 size={12} /></button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {hierarchy.years.length === 0 && hierarchy.ungroupedClasses.length === 0 && (
+                              <p className="text-[11px] text-gray-500 bg-[#fbfaf7] p-2.5 rounded-xl border">
+                                عامة / بدون فصول فرعية مسجلة حالياً (تظهر كاختيار مباشر باسم الخدمة).
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-purple-900 bg-purple-50/50 p-2 rounded-xl border border-purple-100">
+                            🕊️ اجتماع عام / خدمة مفتوحة بدون فصول فرعية (تظهر ككارت لأعضائها وخدامها).
+                          </p>
                         )}
                       </div>
                     );
