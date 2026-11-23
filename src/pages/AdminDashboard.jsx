@@ -9,6 +9,7 @@ import JosephArimatheaManager from '../components/JosephArimatheaManager';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
 import ServiceGroupFeed, { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/ServiceGroupFeed';
 import ServiceDrillDownCards from '../components/ServiceDrillDownCards';
+import NestedCardsBuilder from '../components/NestedCardsBuilder';
 import PermissionsPage from './PermissionsPage';
 import {
   UserPlus, Edit3, Trash2, CalendarPlus, BookOpen,
@@ -16,7 +17,6 @@ import {
   Users, Settings, Save, Upload, ShieldCheck, Lock, Layers, X, UserCheck, ArrowLeftRight
 } from 'lucide-react';
 
-// توحيد وتنسيق رتب الشمامسة لضمان التطابق الكامل بين الداتابيز والشاشات
 export const DEACON_RANKS = [
   { value: 'أبصالتس', label: 'أبصالتس (مرتل)' },
   { value: 'اغنسطس', label: 'اغنسطس (قارئ)' },
@@ -1102,7 +1102,6 @@ export default function AdminDashboard({
     </div>
   );
 
-  // الكروت الخمسة المطلوبة داخل كارت "الإعدادات SETUP"
   const setupCards = [
     {
       id: 'users',
@@ -1155,6 +1154,14 @@ export default function AdminDashboard({
         desc: 'حسابات الكنيسة، الصلاحيات، التصميم، الإعدادات، وسجل النشاط',
         count: `${setupCards.length} كروت`,
         color: 'border-rose-300 bg-rose-50/40'
+      },
+      {
+        id: 'nested_cards',
+        icon: '🧩',
+        title: 'كروت داخل كروت',
+        desc: 'إضافة وتعديل وحذف كروت متداخلة بأي عمق مباشرة من الصفحة وحفظها في قاعدة البيانات',
+        count: 'ديناميكي',
+        color: 'border-rose-300 bg-white'
       },
       ...(canExtractSheet ? [{
         id: 'master_sheet',
@@ -1296,6 +1303,17 @@ export default function AdminDashboard({
 
   return (
     <div className="space-y-4">
+      {activeCard === 'nested_cards' && (
+        <div className="space-y-4">
+          {renderTopBack('🧩 كروت داخل كروت')}
+          <NestedCardsBuilder
+            currentUser={effectiveUser}
+            isAdmin={isAdmin}
+            title="إدارة الكروت المتداخلة"
+          />
+        </div>
+      )}
+
       {activeCard === 'master_sheet' && canExtractSheet && (
         <div className="space-y-4">
           {renderTopBack('📋 شيت التسلسل والافتقاد والترحيم')}
