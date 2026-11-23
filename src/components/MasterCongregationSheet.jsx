@@ -15,6 +15,7 @@ const ROLE_LABELS = {
   mercy_servant: 'خادم إخوة رب',
   member: 'مخدوم (رعية)',
   parent: 'ولي أمر',
+  pension: 'معاشات',
   worker: 'عامل / فراش كنيسة'
 };
 
@@ -46,7 +47,29 @@ const STATUS_META = {
   }
 };
 
+const BASE_SERVICES = [
+  'ابتدائي',
+  'إعدادي',
+  'ثانوي',
+  'جامعة وخريجين',
+  'المعاشات',
+  'الاجتماع العام'
+];
+
+const NO_CLASS_SERVICES = ['المعاشات', 'أصحاب معاشات', 'الاجتماع العام', 'شعب عام', 'اجتماع الأرامل', 'إخوة الرب'];
+
 const ALLOWED_SHEET_ROLES = new Set(['admin', 'priest', 'head_servant']);
+
+const detectUserService = (u) => {
+  const combined = `${u.detailed_stage || ''} ${u.service_stage || ''} ${u.assigned_class || ''} ${u.service_role || ''} ${u.job_title || ''}`;
+  if (combined.includes('معاش') || u.role === 'pension') return 'المعاشات';
+  if (combined.includes('ابتدائي')) return 'ابتدائي';
+  if (combined.includes('إعدادي') || combined.includes('اعدادي')) return 'إعدادي';
+  if (combined.includes('ثانوي')) return 'ثانوي';
+  if (combined.includes('جامعة') || combined.includes('خريج')) return 'جامعة وخريجين';
+  if (combined.includes('اجتماع') || combined.includes('شعب') || combined.includes('رعية')) return 'الاجتماع العام';
+  return (u.detailed_stage || u.service_stage || 'الاجتماع العام').trim();
+};
 
 export function canExtractMasterSheet(user) {
   if (!user) return false;
@@ -57,6 +80,8 @@ export function canExtractMasterSheet(user) {
 
 export default function MasterCongregationSheet({
   users = [],
+  services = [],
+  serviceGroups = [],
   currentUser = null,
   churchName = 'كنيسة السيدة العذراء مريم بالمطرية',
   onUpdateUser,
@@ -66,6 +91,7 @@ export default function MasterCongregationSheet({
   const canEditStatus = ['admin', 'priest', 'head_servant'].includes(currentUser?.role) ||
     Boolean(currentUser?.permissions?.can_edit_members);
 
+  const [serviceTab, setServiceTab] = useState('all');
   const [roleFilter, setRoleFilter] = useState('all');
   const [stageFilter, setStageFilter] = useState('all');
   const [sectorFilter, setSectorFilter] = useState('all');
@@ -87,13 +113,32 @@ export default function MasterCongregationSheet({
     return sorted.map((u, idx) => ({
       ...u,
       serialNo: idx + 1,
+      detectedService: detectUserService(u),
       statusKey: STATUS_META[u.member_status] ? u.member_status : 'active'
     }));
   }, [users]);
 
+  const serviceTabs = useMemo(() => {
+    const set = new Set(BASE_SERVICES);
+    serviceGroups.forEach(g => {
+      if (g?.group_name) set.add(g.group_name.trim());
+    });
+    services.forEach(s => {
+      if (s?.stage_name) set.add(s.stage_name.trim());
+    });
+    sequencedUsers.forEach(u => {
+      if (u.detectedService) set.add(u.detectedService);
+    });
+    return Array.from(set);
+  }, [serviceGroups, services, sequencedUsers]);
+
+  const isCurrentServiceNoClass =
+    serviceTab !== 'all' && NO_CLASS_SERVICES.some(name => serviceTab.includes(name));
+
   const stageOptions = useMemo(() => {
     const set = new Set();
     sequencedUsers.forEach(u => {
+      if (NO_CLASS_SERVICES.some(name => u.detectedService.includes(name))) return;
       const val = (u.detailed_stage || u.service_stage || '').trim();
       if (val) set.add(val);
     });
@@ -110,20 +155,28 @@ export default function MasterCongregationSheet({
   }, [sequencedUsers]);
 
   const stats = useMemo(() => {
-    const total = sequencedUsers.length;
-    const servants = sequencedUsers.filter(u =>
+    const pool = serviceTab === 'all'
+      ? sequencedUsers
+      : sequencedUsers.filter(u => u.detectedService === serviceTab);
+
+    const total = pool.length;
+    const servants = pool.filter(u =>
       ['head_servant', 'vice_head_servant', 'servant', 'meeting_servant', 'mercy_servant'].includes(u.role)
     ).length;
-    const members = sequencedUsers.filter(u => u.role === 'member').length;
-    const needsVisitation = sequencedUsers.filter(u => u.statusKey === 'needs_visitation').length;
-    const inactive = sequencedUsers.filter(u => u.statusKey === 'inactive').length;
-    const departed = sequencedUsers.filter(u => u.statusKey === 'departed').length;
+    const members = pool.filter(u => u.role === 'member' || u.role === 'pension').length;
+    const needsVisitation = pool.filter(u => u.statusKey === 'needs_visitation').length;
+    const inactive = pool.filter(u => u.statusKey === 'inactive').length;
+    const departed = pool.filter(u => u.statusKey === 'departed').length;
     return { total, servants, members, needsVisitation, inactive, departed };
-  }, [sequencedUsers]);
+  }, [sequencedUsers, serviceTab]);
 
   const filteredRows = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return sequencedUsers.filter(row => {
+      if (serviceTab !== 'all' && row.detectedService !== serviceTab) {
+        return false;
+      }
+
       if (roleFilter !== 'all') {
         if (roleFilter === 'servants') {
           if (!['head_servant', 'vice_head_servant', 'servant', 'meeting_servant', 'mercy_servant'].includes(row.role)) {
@@ -157,6 +210,7 @@ export default function MasterCongregationSheet({
           row.phone || '',
           row.address || '',
           row.sector || '',
+          row.detectedService || '',
           row.detailed_stage || row.service_stage || '',
           row.assigned_class || '',
           ROLE_LABELS[row.role] || row.role || ''
@@ -168,7 +222,7 @@ export default function MasterCongregationSheet({
 
       return true;
     });
-  }, [sequencedUsers, roleFilter, stageFilter, sectorFilter, statusFilter, searchQuery]);
+  }, [sequencedUsers, serviceTab, roleFilter, stageFilter, sectorFilter, statusFilter, searchQuery]);
 
   if (!canAccess) {
     return (
@@ -178,19 +232,19 @@ export default function MasterCongregationSheet({
     );
   }
 
-  const handleStatusChange = async (row, nextStatus) => {
+  const persistUserPatch = async (row, patch) => {
     if (!canEditStatus) return;
     setSavingRowId(row.id);
     try {
       if (onUpdateUser) {
-        await onUpdateUser({ ...row, member_status: nextStatus });
-      } else {
+        await onUpdateUser({ ...row, ...patch });
+      } else if (supabase && typeof supabase.from === 'function') {
         const { error } = await supabase
           .from('church_users')
-          .update({ member_status: nextStatus })
+          .update(patch)
           .eq('id', row.id);
         if (error) {
-          alert('تعذر تحديث الحالة: ' + error.message);
+          alert('تعذر تحديث البيانات: ' + error.message);
           return;
         }
         if (onRefresh) await onRefresh();
@@ -200,13 +254,25 @@ export default function MasterCongregationSheet({
     }
   };
 
+  const handleStatusChange = (row, nextStatus) =>
+    persistUserPatch(row, { member_status: nextStatus });
+
+  const handleServiceChange = (row, nextService) => {
+    const noClass = NO_CLASS_SERVICES.some(name => nextService.includes(name));
+    return persistUserPatch(row, {
+      service_stage: nextService,
+      detailed_stage: noClass ? null : nextService,
+      assigned_class: noClass ? null : row.assigned_class
+    });
+  };
+
   const handleExportCSV = () => {
     const headers = [
       'مسلسل ثابت',
       'الاسم الرباعي',
       'الدور / الصفة',
-      'المرحلة / الرعية',
-      'الفصل',
+      'الخدمة',
+      ...(isCurrentServiceNoClass ? [] : ['المرحلة / الفصل']),
       'القطاع',
       'رقم الهاتف',
       'العنوان',
@@ -218,8 +284,8 @@ export default function MasterCongregationSheet({
       r.serialNo,
       r.full_name || '',
       r.permissions?.custom_role_label || ROLE_LABELS[r.role] || r.role || '',
-      r.detailed_stage || r.service_stage || '',
-      r.assigned_class || '',
+      r.detectedService || '',
+      ...(isCurrentServiceNoClass ? [] : [`${r.detailed_stage || r.service_stage || ''}${r.assigned_class ? ` - ${r.assigned_class}` : ''}`]),
       r.sector || '',
       r.phone || '',
       r.address || '',
@@ -235,14 +301,13 @@ export default function MasterCongregationSheet({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `master-congregation-sheet-${todayISO}.csv`;
+    link.download = `congregation-sheet-${serviceTab}-${todayISO}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
 
   return (
     <div className="space-y-4 text-xs" dir="rtl">
-      {/* ترويسة احترافية للشيت */}
       <div className="bg-white p-5 rounded-3xl border border-gray-200 shadow-sm space-y-4">
         <div className="flex flex-wrap justify-between items-start gap-3 border-b border-gray-100 pb-4">
           <div className="flex items-start gap-3">
@@ -252,14 +317,16 @@ export default function MasterCongregationSheet({
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-base sm:text-lg font-black text-[#7a1c24]">
-                  شيت التسلسل الشامل والافتقاد والترحيم — {churchName}
+                  شيت التسلسل والافتقاد والترحيم — {churchName}
                 </h2>
                 <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-950 text-[10px] font-black">
-                  أدمن • أب كاهن • أمين خدمة
+                  {serviceTab === 'all' ? 'كل الخدمات' : `خدمة: ${serviceTab}`}
                 </span>
               </div>
               <p className="text-[11px] text-gray-500 mt-0.5">
-                ترقيم تسلسلي ثابت من لحظة إضافة الفرد للنظام وحتى متابعة الافتقاد أو تسجيل ذكرى الترحيم • تاريخ اليوم: <strong>{todayISO}</strong>
+                {isCurrentServiceNoClass
+                  ? 'خدمة بدون فصول أو مراحل دراسية — يعرض أفراد الخدمة مباشرة.'
+                  : `ترقيم تسلسلي ثابت من لحظة إضافة الفرد للنظام • تاريخ اليوم: ${todayISO}`}
               </p>
             </div>
           </div>
@@ -282,11 +349,51 @@ export default function MasterCongregationSheet({
           </div>
         </div>
 
+        {/* تبويبات الخدمات: كل خدمة تعرض حاجتها لوحدها */}
+        <div className="flex flex-wrap gap-1.5 bg-[#fbfaf7] p-2.5 rounded-2xl border border-gray-200 print:hidden">
+          <button
+            type="button"
+            onClick={() => {
+              setServiceTab('all');
+              setStageFilter('all');
+            }}
+            className={`px-3 py-1.5 rounded-xl font-black cursor-pointer transition ${
+              serviceTab === 'all'
+                ? 'bg-[#7a1c24] text-white shadow-2xs'
+                : 'bg-white text-gray-800 border border-gray-200 hover:bg-red-50/40'
+            }`}
+          >
+            الكل ({sequencedUsers.length})
+          </button>
+
+          {serviceTabs.map(srv => {
+            const count = sequencedUsers.filter(u => u.detectedService === srv).length;
+            const active = serviceTab === srv;
+            return (
+              <button
+                key={srv}
+                type="button"
+                onClick={() => {
+                  setServiceTab(srv);
+                  setStageFilter('all');
+                }}
+                className={`px-3 py-1.5 rounded-xl font-black cursor-pointer transition ${
+                  active
+                    ? 'bg-[#7a1c24] text-white shadow-2xs'
+                    : 'bg-white text-gray-800 border border-gray-200 hover:bg-red-50/40'
+                }`}
+              >
+                {srv} ({count})
+              </button>
+            );
+          })}
+        </div>
+
         {/* بطاقات إحصائية سريعة */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
           <div className="bg-[#fbfaf7] border border-gray-200 rounded-2xl p-3">
             <div className="flex items-center justify-between text-gray-500 font-bold">
-              <span>إجمالي المسلسل</span>
+              <span>إجمالي الخدمة</span>
               <Users size={15} className="text-[#7a1c24]" />
             </div>
             <strong className="text-lg font-black text-gray-950 block mt-1">{stats.total}</strong>
@@ -333,7 +440,7 @@ export default function MasterCongregationSheet({
           </div>
         </div>
 
-        {/* عنوان الكشف المطبوع + الفلاتر */}
+        {/* الفلاتر */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-2.5 print:hidden">
           <div className="relative lg:col-span-2">
             <Search size={15} className="absolute right-3 top-2.5 text-gray-400" />
@@ -354,20 +461,27 @@ export default function MasterCongregationSheet({
             <option value="all">كل الفئات والأدوار</option>
             <option value="servants">الخدام وأمناء الخدمة</option>
             <option value="member">المخدومون (رعية)</option>
+            <option value="pension">معاشات</option>
             <option value="parent">أولياء الأمور</option>
             <option value="priest">الآباء الكهنة</option>
             <option value="deacons">الشمامسة</option>
             <option value="worker">عامل / فراش كنيسة</option>
           </select>
 
-          <select
-            className="p-2 bg-[#fbfaf7] border border-gray-200 rounded-xl font-bold outline-none focus:border-[#7a1c24]"
-            value={stageFilter}
-            onChange={e => setStageFilter(e.target.value)}
-          >
-            <option value="all">كل المراحل / الخدمات</option>
-            {stageOptions.map(st => <option key={st} value={st}>{st}</option>)}
-          </select>
+          {!isCurrentServiceNoClass ? (
+            <select
+              className="p-2 bg-[#fbfaf7] border border-gray-200 rounded-xl font-bold outline-none focus:border-[#7a1c24]"
+              value={stageFilter}
+              onChange={e => setStageFilter(e.target.value)}
+            >
+              <option value="all">كل المراحل</option>
+              {stageOptions.map(st => <option key={st} value={st}>{st}</option>)}
+            </select>
+          ) : (
+            <div className="p-2 bg-amber-50/60 border border-amber-200 rounded-xl font-bold text-amber-950 flex items-center justify-center">
+              بدون فصول دراسية
+            </div>
+          )}
 
           <select
             className="p-2 bg-[#fbfaf7] border border-gray-200 rounded-xl font-bold outline-none focus:border-[#7a1c24]"
@@ -403,12 +517,12 @@ export default function MasterCongregationSheet({
             />
           </div>
           <div>
-            عدد الصفوف الظاهرة: <strong className="text-[#7a1c24]">{filteredRows.length}</strong> من أصل <strong>{sequencedUsers.length}</strong>
+            عدد الصفوف الظاهرة: <strong className="text-[#7a1c24]">{filteredRows.length}</strong> من أصل <strong>{stats.total}</strong>
           </div>
         </div>
       </div>
 
-      {/* جدول التسلسل الاحترافي */}
+      {/* جدول التسلسل */}
       <div className="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="hidden print:block p-4 border-b text-center">
           <h3 className="text-base font-black text-[#7a1c24]">{sheetTitleNote} — {churchName}</h3>
@@ -422,7 +536,8 @@ export default function MasterCongregationSheet({
                 <th className="p-3 w-20">مسلسل #</th>
                 <th className="p-3">الاسم الرباعي</th>
                 <th className="p-3">الصفة / الدور</th>
-                <th className="p-3">المرحلة / الفصل</th>
+                <th className="p-3">الخدمة</th>
+                {!isCurrentServiceNoClass && <th className="p-3">المرحلة / الفصل</th>}
                 <th className="p-3">القطاع والتليفون</th>
                 <th className="p-3">الحالة (افتقاد / ترحيم)</th>
                 <th className="p-3">تاريخ الإضافة</th>
@@ -431,13 +546,15 @@ export default function MasterCongregationSheet({
             <tbody>
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-gray-400 font-bold">
+                  <td colSpan={isCurrentServiceNoClass ? 7 : 8} className="p-8 text-center text-gray-400 font-bold">
                     لا توجد بيانات مطابقة لمعايير البحث والفلترة الحالية.
                   </td>
                 </tr>
               ) : (
                 filteredRows.map((row, index) => {
                   const stMeta = STATUS_META[row.statusKey] || STATUS_META.active;
+                  const rowNoClass = NO_CLASS_SERVICES.some(name => row.detectedService.includes(name));
+
                   return (
                     <tr
                       key={row.id}
@@ -459,12 +576,36 @@ export default function MasterCongregationSheet({
                           </span>
                         )}
                       </td>
-                      <td className="p-3 text-gray-700">
-                        <span className="font-bold">{row.detailed_stage || row.service_stage || '—'}</span>
-                        {row.assigned_class && (
-                          <span className="block text-[11px] text-gray-500">فصل: {row.assigned_class}</span>
+                      <td className="p-3 whitespace-nowrap">
+                        {canEditStatus ? (
+                          <select
+                            disabled={savingRowId === row.id}
+                            value={row.detectedService}
+                            onChange={e => handleServiceChange(row, e.target.value)}
+                            className="px-2 py-1 rounded-xl border border-amber-200 bg-amber-50 text-amber-950 font-black text-[11px] outline-none cursor-pointer"
+                          >
+                            {serviceTabs.map(srv => (
+                              <option key={srv} value={srv}>{srv}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="font-bold text-gray-800">{row.detectedService}</span>
                         )}
                       </td>
+                      {!isCurrentServiceNoClass && (
+                        <td className="p-3 text-gray-700">
+                          {rowNoClass ? (
+                            <span className="text-[11px] text-gray-400">—</span>
+                          ) : (
+                            <>
+                              <span className="font-bold">{row.detailed_stage || row.service_stage || '—'}</span>
+                              {row.assigned_class && (
+                                <span className="block text-[11px] text-gray-500">فصل: {row.assigned_class}</span>
+                              )}
+                            </>
+                          )}
+                        </td>
+                      )}
                       <td className="p-3 text-gray-700">
                         <span>{row.sector || '—'}</span>
                         {row.phone && (
