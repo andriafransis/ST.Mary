@@ -1,7 +1,9 @@
 import { useState, useMemo } from 'react';
+import { supabase } from '../lib/supabase';
 import {
   CalendarCheck, MessageSquareHeart, ShieldCheck, Info, Calendar,
-  MapPin, School, Search, UserCheck, Sparkles, X, Check, Unlink, RotateCcw, Bell
+  MapPin, School, Search, UserCheck, Sparkles, X, Check, Unlink, RotateCcw, Bell,
+  Award, Gift, ClipboardCheck
 } from 'lucide-react';
 
 export const isArabicOnlyName = (value = '') => {
@@ -215,12 +217,18 @@ export default function ParentDashboard({
   allUsers = [],
   attendance = [],
   spiritualNotes = [],
+  visibleMemberNotes = [],
+  commitmentStats = [],
+  memberRewards = [],
+  rewardCampaigns = [],
+  serviceGroups = [],
   events = [],
   services = [],
   linkRequests = [],
   onLinkChild,
   onApproveLinkRequest,
   onRejectLinkRequest,
+  onAcknowledgeNote,
   canManageLinks = true
 }) {
   const curYear = new Date().getFullYear();
@@ -231,6 +239,7 @@ export default function ParentDashboard({
   const [validationError, setValidationError] = useState('');
   const [busyChildId, setBusyChildId] = useState(null);
   const [busyRequestId, setBusyRequestId] = useState(null);
+  const [ackedNoteIds, setAckedNoteIds] = useState(() => new Set());
   const [dismissedIds, setDismissedIds] = useState(() => {
     try {
       const saved = localStorage.getItem(dismissedStorageKey);
@@ -359,6 +368,19 @@ export default function ParentDashboard({
     }
   };
 
+  const handleAcknowledge = async (noteId) => {
+    if (!noteId) return;
+    setAckedNoteIds(prev => new Set([...prev, noteId]));
+    if (onAcknowledgeNote) {
+      await onAcknowledgeNote(noteId);
+      return;
+    }
+    await supabase
+      .from('member_notes')
+      .update({ acknowledged: true, is_read: true })
+      .eq('id', noteId);
+  };
+
   const renderNameBreakdown = (child) => {
     const tokens = getNameTokens(child);
     const first = child.first_name || tokens[0] || '';
@@ -385,7 +407,7 @@ export default function ParentDashboard({
           </span>
         </div>
         <p className="text-xs text-white/85 mt-1">
-          متابعة الأبناء في الكنيسة: الحضور السنوي، الاعتراف، وملاحظات الأب الكاهن • الأبناء المربوطون حالياً: <strong>{effectiveChildrenList.length}</strong>
+          متابعة الأبناء في الكنيسة: الحضور السنوي، الالتزام، الاعتراف، العروض، وملاحظات الأب الكاهن • الأبناء المربوطون حالياً: <strong>{effectiveChildrenList.length}</strong>
         </p>
       </div>
 
@@ -655,7 +677,12 @@ export default function ParentDashboard({
             const totalCount = childAtt.length;
             const rate = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
 
+            const commStat = commitmentStats.find(c => String(c.member_id) === String(child.id));
             const noteObj = spiritualNotes.find(n => n.member_id === child.id);
+            const childVisibleNotes = visibleMemberNotes.filter(
+              n => String(n.member_id) === String(child.id) && n.visible_to_parent !== false
+            );
+            const childRewardsList = memberRewards.filter(r => String(r.member_id) === String(child.id));
 
             return (
               <div key={child.id} className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-4">
@@ -668,10 +695,15 @@ export default function ParentDashboard({
                       {child.sector ? ` • ${child.sector}` : ''}
                     </p>
                   </div>
-                  <div className="flex items-center gap-2 self-start sm:self-center">
+                  <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
                     <span className="px-3.5 py-1.5 bg-amber-100 text-amber-950 rounded-xl font-black">
-                      حضور {curYear}: {rate}%
+                      حضور {curYear}: {commStat?.attendance_percentage ?? rate}%
                     </span>
+                    {commStat?.commitment_status && (
+                      <span className="px-3 py-1.5 bg-teal-50 text-teal-900 border border-teal-200 rounded-xl font-black">
+                        {commStat.commitment_status}
+                      </span>
+                    )}
                     {onLinkChild && canManageLinks && (
                       <button
                         type="button"
@@ -689,11 +721,16 @@ export default function ParentDashboard({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-gray-200/70 space-y-1">
                     <div className="flex items-center gap-1.5 font-black text-gray-800">
-                      <CalendarCheck size={16} className="text-green-700" /> الحضور خلال سنة {curYear}
+                      <CalendarCheck size={16} className="text-green-700" /> الحضور والالتزام خلال سنة {curYear}
                     </div>
                     <p className="text-gray-600">
                       حضر <strong className="text-green-700 text-sm">{presentCount}</strong> مرة من أصل <strong>{totalCount}</strong> لقاء مسجل.
                     </p>
+                    {commStat && (
+                      <p className="text-[11px] text-gray-500">
+                        الغياب: <strong>{commStat.absent_count ?? 0}</strong> • التأخير: <strong>{commStat.late_count ?? 0}</strong> • الانصراف المبكر: <strong>{commStat.early_leave_count ?? 0}</strong>
+                      </p>
+                    )}
                   </div>
 
                   <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-gray-200/70 space-y-1">
@@ -713,17 +750,90 @@ export default function ParentDashboard({
                   </div>
                 </div>
 
-                <div className="bg-[#f9ecee] border border-[#ebd0d4] p-3.5 rounded-2xl">
-                  <div className="flex items-center gap-1.5 font-black text-[#7a1c24] mb-1">
-                    <MessageSquareHeart size={16} /> ملاحظات الأب الكاهن على الابن/الابنة:
+                <div className="bg-[#f9ecee] border border-[#ebd0d4] p-3.5 rounded-2xl space-y-2">
+                  <div className="flex items-center gap-1.5 font-black text-[#7a1c24]">
+                    <MessageSquareHeart size={16} /> ملاحظات الأب الكاهن والمتابعة على الابن/الابنة:
                   </div>
                   <p className="text-[#4a0e13] leading-relaxed">
-                    {noteObj?.priest_note ? noteObj.priest_note : 'لا توجد ملاحظات مسجلة من الأب الكاهن حالياً.'}
+                    {noteObj?.priest_note
+                      ? noteObj.priest_note
+                      : childVisibleNotes.length === 0
+                        ? 'لا توجد ملاحظات مسجلة من الأب الكاهن حالياً.'
+                        : ''}
                   </p>
+
+                  {childVisibleNotes.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      {childVisibleNotes.map(mn => {
+                        const isAcked = mn.acknowledged || ackedNoteIds.has(mn.id);
+                        return (
+                          <div key={mn.id} className="bg-white/90 p-2.5 rounded-xl border border-[#e3c2c7] flex flex-wrap justify-between items-center gap-2">
+                            <div>
+                              <span className="px-2 py-0.5 bg-amber-100 text-amber-950 rounded-lg text-[10px] font-black ml-1.5">
+                                {mn.behavior_tag || 'ملاحظة متابعة'}
+                              </span>
+                              <span className="text-[#4a0e13] font-bold">{mn.note_text}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleAcknowledge(mn.id)}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-black cursor-pointer ${
+                                isAcked ? 'bg-emerald-100 text-emerald-900' : 'bg-[#7a1c24] text-white'
+                              }`}
+                            >
+                              {isAcked ? 'تم الاطلاع ✓' : 'تأكيد الاطلاع'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
+
+                {childRewardsList.length > 0 && (
+                  <div className="bg-emerald-50/70 border border-emerald-200 p-3.5 rounded-2xl space-y-2">
+                    <div className="flex items-center gap-1.5 font-black text-emerald-950">
+                      <Gift size={16} className="text-emerald-700" /> مكافآت وعروض وخصومات مستحقة
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {childRewardsList.map(rw => (
+                        <div key={rw.id} className="bg-white p-2.5 rounded-xl border border-emerald-200 flex justify-between items-center gap-2">
+                          <div>
+                            <strong className="text-gray-900 block">{rw.reward_title}</strong>
+                            <span className="text-[11px] text-gray-500">{rw.reward_type} {rw.granted_date ? `• ${rw.granted_date}` : ''}</span>
+                          </div>
+                          {Number(rw.discount_percent || 0) > 0 && (
+                            <span className="px-2 py-1 bg-emerald-100 text-emerald-900 rounded-lg font-black text-[11px] shrink-0">
+                              خصم {rw.discount_percent}%
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {rewardCampaigns.length > 0 && (
+        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
+          <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
+            <Award size={17} /> العروض والرحلات والمؤتمرات المتاحة ({rewardCampaigns.length})
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {rewardCampaigns.map(camp => (
+              <div key={camp.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <strong className="text-sm text-gray-900">{camp.title}</strong>
+                  <span className="px-2 py-0.5 bg-amber-100 text-amber-950 rounded-lg font-bold text-[10px]">{camp.target_scope || 'عام'}</span>
+                </div>
+                {camp.description && <p className="text-gray-600">{camp.description}</p>}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -763,15 +873,20 @@ export default function ParentDashboard({
             <School size={17} /> الفصول والخدمات المتاحة بالكنيسة
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {services.map(srv => (
-              <div key={srv.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <strong className="text-sm text-gray-900">{srv.class_name}</strong>
-                  <span className="px-2 py-0.5 bg-blue-50 text-blue-800 rounded-lg font-bold text-[10px]">{srv.stage_name}</span>
+            {services.map(srv => {
+              const grp = serviceGroups.find(g => g.id === srv.group_id);
+              return (
+                <div key={srv.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <strong className="text-sm text-gray-900">{srv.class_name}</strong>
+                    <span className="px-2 py-0.5 bg-blue-50 text-blue-800 rounded-lg font-bold text-[10px]">
+                      {grp?.group_name ? `${grp.group_name} • ` : ''}{srv.stage_name}
+                    </span>
+                  </div>
+                  <span className="text-gray-500 block">⏰ {srv.meeting_time} {srv.room_name ? `• 📍 ${srv.room_name}` : ''}</span>
                 </div>
-                <span className="text-gray-500 block">⏰ {srv.meeting_time} {srv.room_name ? `• 📍 ${srv.room_name}` : ''}</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
