@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Phone, Search, UserPlus, Calendar, MessageSquareText, Layers,
   MessageCircle, AlertTriangle, Users, MapPin, X, FileSpreadsheet,
   ArrowRight, BookOpen, Plus, Pencil, Trash2, Check, LayoutGrid, List,
-  ClipboardCheck, HeartHandshake, CheckCircle2, SlidersHorizontal
+  ClipboardCheck, HeartHandshake, CheckCircle2, SlidersHorizontal, Camera, Clock
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BirthdayBanner from '../components/BirthdayBanner';
@@ -63,6 +63,46 @@ const DEFAULT_ATTENDANCE_STATUSES = [
 
 const CUSTOM_ITEMS_STORAGE_KEY = 'servant_custom_service_items_v1';
 
+const parseTimeToMinutes = (timeStr = '') => {
+  const match = String(timeStr || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const hrs = Number(match[1]);
+  const mins = Number(match[2]);
+  if (Number.isNaN(hrs) || Number.isNaN(mins)) return null;
+  return hrs * 60 + mins;
+};
+
+const getNowHHMM = () => {
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+};
+
+const compressPhotoFile = (file, maxSide = 480, quality = 0.72) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxSide / Math.max(img.width || 1, img.height || 1));
+        const width = Math.max(1, Math.round((img.width || 300) * scale));
+        const height = Math.max(1, Math.round((img.height || 300) * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject(new Error('Canvas context unavailable'));
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+
 const isMaleMember = (m) => {
   const g = String(m?.gender || '').trim();
   return g === 'ذكر' || g === 'بنين' || g.toLowerCase() === 'male';
@@ -95,7 +135,11 @@ export default function ServantDashboard({
   const canExtractSheet = canExtractMasterSheet(servant);
   const [showMasterSheet, setShowMasterSheet] = useState(false);
 
-  // البنود القابلة للإضافة والحذف بواسطة الأدمن
+  const [localMemberPhotos, setLocalMemberPhotos] = useState({});
+  const [uploadingPhotoMemberId, setUploadingPhotoMemberId] = useState(null);
+  const cameraInputRef = useRef(null);
+  const pendingPhotoMemberRef = useRef(null);
+
   const [noteTags, setNoteTags] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(CUSTOM_ITEMS_STORAGE_KEY) || '{}');
@@ -125,6 +169,24 @@ export default function ServantDashboard({
     }
   });
 
+  const [irregularThreshold, setIrregularThreshold] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CUSTOM_ITEMS_STORAGE_KEY) || '{}');
+      return Number(saved.irregularThreshold) > 0 ? Number(saved.irregularThreshold) : 2;
+    } catch {
+      return 2;
+    }
+  });
+
+  const [absenceDaysThreshold, setAbsenceDaysThreshold] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CUSTOM_ITEMS_STORAGE_KEY) || '{}');
+      return Number(saved.absenceDaysThreshold) > 0 ? Number(saved.absenceDaysThreshold) : 14;
+    } catch {
+      return 14;
+    }
+  });
+
   const [showItemsManager, setShowItemsManager] = useState(false);
   const [newNoteTagInput, setNewNoteTagInput] = useState('');
   const [newActivityTypeInput, setNewActivityTypeInput] = useState('');
@@ -132,11 +194,19 @@ export default function ServantDashboard({
   const [newStatusEmojiInput, setNewStatusEmojiInput] = useState('📌');
   const [newStatusAttendedInput, setNewStatusAttendedInput] = useState(true);
 
-  const persistCustomItems = async (nextNoteTags, nextActivityTypes, nextAttendanceStatuses) => {
+  const persistCustomItems = async (
+    nextNoteTags,
+    nextActivityTypes,
+    nextAttendanceStatuses,
+    nextIrregularThreshold = irregularThreshold,
+    nextAbsenceDaysThreshold = absenceDaysThreshold
+  ) => {
     const payload = {
       noteTags: nextNoteTags,
       activityTypes: nextActivityTypes,
-      attendanceStatuses: nextAttendanceStatuses
+      attendanceStatuses: nextAttendanceStatuses,
+      irregularThreshold: nextIrregularThreshold,
+      absenceDaysThreshold: nextAbsenceDaysThreshold
     };
     try {
       localStorage.setItem(CUSTOM_ITEMS_STORAGE_KEY, JSON.stringify(payload));
@@ -182,6 +252,12 @@ export default function ServantDashboard({
         }
         if (Array.isArray(data.value.attendanceStatuses) && data.value.attendanceStatuses.length > 0) {
           setAttendanceStatuses(data.value.attendanceStatuses);
+        }
+        if (Number(data.value.irregularThreshold) > 0) {
+          setIrregularThreshold(Number(data.value.irregularThreshold));
+        }
+        if (Number(data.value.absenceDaysThreshold) > 0) {
+          setAbsenceDaysThreshold(Number(data.value.absenceDaysThreshold));
         }
       } catch {
         // تجاهل إذا لم يكن الجدول موجوداً
@@ -272,6 +348,65 @@ export default function ServantDashboard({
       setActForm(prev => ({ ...prev, status_code: updated[0].code, attended: updated[0].attended }));
     }
     persistCustomItems(noteTags, activityTypes, updated);
+  };
+
+  const triggerMemberPhotoCapture = (member) => {
+    if (!member?.id) return;
+    pendingPhotoMemberRef.current = member;
+    if (cameraInputRef.current) {
+      cameraInputRef.current.value = '';
+      cameraInputRef.current.click();
+    }
+  };
+
+  const handlePhotoFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    const targetMember = pendingPhotoMemberRef.current;
+    if (!file || !targetMember?.id) return;
+
+    setUploadingPhotoMemberId(targetMember.id);
+    try {
+      const compressedDataUrl = await compressPhotoFile(file, 480, 0.72);
+      let finalPhotoUrl = compressedDataUrl;
+
+      if (supabase?.storage && typeof supabase.storage.from === 'function') {
+        try {
+          const filePath = `${targetMember.id}/${Date.now()}.jpg`;
+          const blob = await (await fetch(compressedDataUrl)).blob();
+          const { error: uploadErr } = await supabase.storage
+            .from('member-photos')
+            .upload(filePath, blob, { contentType: 'image/jpeg', upsert: true });
+
+          if (!uploadErr) {
+            const { data: pubData } = supabase.storage.from('member-photos').getPublicUrl(filePath);
+            if (pubData?.publicUrl) {
+              finalPhotoUrl = pubData.publicUrl;
+            }
+          }
+        } catch {
+          // نستخدم الصورة المضغوطة مباشرة في حال عدم تفعيل Bucket التخزين
+        }
+      }
+
+      setLocalMemberPhotos(prev => ({ ...prev, [targetMember.id]: finalPhotoUrl }));
+
+      if (supabase && typeof supabase.from === 'function') {
+        const { error: dbErr } = await supabase
+          .from('church_users')
+          .update({ avatar_url: finalPhotoUrl })
+          .eq('id', targetMember.id);
+
+        if (!dbErr && typeof onRefresh === 'function') {
+          onRefresh();
+        }
+      }
+    } catch (err) {
+      console.error('خطأ أثناء التقاط/حفظ صورة المخدوم:', err);
+      alert('تعذر معالجة الصورة، حاول مرة أخرى.');
+    } finally {
+      setUploadingPhotoMemberId(null);
+      pendingPhotoMemberRef.current = null;
+    }
   };
 
   const acknowledgedStorageKey = `acked_member_notes_${servant?.id || servant?.username || 'default'}`;
@@ -461,6 +596,9 @@ export default function ServantDashboard({
     activity_date: new Date().toISOString().split('T')[0],
     activity_type: activityTypes[0] || 'مدارس أحد',
     status_code: attendanceStatuses[0]?.code || 'present',
+    expected_time: '10:00',
+    check_in_time: getNowHHMM(),
+    check_out_time: '',
     notes: ''
   });
 
@@ -470,6 +608,9 @@ export default function ServantDashboard({
     activity_date: new Date().toISOString().split('T')[0],
     activity_type: activityTypes[0] || 'مدارس أحد',
     status_code: attendanceStatuses[0]?.code || 'present',
+    expected_time: '10:00',
+    check_in_time: getNowHHMM(),
+    check_out_time: '',
     attended: true,
     notes: ''
   });
@@ -853,44 +994,98 @@ export default function ServantDashboard({
   const scopeMemberIds = new Set(scopeMembers.map(m => m.id));
   const scopeBirthdays = birthdays.filter(b => scopeMemberIds.has(b.id));
 
-  const getAttendanceInfo = (memberId) => {
-    const mActs = activities
-      .filter(a => a.member_id === memberId)
-      .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
-
-    if (mActs.length === 0) {
-      return {
-        needsFollowUp: true,
-        label: 'لم يسجل حضور بعد',
-        badgeColor: 'bg-gray-100 text-gray-700',
-        accentBar: 'border-r-4 border-r-gray-400',
-        avatarTone: 'bg-slate-100 text-slate-700 border-slate-200'
-      };
-    }
-    const lastAct = mActs[0];
-    const daysSinceLast = Math.floor((Date.now() - new Date(lastAct.activity_date).getTime()) / 86400000);
-    if (!lastAct.attended || daysSinceLast > 14) {
-      return {
-        needsFollowUp: true,
-        label: !lastAct.attended ? 'غائب آخر لقاء ⚠️' : `مفتقد منذ ${daysSinceLast} يوم ⚠️`,
-        badgeColor: 'bg-red-100 text-red-800',
-        accentBar: 'border-r-4 border-r-red-600',
-        avatarTone: 'bg-red-50 text-[#7a1c24] border-red-200'
-      };
-    }
-    return {
-      needsFollowUp: false,
-      label: 'حضر آخر لقاء ✅',
-      badgeColor: 'bg-green-100 text-green-800',
-      accentBar: 'border-r-4 border-r-emerald-600',
-      avatarTone: 'bg-emerald-50 text-emerald-800 border-emerald-200'
-    };
-  };
+  const getMemberPhoto = (m) => localMemberPhotos[m.id] || m.avatar_url || m.photo_url || '';
 
   const getMemberActiveNotes = (memberId) =>
     memberNotes.filter(
       n => n.member_id === memberId && !hiddenNotes[n.id] && !n.is_read && !n.acknowledged
     );
+
+  const getMemberInsights = (memberId) => {
+    const mActs = activities
+      .filter(a => a.member_id === memberId)
+      .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
+
+    const recent30DaysActs = mActs.filter(a => {
+      const diffDays = Math.floor((Date.now() - new Date(a.activity_date).getTime()) / 86400000);
+      return diffDays <= 30;
+    });
+
+    const irregularCount = recent30DaysActs.filter(a => {
+      const txt = `${a.status_code || ''} ${a.notes || ''}`.toLowerCase();
+      const hasDelay = Number(a.delay_minutes) > 0 || txt.includes('تأخر') || txt.includes('late');
+      const hasEarlyLeave = Number(a.early_leave_minutes) > 0 || txt.includes('انصراف مبكر') || txt.includes('early_leave');
+      return hasDelay || hasEarlyLeave;
+    }).length;
+
+    const hasQuestionMarks = irregularCount >= irregularThreshold;
+
+    const activeNotes = getMemberActiveNotes(memberId);
+    const hasFollowUpNote = activeNotes.some(n => {
+      const t = String(n.behavior_tag || '');
+      return t.includes('افتقاد') || t.includes('متابعة') || t.includes('مشاكل');
+    });
+
+    if (mActs.length === 0) {
+      return {
+        needsFollowUp: hasFollowUpNote || hasQuestionMarks,
+        unrecordedYet: true,
+        hasQuestionMarks,
+        irregularCount,
+        label: 'لم يُسجل حضور بعد',
+        badgeColor: 'bg-gray-100 text-gray-700',
+        accentBar: hasQuestionMarks ? 'border-r-4 border-r-amber-600' : 'border-r-4 border-r-gray-400',
+        avatarTone: 'bg-slate-100 text-slate-700 border-slate-200'
+      };
+    }
+
+    const lastAct = mActs[0];
+    const daysSinceLast = Math.floor((Date.now() - new Date(lastAct.activity_date).getTime()) / 86400000);
+    const isAbsentOrOverdue = !lastAct.attended || daysSinceLast > absenceDaysThreshold;
+    const needsFollowUp = isAbsentOrOverdue || hasFollowUpNote || hasQuestionMarks;
+
+    if (!lastAct.attended) {
+      return {
+        needsFollowUp,
+        unrecordedYet: false,
+        hasQuestionMarks,
+        irregularCount,
+        label: `غائب آخر لقاء (${lastAct.activity_date || '—'}) ⚠️`,
+        badgeColor: 'bg-red-100 text-red-800',
+        accentBar: 'border-r-4 border-r-red-600',
+        avatarTone: 'bg-red-50 text-[#7a1c24] border-red-200'
+      };
+    }
+
+    if (daysSinceLast > absenceDaysThreshold) {
+      return {
+        needsFollowUp,
+        unrecordedYet: false,
+        hasQuestionMarks,
+        irregularCount,
+        label: `منقطع منذ ${daysSinceLast} يوم ⚠️`,
+        badgeColor: 'bg-red-100 text-red-800',
+        accentBar: 'border-r-4 border-r-red-600',
+        avatarTone: 'bg-red-50 text-[#7a1c24] border-red-200'
+      };
+    }
+
+    const timeBadge =
+      lastAct.check_in_time || lastAct.check_out_time
+        ? ` (${lastAct.check_in_time ? `دخول ${lastAct.check_in_time}` : ''}${lastAct.check_in_time && lastAct.check_out_time ? ' • ' : ''}${lastAct.check_out_time ? `انصراف ${lastAct.check_out_time}` : ''})`
+        : '';
+
+    return {
+      needsFollowUp,
+      unrecordedYet: false,
+      hasQuestionMarks,
+      irregularCount,
+      label: `حضر آخر لقاء${timeBadge} ✅`,
+      badgeColor: 'bg-green-100 text-green-800',
+      accentBar: hasQuestionMarks ? 'border-r-4 border-r-amber-600' : 'border-r-4 border-r-emerald-600',
+      avatarTone: 'bg-emerald-50 text-emerald-800 border-emerald-200'
+    };
+  };
 
   const getInitials = (fullName = '') => {
     const parts = String(fullName || '').trim().split(/\s+/).filter(Boolean);
@@ -899,11 +1094,13 @@ export default function ServantDashboard({
     return `${parts[0][0]}${parts[1][0]}`;
   };
 
-  const followUpMembers = scopeMembers.filter(m => getAttendanceInfo(m.id).needsFollowUp);
+  const followUpMembers = scopeMembers.filter(m => getMemberInsights(m.id).needsFollowUp);
   const caseTrackingMembers = scopeMembers.filter(m => {
     const activeNotes = getMemberActiveNotes(m.id);
-    if (activeNotes.length === 0) return false;
-    if (selectedCaseTagFilter === 'الكل') return true;
+    const insights = getMemberInsights(m.id);
+    if (selectedCaseTagFilter === 'الكل') {
+      return activeNotes.length > 0 || insights.hasQuestionMarks;
+    }
     return activeNotes.some(n => (n.behavior_tag || noteTags[0] || 'عادي') === selectedCaseTagFilter);
   });
 
@@ -928,10 +1125,29 @@ export default function ServantDashboard({
   const buildActivityPayload = (formObj) => {
     const statusObj =
       attendanceStatuses.find(s => s.code === formObj.status_code) ||
-      attendanceStatuses[0] || { label: 'حاضر', attended: true };
+      attendanceStatuses[0] || { code: 'present', label: 'حاضر', attended: true };
+
+    const expectedMins = parseTimeToMinutes(formObj.expected_time);
+    const checkInMins = parseTimeToMinutes(formObj.check_in_time);
+    const delayMinutes =
+      expectedMins !== null && checkInMins !== null && checkInMins > expectedMins
+        ? checkInMins - expectedMins
+        : 0;
+
+    const earlyLeaveMinutes =
+      formObj.status_code === 'early_leave' && formObj.check_out_time
+        ? 15
+        : 0;
+
+    const timeSummaryParts = [];
+    if (formObj.expected_time) timeSummaryParts.push(`موعد متوقع/معلن: ${formObj.expected_time}`);
+    if (formObj.check_in_time) timeSummaryParts.push(`دخول: ${formObj.check_in_time}`);
+    if (formObj.check_out_time) timeSummaryParts.push(`انصراف: ${formObj.check_out_time}`);
+    if (delayMinutes > 0) timeSummaryParts.push(`تأخير ${delayMinutes} دقيقة`);
 
     const combinedNotes = [
       statusObj.label !== 'حاضر' ? `حالة: ${statusObj.label}` : '',
+      timeSummaryParts.join(' | '),
       (formObj.notes || '').trim()
     ]
       .filter(Boolean)
@@ -940,6 +1156,12 @@ export default function ServantDashboard({
     return {
       activity_date: formObj.activity_date,
       activity_type: formObj.activity_type,
+      status_code: statusObj.code,
+      expected_time: formObj.expected_time || null,
+      check_in_time: formObj.check_in_time || null,
+      check_out_time: formObj.check_out_time || null,
+      delay_minutes: delayMinutes,
+      early_leave_minutes: earlyLeaveMinutes,
       attended: Boolean(statusObj.attended),
       notes: combinedNotes
     };
@@ -947,10 +1169,14 @@ export default function ServantDashboard({
 
   const handleQuickMemberAttendance = (member, statusCode) => {
     if (typeof onSaveActivity !== 'function') return;
+    const nowTime = getNowHHMM();
     const payload = buildActivityPayload({
       activity_date: batchActForm.activity_date,
       activity_type: batchActForm.activity_type,
       status_code: statusCode,
+      expected_time: batchActForm.expected_time,
+      check_in_time: batchActForm.check_in_time || nowTime,
+      check_out_time: statusCode === 'early_leave' ? (batchActForm.check_out_time || nowTime) : batchActForm.check_out_time,
       notes: batchActForm.notes
     });
     onSaveActivity(member.id, payload);
@@ -1045,6 +1271,15 @@ export default function ServantDashboard({
 
   return (
     <div className="space-y-4" dir="rtl">
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handlePhotoFileChange}
+        className="hidden"
+      />
+
       <BirthdayBanner birthdays={scopeBirthdays} />
 
       {canExtractSheet && (
@@ -1061,7 +1296,7 @@ export default function ServantDashboard({
                   showItemsManager ? 'bg-[#7a1c24] text-white' : 'bg-white text-[#7a1c24] border border-teal-300 hover:bg-teal-100/50'
                 }`}
               >
-                <SlidersHorizontal size={14} /> إدارة بنود الملاحظات والحضور
+                <SlidersHorizontal size={14} /> إدارة البنود والتنبيهات
               </button>
             )}
             <button
@@ -1075,14 +1310,13 @@ export default function ServantDashboard({
         </div>
       )}
 
-      {/* لوحة إضافة وحذف البنود للأدمن */}
       {isAdminUser && showItemsManager && (
         <div className="bg-white p-4 sm:p-5 rounded-3xl border border-[#7a1c24]/30 shadow-sm space-y-4 text-xs">
           <div className="flex items-center justify-between border-b pb-2.5">
             <div>
-              <h3 className="text-sm font-black text-[#7a1c24]">⚙️ إدارة بنود الملاحظات والحضور والانصراف (للأدمن)</h3>
+              <h3 className="text-sm font-black text-[#7a1c24]">⚙️ إدارة بنود الملاحظات والحضور والانصراف وعلامات المتابعة (للأدمن)</h3>
               <p className="text-[11px] text-gray-500 font-bold mt-0.5">
-                أضف أو احذف أي بند لتظهر فوراً في قوائم الملاحظات والحضور والانصراف وتُحفظ في الداتابيز.
+                تحكم في البنود، وعدد مرات التكرار المسبب لظهور علامات الاستفهام (❓❓)، ومدة الانقطاع للافتقاد.
               </p>
             </div>
             <button
@@ -1094,8 +1328,43 @@ export default function ServantDashboard({
             </button>
           </div>
 
+          <div className="bg-amber-50/70 p-3 rounded-2xl border border-amber-200 flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 font-bold text-amber-950">
+              <span>تكرار التأخير/الانصراف المبكر لظهور ❓❓:</span>
+              <input
+                type="number"
+                min="1"
+                max="15"
+                className="w-16 px-2 py-1 bg-white border rounded-xl text-center font-black"
+                value={irregularThreshold}
+                onChange={e => {
+                  const val = Math.max(1, Number(e.target.value) || 2);
+                  setIrregularThreshold(val);
+                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, val, absenceDaysThreshold);
+                }}
+              />
+              <span>مرات (آخر 30 يوم)</span>
+            </label>
+
+            <label className="flex items-center gap-2 font-bold text-amber-950">
+              <span>حد أيام الانقطاع للظهور في الافتقاد:</span>
+              <input
+                type="number"
+                min="1"
+                max="90"
+                className="w-16 px-2 py-1 bg-white border rounded-xl text-center font-black"
+                value={absenceDaysThreshold}
+                onChange={e => {
+                  const val = Math.max(1, Number(e.target.value) || 14);
+                  setAbsenceDaysThreshold(val);
+                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, irregularThreshold, val);
+                }}
+              />
+              <span>يوم</span>
+            </label>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* 1. بنود الملاحظات والمتابعة */}
             <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-amber-200 space-y-2.5">
               <strong className="text-amber-950 block font-black">1) بنود الملاحظات ومتابعة الحالة:</strong>
               <form onSubmit={handleAddNoteTagItem} className="flex gap-1.5">
@@ -1133,7 +1402,6 @@ export default function ServantDashboard({
               </div>
             </div>
 
-            {/* 2. أنواع اللقاءات والأنشطة */}
             <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-emerald-200 space-y-2.5">
               <strong className="text-emerald-950 block font-black">2) أنواع الحضور والانصراف:</strong>
               <form onSubmit={handleAddActivityTypeItem} className="flex gap-1.5">
@@ -1171,7 +1439,6 @@ export default function ServantDashboard({
               </div>
             </div>
 
-            {/* 3. حالات الحضور والانصراف */}
             <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-blue-200 space-y-2.5">
               <strong className="text-blue-950 block font-black">3) حالات الحضور والانصراف:</strong>
               <form onSubmit={handleAddAttendanceStatusItem} className="space-y-1.5">
@@ -1735,7 +2002,7 @@ export default function ServantDashboard({
                 <ClipboardCheck size={15} /> حضور وانصراف
               </span>
               <span className={`text-[10px] font-bold block mt-0.5 ${activeServiceModule === 'attendance' ? 'text-emerald-100' : 'text-emerald-700'}`}>
-                تسجيل حضور، غياب، وانصراف
+                تسجيل حضور، أوقات، وانصراف
               </span>
             </div>
             <span className={`px-2.5 py-1 rounded-xl font-black text-xs ${activeServiceModule === 'attendance' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-900'}`}>
@@ -1757,7 +2024,7 @@ export default function ServantDashboard({
                 <AlertTriangle size={15} /> افتقاد
               </span>
               <span className={`text-[10px] font-bold block mt-0.5 ${activeServiceModule === 'followup' ? 'text-red-100' : 'text-red-700'}`}>
-                غائبون ومنقطعون للزيارة
+                غياب/انقطاع لأكثر من {absenceDaysThreshold} يوم
               </span>
             </div>
             <span className={`px-2.5 py-1 rounded-xl font-black text-xs ${activeServiceModule === 'followup' ? 'bg-white/20 text-white' : 'bg-red-100 text-red-800'}`}>
@@ -1779,7 +2046,7 @@ export default function ServantDashboard({
                 <HeartHandshake size={15} /> متابعة حالة
               </span>
               <span className={`text-[10px] font-bold block mt-0.5 ${activeServiceModule === 'cases' ? 'text-amber-100' : 'text-amber-800'}`}>
-                مراجعة الحالات والملاحظات
+                ملاحظات وتنبيهات ❓❓
               </span>
             </div>
             <span className={`px-2.5 py-1 rounded-xl font-black text-xs ${activeServiceModule === 'cases' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-900'}`}>
@@ -1815,10 +2082,10 @@ export default function ServantDashboard({
 
         {activeServiceModule === 'attendance' && (
           <div className="bg-emerald-50/70 p-3.5 rounded-2xl border border-emerald-200 space-y-2.5">
-            <div className="font-black text-emerald-950 text-xs">
-              ⚡ شريط تسجيل الحضور والانصراف السريع (اختر النوع والتاريخ ثم اضغط زر الحالة أمام أي مخدوم):
+            <div className="font-black text-emerald-950 text-xs flex items-center gap-1.5">
+              <Clock size={14} /> شريط تسجيل الحضور والانصراف والأوقات (الموعد المعلن/المتوقع، وقت الدخول، ووقت الانصراف):
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2">
               <select
                 className="p-2 bg-white border border-emerald-200 rounded-xl text-xs font-bold"
                 value={batchActForm.activity_type}
@@ -1834,9 +2101,36 @@ export default function ServantDashboard({
                 value={batchActForm.activity_date}
                 onChange={e => setBatchActForm({ ...batchActForm, activity_date: e.target.value })}
               />
+              <div>
+                <label className="text-[10px] font-bold text-emerald-900 block mb-0.5">موعد معلن/متوقع</label>
+                <input
+                  type="time"
+                  className="w-full p-1.5 bg-white border border-emerald-200 rounded-xl text-xs font-bold"
+                  value={batchActForm.expected_time}
+                  onChange={e => setBatchActForm({ ...batchActForm, expected_time: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-emerald-900 block mb-0.5">وقت الدخول الفعلي</label>
+                <input
+                  type="time"
+                  className="w-full p-1.5 bg-white border border-emerald-200 rounded-xl text-xs font-bold"
+                  value={batchActForm.check_in_time}
+                  onChange={e => setBatchActForm({ ...batchActForm, check_in_time: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-emerald-900 block mb-0.5">وقت الانصراف</label>
+                <input
+                  type="time"
+                  className="w-full p-1.5 bg-white border border-emerald-200 rounded-xl text-xs font-bold"
+                  value={batchActForm.check_out_time}
+                  onChange={e => setBatchActForm({ ...batchActForm, check_out_time: e.target.value })}
+                />
+              </div>
               <input
                 type="text"
-                placeholder="ملاحظة سريعة (مثلاً: انصرف الساعة 11:30)..."
+                placeholder="ملاحظة (مثلاً: قال لوالده 10:00 وجه 11:00)..."
                 className="p-2 bg-white border border-emerald-200 rounded-xl text-xs font-bold"
                 value={batchActForm.notes}
                 onChange={e => setBatchActForm({ ...batchActForm, notes: e.target.value })}
@@ -1892,17 +2186,39 @@ export default function ServantDashboard({
           {displayedMembers.map((m, index) => {
             const mActs = activities.filter(a => a.member_id === m.id);
             const mNotes = getMemberActiveNotes(m.id);
-            const attInfo = getAttendanceInfo(m.id);
+            const insights = getMemberInsights(m.id);
             const callPhone = m.phone || m.father_phone || m.mother_phone;
+            const memberPhoto = getMemberPhoto(m);
 
             return (
               <div
                 key={m.id}
-                className={`p-4 rounded-3xl border text-xs space-y-3 shadow-2xs hover:shadow-sm transition bg-white border-gray-200 ${attInfo.accentBar}`}
+                className={`p-4 rounded-3xl border text-xs space-y-3 shadow-2xs hover:shadow-sm transition bg-white border-gray-200 ${insights.accentBar}`}
               >
                 <div className="flex items-start gap-2.5 w-full">
-                  <div className={`w-10 h-10 rounded-2xl border flex items-center justify-center font-black text-xs shrink-0 ${attInfo.avatarTone}`}>
-                    {getInitials(m.full_name)}
+                  <div className="relative shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => triggerMemberPhotoCapture(m)}
+                      title="تصوير / تحديث صورة المخدوم"
+                      className={`w-12 h-12 rounded-2xl border overflow-hidden flex items-center justify-center font-black text-xs cursor-pointer transition ${insights.avatarTone}`}
+                    >
+                      {uploadingPhotoMemberId === m.id ? (
+                        <span className="text-[10px]">...</span>
+                      ) : memberPhoto ? (
+                        <img src={memberPhoto} alt={m.full_name} className="w-full h-full object-cover" />
+                      ) : (
+                        <span>{getInitials(m.full_name)}</span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => triggerMemberPhotoCapture(m)}
+                      title="التقاط صورة للمخدوم"
+                      className="w-5 h-5 rounded-full bg-[#7a1c24] text-white flex items-center justify-center absolute -bottom-1 -left-1 shadow cursor-pointer"
+                    >
+                      <Camera size={11} />
+                    </button>
                   </div>
 
                   <div className="space-y-1.5 w-full min-w-0">
@@ -1919,9 +2235,14 @@ export default function ServantDashboard({
                           ⛪ {m.assigned_class}
                         </span>
                       )}
-                      <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${attInfo.badgeColor}`}>
-                        {attInfo.label}
+                      <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${insights.badgeColor}`}>
+                        {insights.label}
                       </span>
+                      {insights.hasQuestionMarks && (
+                        <span className="px-2 py-0.5 bg-amber-100 text-amber-950 border border-amber-300 rounded-lg text-[10px] font-black">
+                          ❓❓ تكرار تأخير/انصراف ({insights.irregularCount}) — متابعة
+                        </span>
+                      )}
                     </div>
 
                     <div className="text-gray-600 space-y-1 text-[11px]">
@@ -1988,7 +2309,7 @@ export default function ServantDashboard({
                     type="button"
                     onClick={() => {
                       setNoteMember(m);
-                      setNewNoteTag(noteTags[0] || 'عادي');
+                      setNewNoteTag(insights.hasQuestionMarks ? (noteTags.find(t => t.includes('متابعة')) || noteTags[0]) : (noteTags[0] || 'عادي'));
                       setNoteModal(true);
                     }}
                     className="px-2.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition"
@@ -2004,6 +2325,9 @@ export default function ServantDashboard({
                         activity_date: new Date().toISOString().split('T')[0],
                         activity_type: activityTypes[0] || 'مدارس أحد',
                         status_code: firstStatus.code,
+                        expected_time: '10:00',
+                        check_in_time: getNowHHMM(),
+                        check_out_time: '',
                         attended: firstStatus.attended,
                         notes: ''
                       });
@@ -2011,7 +2335,7 @@ export default function ServantDashboard({
                     }}
                     className="px-2.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition"
                   >
-                    <Calendar size={13} /> حضور ونشاط
+                    <Calendar size={13} /> حضور وأوقات
                   </button>
                 </div>
 
@@ -2193,7 +2517,7 @@ export default function ServantDashboard({
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-55">
           <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-3 text-xs font-bold">
             <div className="flex justify-between items-center">
-              <h3 className="font-extrabold text-sm text-[#7a1c24]">تسجيل حضور أو نشاط لـ: {selectedMember.full_name}</h3>
+              <h3 className="font-extrabold text-sm text-[#7a1c24]">تسجيل حضور وأوقات لـ: {selectedMember.full_name}</h3>
               <button type="button" onClick={() => setActModal(false)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer"><X size={16} /></button>
             </div>
             <form
@@ -2212,17 +2536,37 @@ export default function ServantDashboard({
                 ))}
               </select>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <input type="date" className="w-full p-2.5 border rounded-xl" value={actForm.activity_date} onChange={e => setActForm({ ...actForm, activity_date: e.target.value })} />
-                <select className="w-full p-2.5 border rounded-xl bg-white" value={actForm.status_code} onChange={e => setActForm({ ...actForm, status_code: e.target.value })}>
-                  {attendanceStatuses.map(st => (
-                    <option key={st.code} value={st.code}>{st.label} {st.emoji}</option>
-                  ))}
-                </select>
+                <div>
+                  <label className="block mb-1 text-gray-600">التاريخ</label>
+                  <input type="date" className="w-full p-2 border rounded-xl" value={actForm.activity_date} onChange={e => setActForm({ ...actForm, activity_date: e.target.value })} />
+                </div>
+                <div>
+                  <label className="block mb-1 text-gray-600">الحالة</label>
+                  <select className="w-full p-2 border rounded-xl bg-white" value={actForm.status_code} onChange={e => setActForm({ ...actForm, status_code: e.target.value })}>
+                    {attendanceStatuses.map(st => (
+                      <option key={st.code} value={st.code}>{st.label} {st.emoji}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
-              <input placeholder="ملاحظات الحضور أو الانصراف أو الافتقاد..." className="w-full p-2.5 border rounded-xl" value={actForm.notes} onChange={e => setActForm({ ...actForm, notes: e.target.value })} />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div>
+                  <label className="block mb-1 text-gray-600">موعد معلن/متوقع</label>
+                  <input type="time" className="w-full p-2 border rounded-xl" value={actForm.expected_time} onChange={e => setActForm({ ...actForm, expected_time: e.target.value })} />
+                </div>
+                <div>
+                  <label className="block mb-1 text-gray-600">وقت الدخول</label>
+                  <input type="time" className="w-full p-2 border rounded-xl" value={actForm.check_in_time} onChange={e => setActForm({ ...actForm, check_in_time: e.target.value })} />
+                </div>
+                <div>
+                  <label className="block mb-1 text-gray-600">وقت الانصراف</label>
+                  <input type="time" className="w-full p-2 border rounded-xl" value={actForm.check_out_time} onChange={e => setActForm({ ...actForm, check_out_time: e.target.value })} />
+                </div>
+              </div>
+              <input placeholder="ملاحظات (مثلاً: قال لوالده 10:00 ووصل 11:00 أو انصراف بدري)..." className="w-full p-2.5 border rounded-xl" value={actForm.notes} onChange={e => setActForm({ ...actForm, notes: e.target.value })} />
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setActModal(false)} className="px-4 py-2 border rounded-xl cursor-pointer">إلغاء</button>
-                <button type="submit" className="px-5 py-2 bg-[#7a1c24] text-white rounded-xl cursor-pointer">حفظ الحالة</button>
+                <button type="submit" className="px-5 py-2 bg-[#7a1c24] text-white rounded-xl cursor-pointer">حفظ الحالة والأوقات</button>
               </div>
             </form>
           </div>
