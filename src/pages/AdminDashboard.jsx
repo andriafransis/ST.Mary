@@ -132,6 +132,7 @@ const STAGE_OPTIONS = [
 ];
 
 const SERVANT_ROLES = ['head_servant', 'vice_head_servant', 'servant', 'meeting_servant', 'mercy_servant'];
+const SETUP_SUB_CARDS = ['users', 'roles_permissions', 'page_designer', 'settings', 'logs'];
 
 const detectGuardianType = (u) => {
   if (!u) return 'father';
@@ -1065,16 +1066,27 @@ export default function AdminDashboard({
     userSubTab === 'members' ? 'إضافة مخدوم' :
     userSubTab === 'parents' ? 'إضافة ولي أمر / عامل' : 'إضافة شخص جديد';
 
+  const isSetupChildCard = SETUP_SUB_CARDS.includes(activeCard);
+
   const renderTopBack = (title) => (
     <div className="bg-white p-4 rounded-2xl border shadow-2xs flex flex-wrap justify-between items-center gap-2 print:hidden">
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap">
         <button
           type="button"
-          onClick={() => setActiveCard('hub')}
+          onClick={() => setActiveCard(isSetupChildCard ? 'setup_hub' : 'hub')}
           className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer"
         >
-          <ArrowRight size={15} /> رجوع لكروت الإدارة
+          <ArrowRight size={15} /> {isSetupChildCard ? 'رجوع لكروت الإعدادات SETUP' : 'رجوع لكروت الإدارة'}
         </button>
+        {isSetupChildCard && (
+          <button
+            type="button"
+            onClick={() => setActiveCard('hub')}
+            className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-200 rounded-xl text-xs font-black cursor-pointer"
+          >
+            🏠 الرئيسية للإدارة
+          </button>
+        )}
         <h2 className="text-base md:text-lg font-black text-[#7a1c24]">{title}</h2>
         {!isAdmin && !canExtractSheet && (
           <span className="px-2.5 py-1 bg-red-100 text-red-800 rounded-full text-[10px] font-black flex items-center gap-1">
@@ -1090,9 +1102,60 @@ export default function AdminDashboard({
     </div>
   );
 
+  // الكروت الخمسة المطلوبة داخل كارت "الإعدادات SETUP"
+  const setupCards = [
+    {
+      id: 'users',
+      icon: '👥',
+      title: 'حسابات الكنيسة',
+      desc: 'إدارة الكهنة، الخدام، الشمامسة، المخدومين، وأولياء الأمور ونقلهم فردي وجماعي',
+      count: `${users.length} فرد`,
+      color: 'border-red-200 bg-white'
+    },
+    {
+      id: 'roles_permissions',
+      icon: '🔐',
+      title: 'الصلاحيات والأدوار',
+      desc: 'إنشاء قوالب صلاحيات وتحديد مين يشوف ومين يعدل لكل شاشة ولكل فرد',
+      count: `${roleTemplatesCount} قالب • موحّد`,
+      color: 'border-emerald-300 bg-emerald-50/30'
+    },
+    {
+      id: 'page_designer',
+      icon: '🎨',
+      title: 'التصميم وتعديل الصفحات',
+      desc: 'ترتيب الأقسام، إضافة ونشر الأخبار والقداسات والرحلات والفيديوهات والكهنة والروابط',
+      count: 'تحكم كامل',
+      color: 'border-pink-300 bg-pink-50/30'
+    },
+    {
+      id: 'settings',
+      icon: '⚙️',
+      title: 'الإعدادات وهوية الكنيسة',
+      desc: 'تغيير اسم الكنيسة، الشعار، رفع لوجو الكنيسة وصورة السيدة العذراء، وتليفون الطوارئ',
+      count: 'تخصيص كامل',
+      color: 'border-amber-300 bg-amber-50/40'
+    },
+    ...(isAdmin ? [{
+      id: 'logs',
+      icon: '📊',
+      title: 'سجل النشاط واللوجات والواتساب',
+      desc: 'مين دخل ومين مدخلش، الأجهزة، مدة الجلسة، وصلاحيات الواتساب للكهنة',
+      count: 'للأدمن فقط',
+      color: 'border-indigo-300 bg-indigo-50/40'
+    }] : [])
+  ];
+
   if (activeCard === 'hub') {
     const adminCards = [
-      { id: 'users', icon: '👥', title: 'حسابات الكنيسة', desc: 'إدارة الكهنة، الخدام، الشمامسة، المخدومين، وأولياء الأمور ونقلهم فردي وجماعي', count: `${users.length} فرد`, color: 'border-red-200 bg-white' },
+      {
+        id: 'setup_hub',
+        icon: '🛠️',
+        title: 'الإعدادات SETUP',
+        desc: 'حسابات الكنيسة، الصلاحيات، التصميم، الإعدادات، وسجل النشاط',
+        count: `${setupCards.length} كروت`,
+        color: 'border-rose-300 bg-rose-50/40'
+      },
       ...(canExtractSheet ? [{
         id: 'master_sheet',
         icon: '📋',
@@ -1101,17 +1164,13 @@ export default function AdminDashboard({
         count: `${users.length} مسجل`,
         color: 'border-teal-300 bg-teal-50/30'
       }] : []),
-      { id: 'roles_permissions', icon: '🔐', title: 'المركز الموحد للصلاحيات والأدوار', desc: 'إنشاء قوالب صلاحيات (الشعب، الكاهن، الخادم، المخدوم...) وتحديد مين يشوف ومين يعدل لكل شاشة ولكل فرد', count: `${roleTemplatesCount} قالب • موحّد`, color: 'border-emerald-300 bg-emerald-50/30' },
-      { id: 'page_designer', icon: '🎨', title: 'تصميم وتعديل الصفحة الرئيسية والصفحات', desc: 'ترتيب الأقسام، إضافة ونشر الأخبار والقداسات والرحلات والفيديوهات والكهنة وروابط يوتيوب وفيسبوك', count: 'تحكم كامل', color: 'border-pink-300 bg-pink-50/30' },
       { id: 'events', icon: '⛪', title: 'مواعيد القداسات والاجتماعات', desc: 'إضافة وتعديل مواعيد القداسات، العشيات، والاجتماعات العامة', count: `${events.length} موعد`, color: 'border-amber-200 bg-white' },
       { id: 'services', icon: '🏫', title: 'الخدمات والاجتماعات والفصول', desc: 'تصفح متدرج بالكروت: الخدمة ← السنة الدراسية ← الفصول، مع الإضافة والتعديل والنقل من جوه الكروت', count: `${dbServiceGroups.length} خدمة • ${services.length} فصل`, color: 'border-blue-200 bg-white' },
       { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل، المواد، الأسعار، حضور الطلاب والمدرسين، وشيت المحاسبة', count: 'إدارة الدروس', color: 'border-indigo-200 bg-white' },
       { id: 'joseph_arimathea', icon: '🕊️', title: 'خدمة يوسف الرامي', desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، خط سير السائق، ومتابعة المرافقين', count: 'خدمة المنتقلين', color: 'border-slate-300 bg-white' },
       { id: 'burial_and_caskets', icon: '⚰️', title: 'أماكن الدفن والصناديق وألحان يوسف الرامي', desc: 'جدول أماكن الدفن بالترقيم المتسلسل ورسوم الانتقال + مخزون الصناديق + ألحان يوسف الرامي وسلايدر الصوت', count: 'جداول وألحان', color: 'border-cyan-200 bg-white' },
       { id: 'categories', icon: '📂', title: 'كروت بحث الحالة', desc: 'تعديل وإضافة تصنيفات الأسر في مكتب الكاهن', count: `${caseCategories.length} تصنيف`, color: 'border-emerald-200 bg-white' },
-      { id: 'custom_cards', icon: '📌', title: 'كروت إضافية للكاهن', desc: 'إنشاء كروت مخصصة تظهر داخل شاشة الأب الكاهن', count: `${customCards.length} كارت`, color: 'border-purple-200 bg-white' },
-      ...(isAdmin ? [{ id: 'logs', icon: '📊', title: 'سجل النشاطات واللوجات والواتساب', desc: 'مين دخل ومين مدخلش، الأجهزة، مدة الجلسة، وصلاحيات الواتساب للكهنة', count: 'للأدمن فقط', color: 'border-indigo-300 bg-indigo-50/40' }] : []),
-      { id: 'settings', icon: '🏛️', title: 'إعدادات وهوية الكنيسة، اللوجو، وصورة العذراء، وأرقام الطوارئ', desc: 'تغيير اسم الكنيسة، الشعار، رفع لوجو الكنيسة وصورة السيدة العذراء من جهازك، ورقم تليفون الكنيسة والتنبيه العاجل', count: 'تخصيص كامل', color: 'border-amber-300 bg-amber-50/40' }
+      { id: 'custom_cards', icon: '📌', title: 'كروت إضافية للكاهن', desc: 'إنشاء كروت مخصصة تظهر داخل شاشة الأب الكاهن', count: `${customCards.length} كارت`, color: 'border-purple-200 bg-white' }
     ];
 
     return (
@@ -1130,6 +1189,50 @@ export default function AdminDashboard({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {adminCards.map(c => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setActiveCard(c.id)}
+              className={`${c.color} border-2 p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer`}
+            >
+              <div className="flex justify-between items-start w-full">
+                <span className="text-4xl">{c.icon}</span>
+                <span className="px-3 py-1 bg-[#f9ecee] text-[#7a1c24] rounded-full text-xs font-black">{c.count}</span>
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-gray-900">{c.title}</h3>
+                <p className="text-xs md:text-sm text-gray-600 mt-1">{c.desc}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (activeCard === 'setup_hub') {
+    return (
+      <div className="space-y-4">
+        <div className="bg-white p-4 rounded-2xl border shadow-2xs flex flex-wrap justify-between items-center gap-2">
+          <div className="flex items-center gap-3 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setActiveCard('hub')}
+              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer"
+            >
+              <ArrowRight size={15} /> رجوع لكروت الإدارة
+            </button>
+            <h2 className="text-base md:text-lg font-black text-[#7a1c24]">🛠️ الإعدادات SETUP</h2>
+          </div>
+          {onRefresh && (
+            <button type="button" onClick={onRefresh} className="px-3 py-2 bg-white border hover:bg-gray-50 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
+              <RefreshCw size={13} /> تحديث
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {setupCards.map(c => (
             <button
               key={c.id}
               type="button"
@@ -1208,7 +1311,7 @@ export default function AdminDashboard({
 
       {activeCard === 'roles_permissions' && (
         <div className="space-y-4 text-xs md:text-sm">
-          {renderTopBack('🔐 المركز الموحد للصلاحيات والأدوار المخصصة')}
+          {renderTopBack('🔐 الصلاحيات والأدوار')}
           <PermissionsPage
             users={users}
             roleScreens={roleScreens}
@@ -1224,7 +1327,7 @@ export default function AdminDashboard({
 
       {activeCard === 'page_designer' && (
         <div className="space-y-4">
-          {renderTopBack('🎨 تصميم وتعديل الصفحة الرئيسية والصفحات')}
+          {renderTopBack('🎨 التصميم وتعديل الصفحات')}
           <AdminPageDesigner currentUser={effectiveUser} onSaved={onRefresh} />
         </div>
       )}
@@ -1434,7 +1537,6 @@ export default function AdminDashboard({
         <div className="space-y-4 text-xs">
           {renderTopBack('🏫 الخدمات والاجتماعات والسنوات الدراسية وفصولها')}
 
-          {/* تصفح متدرج بالكروت مع أكشنات مباشرة على كل مستوى: الخدمة ← السنة الدراسية ← الفصول */}
           <ServiceDrillDownCards
             groups={effectiveGroups}
             services={services}
@@ -1516,7 +1618,6 @@ export default function AdminDashboard({
             }}
           />
 
-          {/* كارت نقل وتعديل الأب الكاهن المسؤول عن خدمة أو سنة دراسية أو فصل */}
           {isAdmin && (
             <div className="bg-purple-50/50 p-4 rounded-3xl border-2 border-purple-200 space-y-3 font-bold shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2446,7 +2547,7 @@ export default function AdminDashboard({
 
       {activeCard === 'logs' && isAdmin && (
         <div className="space-y-4 text-xs">
-          {renderTopBack('📊 سجل النشاطات والجلسات وصلاحيات الواتساب')}
+          {renderTopBack('📊 سجل النشاط واللوجات والواتساب')}
           <AdminLogsAndWaWidget
             currentUser={effectiveUser}
             priests={priestsList}
@@ -2458,7 +2559,7 @@ export default function AdminDashboard({
 
       {activeCard === 'settings' && (
         <div className="space-y-4 text-xs">
-          {renderTopBack('🏛️ إعدادات وهوية الكنيسة، اللوجو، وصورة العذراء، وأرقام الطوارئ')}
+          {renderTopBack('⚙️ الإعدادات وهوية الكنيسة')}
           <form onSubmit={handleSaveChurchIdentity} className="bg-white p-6 rounded-3xl border shadow-sm space-y-4 max-w-2xl font-bold">
             <div className="flex items-center gap-2 text-[#7a1c24] text-sm font-black border-b pb-2">
               <Settings size={18} /> تخصيص اسم الكنيسة، لوجو الكنيسة، صورة السيدة العذراء، وأرقام التواصل
