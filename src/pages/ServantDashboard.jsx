@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import {
   Phone, Search, UserPlus, Calendar, MessageSquareText, Layers,
   MessageCircle, AlertTriangle, Users, MapPin, X, FileSpreadsheet,
-  ArrowRight, BookOpen, Plus, Pencil, Trash2, Check, LayoutGrid, List, Sparkles
+  ArrowRight, BookOpen, Plus, Pencil, Trash2, Check, LayoutGrid, List,
+  ClipboardCheck, HeartHandshake, CheckCircle2
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BirthdayBanner from '../components/BirthdayBanner';
@@ -32,6 +33,33 @@ const CORE_SERVICE_GROUPS = [
 ];
 
 const GENDER_SCOPES = ['الكل', 'بنين', 'بنات'];
+
+const NOTE_TAG_OPTIONS = [
+  'عادي',
+  'يحتاج متابعة خاصة',
+  'مشاكل عائلية',
+  'مجد ومجتهد',
+  'ظروف صحية',
+  'متابعة دراسية / سلوكية',
+  'احتياج افتقاد'
+];
+
+const ACTIVITY_TYPE_OPTIONS = [
+  'مدارس أحد',
+  'قداس إلهي',
+  'صلاة عشية',
+  'اجتماع خدمة / درس كتاب',
+  'ألحان / كورال / شماسة',
+  'مؤتمر / خلوة / رحلة'
+];
+
+const ATTENDANCE_STATUS_OPTIONS = [
+  { value: 'present', label: 'حاضر ✅', attended: true },
+  { value: 'absent', label: 'غائب ❌', attended: false },
+  { value: 'early_leave', label: 'انصراف مبكر 🚪', attended: true },
+  { value: 'late', label: 'حضور متأخر ⏱️', attended: true },
+  { value: 'excused', label: 'معتذر بعذر 📝', attended: false }
+];
 
 const isMaleMember = (m) => {
   const g = String(m?.gender || '').trim();
@@ -239,14 +267,33 @@ export default function ServantDashboard({
   })();
 
   const [selectedGenderFilter, setSelectedGenderFilter] = useState(defaultGenderScope);
-  const [viewMode, setViewMode] = useState('list');
+
+  // التبويب الرئيسي داخل الخدمة المختارة:
+  // 'search' | 'attendance' | 'followup' | 'cases'
+  const [activeServiceModule, setActiveServiceModule] = useState('search');
+  const [selectedCaseTagFilter, setSelectedCaseTagFilter] = useState('الكل');
+
   const [cardDensity, setCardDensity] = useState('compact');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
 
+  // تسجيل حضور / انصراف سريع جماعي أو فردي داخل بند الحضور والانصراف
+  const [batchActForm, setBatchActForm] = useState({
+    activity_date: new Date().toISOString().split('T')[0],
+    activity_type: 'مدارس أحد',
+    status_code: 'present',
+    notes: ''
+  });
+
   const [actModal, setActModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState(null);
-  const [actForm, setActForm] = useState({ activity_date: new Date().toISOString().split('T')[0], activity_type: 'مدارس أحد', attended: true, notes: '' });
+  const [actForm, setActForm] = useState({
+    activity_date: new Date().toISOString().split('T')[0],
+    activity_type: 'مدارس أحد',
+    status_code: 'present',
+    attended: true,
+    notes: ''
+  });
 
   const [noteModal, setNoteModal] = useState(false);
   const [noteMember, setNoteMember] = useState(null);
@@ -661,6 +708,11 @@ export default function ServantDashboard({
     };
   };
 
+  const getMemberActiveNotes = (memberId) =>
+    memberNotes.filter(
+      n => n.member_id === memberId && !hiddenNotes[n.id] && !n.is_read && !n.acknowledged
+    );
+
   const getInitials = (fullName = '') => {
     const parts = String(fullName || '').trim().split(/\s+/).filter(Boolean);
     if (parts.length === 0) return 'م';
@@ -669,11 +721,23 @@ export default function ServantDashboard({
   };
 
   const followUpMembers = scopeMembers.filter(m => getAttendanceInfo(m.id).needsFollowUp);
-  const basePool = viewMode === 'followup' ? followUpMembers : scopeMembers;
+  const caseTrackingMembers = scopeMembers.filter(m => {
+    const activeNotes = getMemberActiveNotes(m.id);
+    if (activeNotes.length === 0) return false;
+    if (selectedCaseTagFilter === 'الكل') return true;
+    return activeNotes.some(n => (n.behavior_tag || 'عادي') === selectedCaseTagFilter);
+  });
+
+  const modulePool =
+    activeServiceModule === 'followup'
+      ? followUpMembers
+      : activeServiceModule === 'cases'
+      ? caseTrackingMembers
+      : scopeMembers;
 
   const displayedMembers = searchQuery.trim() === ''
-    ? basePool
-    : basePool.filter(m => (
+    ? modulePool
+    : modulePool.filter(m => (
       (m.full_name || '') + ' ' +
       (m.phone || '') + ' ' +
       (m.father_full_name || '') + ' ' +
@@ -681,6 +745,37 @@ export default function ServantDashboard({
       (m.address || '') + ' ' +
       (m.assigned_class || '')
     ).toLowerCase().includes(searchQuery.toLowerCase()));
+
+  const buildActivityPayload = (formObj) => {
+    const statusObj =
+      ATTENDANCE_STATUS_OPTIONS.find(s => s.value === formObj.status_code) ||
+      ATTENDANCE_STATUS_OPTIONS[0];
+    const statusLabel = statusObj.label.replace(/\s*[✅❌🚪⏱️📝]\s*$/, '');
+    const combinedNotes = [
+      statusLabel !== 'حاضر' ? `حالة: ${statusLabel}` : '',
+      (formObj.notes || '').trim()
+    ]
+      .filter(Boolean)
+      .join(' — ');
+
+    return {
+      activity_date: formObj.activity_date,
+      activity_type: formObj.activity_type,
+      attended: statusObj.attended,
+      notes: combinedNotes
+    };
+  };
+
+  const handleQuickMemberAttendance = (member, statusCode) => {
+    if (typeof onSaveActivity !== 'function') return;
+    const payload = buildActivityPayload({
+      activity_date: batchActForm.activity_date,
+      activity_type: batchActForm.activity_type,
+      status_code: statusCode,
+      notes: batchActForm.notes
+    });
+    onSaveActivity(member.id, payload);
+  };
 
   const openAddMemberModal = () => {
     if (!canAdd) return alert('🔒 غير مسموح لك بإضافة مخدومين حسب صلاحياتك الحالية.');
@@ -786,7 +881,7 @@ export default function ServantDashboard({
       <div className="space-y-3 bg-white p-4 rounded-3xl border border-gray-200 shadow-2xs">
         <div className="flex flex-wrap justify-between items-center gap-2 px-1">
           <div className="flex items-center gap-1.5 text-xs font-black text-gray-800">
-            <Layers size={15} className="text-[#7a1c24]" /> الخدمات الرئيسية (اضغط على الخدمة لفتح سنواتها وفصولها بالداخل):
+            <Layers size={15} className="text-[#7a1c24]" /> الخدمات الرئيسية (اضغط على الخدمة لفتح سنواتها وفصولها وبنود المتابعة):
           </div>
           <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold">
             <button
@@ -869,6 +964,7 @@ export default function ServantDashboard({
                     setSelectedYearFilter('');
                     setSelectedClassFilter('');
                     setSearchQuery('');
+                    setActiveServiceModule('search');
                     if (srv.includes('بنات')) setSelectedGenderFilter('بنات');
                     else if (srv.includes('بنين')) setSelectedGenderFilter('بنين');
                   }}
@@ -1202,8 +1298,8 @@ export default function ServantDashboard({
         </div>
       </div>
 
-      {/* قسم التحكم وكارت البحث السريع في وش الصفحة */}
-      <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3.5 text-xs">
+      {/* قسم الخدمة المفتوحة: رأس الخدمة + كروت البنود الأربعة (بحث / حضور وانصراف / افتقاد / متابعة حالة) */}
+      <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-4 text-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
             <h2 className="text-base sm:text-lg font-black text-gray-900">
@@ -1212,15 +1308,9 @@ export default function ServantDashboard({
               {selectedClassFilter ? ` ← ${selectedClassFilter}` : ''}
               {selectedGenderFilter !== 'الكل' ? ` (${selectedGenderFilter})` : ''}
             </h2>
-            <div className="flex flex-wrap items-center gap-2 mt-1">
-              <span className="text-gray-500 font-bold">المسؤول: {servant?.full_name || ''}</span>
-              <span className="px-2.5 py-0.5 bg-gray-100 text-gray-800 rounded-full font-bold text-[11px]">
-                المخدومين: {scopeMembers.length}
-              </span>
-              <span className={`px-2.5 py-0.5 rounded-full font-bold text-[11px] ${followUpMembers.length > 0 ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
-                يحتاجون افتقاد: {followUpMembers.length}
-              </span>
-            </div>
+            <p className="text-gray-500 font-bold mt-0.5">
+              المسؤول: {servant?.full_name || ''} • اختر البند المناسب للعمل داخل الخدمة مباشرة
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
@@ -1231,9 +1321,8 @@ export default function ServantDashboard({
                 className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1 cursor-pointer transition ${
                   cardDensity === 'compact' ? 'bg-white text-[#7a1c24] shadow-2xs' : 'text-gray-600'
                 }`}
-                title="عرض مدمج لتقليل السكرول"
               >
-                <LayoutGrid size={13} /> عرض مدمج
+                <LayoutGrid size={13} /> مدمج
               </button>
               <button
                 type="button"
@@ -1241,9 +1330,8 @@ export default function ServantDashboard({
                 className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1 cursor-pointer transition ${
                   cardDensity === 'detailed' ? 'bg-white text-[#7a1c24] shadow-2xs' : 'text-gray-600'
                 }`}
-                title="عرض تفصيلي كامل"
               >
-                <List size={13} /> عرض تفصيلي
+                <List size={13} /> تفصيلي
               </button>
             </div>
 
@@ -1259,61 +1347,174 @@ export default function ServantDashboard({
           </div>
         </div>
 
-        {/* كارت البحث السريع المباشر في وش الصفحة */}
-        <div className="bg-linear-to-l from-[#fbfaf7] to-red-50/40 p-3.5 rounded-2xl border border-amber-200/90 space-y-2.5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="font-black text-[#7a1c24] flex items-center gap-1.5 text-xs">
-              <Sparkles size={14} /> كارت البحث السريع (وصول فوري لأي مخدوم بدون سكرول طويل)
+        {/* 4 كروت بنود رئيسية أسفل الخدمة المختارة */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+          <button
+            type="button"
+            onClick={() => setActiveServiceModule('search')}
+            className={`p-3.5 rounded-2xl border text-right transition cursor-pointer flex items-center justify-between gap-2 ${
+              activeServiceModule === 'search'
+                ? 'bg-[#7a1c24] text-white border-[#7a1c24] shadow-xs'
+                : 'bg-[#fbfaf7] text-gray-900 border-gray-200 hover:bg-red-50/40'
+            }`}
+          >
+            <div>
+              <span className="font-black text-xs sm:text-sm block">🔍 بحث ومخدومين</span>
+              <span className={`text-[10px] font-bold block mt-0.5 ${activeServiceModule === 'search' ? 'text-amber-100' : 'text-gray-500'}`}>
+                وصول سريع وبيانات كاملة
+              </span>
+            </div>
+            <span className={`px-2.5 py-1 rounded-xl font-black text-xs ${activeServiceModule === 'search' ? 'bg-white/20 text-white' : 'bg-red-50 text-[#7a1c24]'}`}>
+              {scopeMembers.length}
             </span>
-            <span className="text-[11px] font-bold text-gray-600">
-              الظاهر حالياً: <strong className="text-gray-900">{displayedMembers.length}</strong> من {basePool.length}
-            </span>
-          </div>
+          </button>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 items-center">
-            <div className="lg:col-span-7 relative">
-              <Search size={16} className="absolute right-3.5 top-3 text-[#7a1c24]" />
+          <button
+            type="button"
+            onClick={() => setActiveServiceModule('attendance')}
+            className={`p-3.5 rounded-2xl border text-right transition cursor-pointer flex items-center justify-between gap-2 ${
+              activeServiceModule === 'attendance'
+                ? 'bg-emerald-800 text-white border-emerald-800 shadow-xs'
+                : 'bg-emerald-50/50 text-emerald-950 border-emerald-200 hover:bg-emerald-50'
+            }`}
+          >
+            <div>
+              <span className="font-black text-xs sm:text-sm block flex items-center gap-1">
+                <ClipboardCheck size={15} /> حضور وانصراف
+              </span>
+              <span className={`text-[10px] font-bold block mt-0.5 ${activeServiceModule === 'attendance' ? 'text-emerald-100' : 'text-emerald-700'}`}>
+                تسجيل حضور، غياب، وانصراف
+              </span>
+            </div>
+            <span className={`px-2.5 py-1 rounded-xl font-black text-xs ${activeServiceModule === 'attendance' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-900'}`}>
+              {scopeMembers.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveServiceModule('followup')}
+            className={`p-3.5 rounded-2xl border text-right transition cursor-pointer flex items-center justify-between gap-2 ${
+              activeServiceModule === 'followup'
+                ? 'bg-red-700 text-white border-red-700 shadow-xs'
+                : 'bg-red-50/50 text-red-950 border-red-200 hover:bg-red-50'
+            }`}
+          >
+            <div>
+              <span className="font-black text-xs sm:text-sm block flex items-center gap-1">
+                <AlertTriangle size={15} /> افتقاد
+              </span>
+              <span className={`text-[10px] font-bold block mt-0.5 ${activeServiceModule === 'followup' ? 'text-red-100' : 'text-red-700'}`}>
+                غائبون ومنقطعون للزيارة
+              </span>
+            </div>
+            <span className={`px-2.5 py-1 rounded-xl font-black text-xs ${activeServiceModule === 'followup' ? 'bg-white/20 text-white' : 'bg-red-100 text-red-800'}`}>
+              {followUpMembers.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveServiceModule('cases')}
+            className={`p-3.5 rounded-2xl border text-right transition cursor-pointer flex items-center justify-between gap-2 ${
+              activeServiceModule === 'cases'
+                ? 'bg-amber-800 text-white border-amber-800 shadow-xs'
+                : 'bg-amber-50/60 text-amber-950 border-amber-200 hover:bg-amber-50'
+            }`}
+          >
+            <div>
+              <span className="font-black text-xs sm:text-sm block flex items-center gap-1">
+                <HeartHandshake size={15} /> متابعة حالة
+              </span>
+              <span className={`text-[10px] font-bold block mt-0.5 ${activeServiceModule === 'cases' ? 'text-amber-100' : 'text-amber-800'}`}>
+                مراجعة الحالات والملاحظات
+              </span>
+            </div>
+            <span className={`px-2.5 py-1 rounded-xl font-black text-xs ${activeServiceModule === 'cases' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-900'}`}>
+              {caseTrackingMembers.length}
+            </span>
+          </button>
+        </div>
+
+        {/* شريط البحث السريع المشترك */}
+        <div className="bg-[#fbfaf7] p-3 rounded-2xl border border-gray-200 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          <div className="relative flex-1">
+            <Search size={16} className="absolute right-3.5 top-2.5 text-[#7a1c24]" />
+            <input
+              type="text"
+              placeholder="ابحث بالاسم، الأب، الأم، التليفون، أو العنوان..."
+              className="w-full pr-10 pl-8 py-2 bg-white border border-gray-200 rounded-xl text-xs font-bold outline-none focus:border-[#7a1c24]"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute left-2.5 top-2 text-gray-400 hover:text-gray-700 cursor-pointer"
+              >
+                <X size={15} />
+              </button>
+            )}
+          </div>
+          <span className="text-[11px] font-bold text-gray-600 px-2">
+            النتائج: <strong className="text-gray-900">{displayedMembers.length}</strong>
+          </span>
+        </div>
+
+        {/* إعدادات تسجيل الحضور والانصراف السريع عند فتح بند "حضور وانصراف" */}
+        {activeServiceModule === 'attendance' && (
+          <div className="bg-emerald-50/70 p-3.5 rounded-2xl border border-emerald-200 space-y-2.5">
+            <div className="font-black text-emerald-950 text-xs">
+              ⚡ شريط تسجيل الحضور والانصراف السريع (اختر النوع والتاريخ ثم اضغط زر الحالة أمام أي مخدوم):
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <select
+                className="p-2 bg-white border border-emerald-200 rounded-xl text-xs font-bold"
+                value={batchActForm.activity_type}
+                onChange={e => setBatchActForm({ ...batchActForm, activity_type: e.target.value })}
+              >
+                {ACTIVITY_TYPE_OPTIONS.map((actType, idx) => (
+                  <option key={idx} value={actType}>{actType}</option>
+                ))}
+              </select>
+              <input
+                type="date"
+                className="p-2 bg-white border border-emerald-200 rounded-xl text-xs font-bold"
+                value={batchActForm.activity_date}
+                onChange={e => setBatchActForm({ ...batchActForm, activity_date: e.target.value })}
+              />
               <input
                 type="text"
-                placeholder="اكتب اسم المخدوم، الأب، الأم، رقم التليفون، أو العنوان للوصول السريع..."
-                className="w-full pr-10 pl-9 py-2.5 bg-white border border-gray-300 rounded-2xl text-xs font-bold outline-none focus:border-[#7a1c24] transition"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="ملاحظة سريعة (مثلاً: انصرف الساعة 11:30)..."
+                className="p-2 bg-white border border-emerald-200 rounded-xl text-xs font-bold"
+                value={batchActForm.notes}
+                onChange={e => setBatchActForm({ ...batchActForm, notes: e.target.value })}
               />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute left-3 top-2.5 text-gray-400 hover:text-gray-700 cursor-pointer"
-                  title="مسح البحث"
-                >
-                  <X size={16} />
-                </button>
-              )}
-            </div>
-
-            <div className="lg:col-span-5 grid grid-cols-2 gap-1.5 bg-gray-100 p-1 rounded-2xl">
-              <button
-                type="button"
-                onClick={() => setViewMode('list')}
-                className={`py-2 px-3 rounded-xl font-bold cursor-pointer transition text-center ${
-                  viewMode === 'list' ? 'bg-gray-900 text-white shadow-xs' : 'text-gray-700 hover:bg-white/60'
-                }`}
-              >
-                كل المخدومين ({scopeMembers.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('followup')}
-                className={`py-2 px-3 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition ${
-                  viewMode === 'followup' ? 'bg-red-700 text-white shadow-xs' : 'text-red-800 hover:bg-red-50'
-                }`}
-              >
-                <AlertTriangle size={14} /> الافتقاد ({followUpMembers.length})
-              </button>
             </div>
           </div>
-        </div>
+        )}
+
+        {/* فلاتر نوع الحالة عند فتح بند "متابعة حالة" */}
+        {activeServiceModule === 'cases' && (
+          <div className="bg-amber-50/70 p-3 rounded-2xl border border-amber-200 flex flex-wrap items-center gap-1.5">
+            <span className="font-black text-amber-950 ml-1">تصفية الحالات:</span>
+            {['الكل', ...NOTE_TAG_OPTIONS].map(tag => (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => setSelectedCaseTagFilter(tag)}
+                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold cursor-pointer transition ${
+                  selectedCaseTagFilter === tag
+                    ? 'bg-amber-800 text-white'
+                    : 'bg-white text-amber-950 border border-amber-200 hover:bg-amber-100/60'
+                }`}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {displayedMembers.length === 0 ? (
@@ -1322,12 +1523,12 @@ export default function ServantDashboard({
             <Users size={24} />
           </div>
           <div>
-            <p className="text-sm font-black text-gray-800">لا يوجد مخدومون في هذه القائمة حالياً</p>
+            <p className="text-sm font-black text-gray-800">لا يوجد مخدومون في هذا البند حالياً</p>
             <p className="text-xs text-gray-400 mt-0.5">
-              {searchQuery ? 'جرّب البحث بكلمة مختلفة أو امسح خانة البحث.' : 'يمكنك إضافة أول مخدوم للفصل بسهولة من الزر بالأسفل.'}
+              {searchQuery ? 'جرّب البحث بكلمة مختلفة أو امسح خانة البحث.' : 'يمكنك التبديل بين البنود أو إضافة مخدوم جديد للفصل.'}
             </p>
           </div>
-          {!searchQuery && viewMode === 'list' && canAdd && (
+          {!searchQuery && activeServiceModule === 'search' && canAdd && (
             <button
               type="button"
               onClick={openAddMemberModal}
@@ -1341,9 +1542,7 @@ export default function ServantDashboard({
         <div className={cardDensity === 'compact' ? 'grid grid-cols-1 xl:grid-cols-2 gap-3' : 'grid gap-3'}>
           {displayedMembers.map((m, index) => {
             const mActs = activities.filter(a => a.member_id === m.id);
-            const mNotes = memberNotes.filter(
-              n => n.member_id === m.id && !hiddenNotes[n.id] && !n.is_read && !n.acknowledged
-            );
+            const mNotes = getMemberActiveNotes(m.id);
             const attInfo = getAttendanceInfo(m.id);
             const callPhone = m.phone || m.father_phone || m.mother_phone;
 
@@ -1352,44 +1551,76 @@ export default function ServantDashboard({
                 key={m.id}
                 className={`p-4 rounded-3xl border text-xs space-y-3 shadow-2xs hover:shadow-sm transition bg-white border-gray-200 ${attInfo.accentBar}`}
               >
-                <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
-                  <div className="flex items-start gap-2.5 w-full">
-                    <div className={`w-10 h-10 rounded-2xl border flex items-center justify-center font-black text-xs shrink-0 ${attInfo.avatarTone}`}>
-                      {getInitials(m.full_name)}
+                <div className="flex items-start gap-2.5 w-full">
+                  <div className={`w-10 h-10 rounded-2xl border flex items-center justify-center font-black text-xs shrink-0 ${attInfo.avatarTone}`}>
+                    {getInitials(m.full_name)}
+                  </div>
+
+                  <div className="space-y-1.5 w-full min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="px-2 py-0.5 bg-[#7a1c24] text-white rounded-lg text-[10px] font-black">#{index + 1}</span>
+                      <h3 className="text-sm font-black text-gray-900">{m.full_name}</h3>
+                      {m.gender && (
+                        <span className="px-2 py-0.5 bg-pink-50 text-pink-900 rounded-lg text-[10px] font-bold">
+                          {m.gender === 'أنثى' ? '♀️ بنات' : '♂️ بنين'}
+                        </span>
+                      )}
+                      {m.assigned_class && (
+                        <span className="px-2 py-0.5 bg-red-50 text-[#7a1c24] rounded-lg text-[10px] font-bold">
+                          ⛪ {m.assigned_class}
+                        </span>
+                      )}
+                      <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${attInfo.badgeColor}`}>
+                        {attInfo.label}
+                      </span>
                     </div>
 
-                    <div className="space-y-1.5 w-full min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="px-2 py-0.5 bg-[#7a1c24] text-white rounded-lg text-[10px] font-black">#{index + 1}</span>
-                        <h3 className="text-sm font-black text-gray-900">{m.full_name}</h3>
-                        {m.gender && (
-                          <span className="px-2 py-0.5 bg-pink-50 text-pink-900 rounded-lg text-[10px] font-bold">
-                            {m.gender === 'أنثى' ? '♀️ بنات' : '♂️ بنين'}
-                          </span>
-                        )}
-                        {m.assigned_class && (
-                          <span className="px-2 py-0.5 bg-red-50 text-[#7a1c24] rounded-lg text-[10px] font-bold">
-                            ⛪ {m.assigned_class}
-                          </span>
-                        )}
-                        <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${attInfo.badgeColor}`}>
-                          {attInfo.label}
-                        </span>
-                      </div>
-
-                      <div className="text-gray-600 space-y-1 text-[11px]">
-                        <p className="flex flex-wrap gap-x-3 gap-y-1">
-                          <span>👨‍👦 الأب: <strong className="text-gray-800">{m.father_full_name || '—'}</strong> (📞 {m.father_phone || '—'})</span>
-                          <span>👩‍👦 الأم: <strong className="text-gray-800">{m.mother_full_name || '—'}</strong> (📞 {m.mother_phone || '—'})</span>
-                        </p>
-                        <p className="text-gray-500 flex flex-wrap items-center gap-x-3 gap-y-1">
-                          <span className="inline-flex items-center gap-1"><Phone size={11} /> {m.phone || 'غير مسجل'}</span>
-                          <span className="inline-flex items-center gap-1"><MapPin size={11} /> {m.address || 'بدون عنوان'}</span>
-                        </p>
-                      </div>
+                    <div className="text-gray-600 space-y-1 text-[11px]">
+                      <p className="flex flex-wrap gap-x-3 gap-y-1">
+                        <span>👨‍👦 الأب: <strong className="text-gray-800">{m.father_full_name || '—'}</strong> (📞 {m.father_phone || '—'})</span>
+                        <span>👩‍👦 الأم: <strong className="text-gray-800">{m.mother_full_name || '—'}</strong> (📞 {m.mother_phone || '—'})</span>
+                      </p>
+                      <p className="text-gray-500 flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span className="inline-flex items-center gap-1"><Phone size={11} /> {m.phone || 'غير مسجل'}</span>
+                        <span className="inline-flex items-center gap-1"><MapPin size={11} /> {m.address || 'بدون عنوان'}</span>
+                      </p>
                     </div>
                   </div>
                 </div>
+
+                {/* أزرار تسجيل الحضور والانصراف المباشرة عند فتح بند "حضور وانصراف" */}
+                {activeServiceModule === 'attendance' && (
+                  <div className="bg-emerald-50/50 p-2.5 rounded-2xl border border-emerald-200/80 flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleQuickMemberAttendance(m, 'present')}
+                      className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-bold text-[11px] cursor-pointer"
+                    >
+                      حاضر ✅
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickMemberAttendance(m, 'absent')}
+                      className="px-2.5 py-1.5 bg-red-700 hover:bg-red-800 text-white rounded-xl font-bold text-[11px] cursor-pointer"
+                    >
+                      غائب ❌
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickMemberAttendance(m, 'early_leave')}
+                      className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-[11px] cursor-pointer"
+                    >
+                      انصراف مبكر 🚪
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickMemberAttendance(m, 'late')}
+                      className="px-2.5 py-1.5 bg-sky-700 hover:bg-sky-800 text-white rounded-xl font-bold text-[11px] cursor-pointer"
+                    >
+                      تأخير ⏱️
+                    </button>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 pt-1">
                   {callPhone ? (
@@ -1424,11 +1655,21 @@ export default function ServantDashboard({
                     onClick={() => { setNoteMember(m); setNoteModal(true); }}
                     className="px-2.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition"
                   >
-                    <MessageSquareText size={13} /> ملاحظة ({memberNotes.filter(n => n.member_id === m.id).length})
+                    <MessageSquareText size={13} /> ملاحظة ({mNotes.length})
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setSelectedMember(m); setActModal(true); }}
+                    onClick={() => {
+                      setSelectedMember(m);
+                      setActForm({
+                        activity_date: new Date().toISOString().split('T')[0],
+                        activity_type: 'مدارس أحد',
+                        status_code: 'present',
+                        attended: true,
+                        notes: ''
+                      });
+                      setActModal(true);
+                    }}
                     className="px-2.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition"
                   >
                     <Calendar size={13} /> حضور ونشاط
@@ -1437,7 +1678,9 @@ export default function ServantDashboard({
 
                 {mNotes.length > 0 && (
                   <div className="bg-amber-50/90 p-3 rounded-2xl border border-amber-300 space-y-2 text-[11px]">
-                    <span className="font-black text-[#7a1c24] block">🕊️ تنبيهات وملاحظات الأب الكاهن:</span>
+                    <span className="font-black text-[#7a1c24] flex items-center gap-1">
+                      <CheckCircle2 size={13} /> تنبيهات وملاحظات المتابعة:
+                    </span>
                     {mNotes.map(n => (
                       <div key={n.id} className="bg-white p-2.5 rounded-xl border border-amber-200 flex flex-col sm:flex-row justify-between sm:items-center gap-2">
                         <div className="space-y-1">
@@ -1593,12 +1836,11 @@ export default function ServantDashboard({
             </div>
             <form onSubmit={handleNoteSubmit} className="space-y-3">
               <select className="w-full p-2.5 border rounded-xl bg-white" value={newNoteTag} onChange={e => setNewNoteTag(e.target.value)}>
-                <option value="عادي">ملاحظة عادية</option>
-                <option value="يحتاج متابعة خاصة">يحتاج متابعة خاصة</option>
-                <option value="مشاكل عائلية">مشاكل عائلية / ظروف خاصة ⚠️</option>
-                <option value="مجد ومجتهد">مجد ومجتهد ⭐</option>
+                {NOTE_TAG_OPTIONS.map((tag, idx) => (
+                  <option key={idx} value={tag}>{tag}</option>
+                ))}
               </select>
-              <textarea required className="w-full p-2.5 border rounded-xl" rows="3" placeholder="اكتب الملاحظة..." value={newNoteText} onChange={e => setNewNoteText(e.target.value)} />
+              <textarea required className="w-full p-2.5 border rounded-xl" rows="3" placeholder="اكتب الملاحظة أو تفاصيل المتابعة..." value={newNoteText} onChange={e => setNewNoteText(e.target.value)} />
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setNoteModal(false)} className="px-4 py-2 border rounded-xl cursor-pointer">إلغاء</button>
                 <button type="submit" className="px-5 py-2 bg-[#7a1c24] text-white rounded-xl cursor-pointer">حفظ</button>
@@ -1615,23 +1857,33 @@ export default function ServantDashboard({
               <h3 className="font-extrabold text-sm text-[#7a1c24]">تسجيل حضور أو نشاط لـ: {selectedMember.full_name}</h3>
               <button type="button" onClick={() => setActModal(false)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer"><X size={16} /></button>
             </div>
-            <form onSubmit={e => { e.preventDefault(); if (typeof onSaveActivity === 'function') onSaveActivity(selectedMember.id, actForm); setActModal(false); }} className="space-y-3">
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                if (typeof onSaveActivity === 'function') {
+                  onSaveActivity(selectedMember.id, buildActivityPayload(actForm));
+                }
+                setActModal(false);
+              }}
+              className="space-y-3"
+            >
               <select className="w-full p-2.5 border rounded-xl bg-white" value={actForm.activity_type} onChange={e => setActForm({ ...actForm, activity_type: e.target.value })}>
-                <option value="مدارس أحد">مدارس أحد</option>
-                <option value="قداس">قداس إلهي</option>
-                <option value="عشية">صلاة عشية</option>
-                <option value="رحلة ترفيهية">رحلة ترفيهية 🏖️</option>
+                {ACTIVITY_TYPE_OPTIONS.map((actType, idx) => (
+                  <option key={idx} value={actType}>{actType}</option>
+                ))}
               </select>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <input type="date" className="w-full p-2.5 border rounded-xl" value={actForm.activity_date} onChange={e => setActForm({ ...actForm, activity_date: e.target.value })} />
-                <select className="w-full p-2.5 border rounded-xl bg-white" value={actForm.attended ? 'yes' : 'no'} onChange={e => setActForm({ ...actForm, attended: e.target.value === 'yes' })}>
-                  <option value="yes">حضر ✅</option><option value="no">غائب ❌</option>
+                <select className="w-full p-2.5 border rounded-xl bg-white" value={actForm.status_code} onChange={e => setActForm({ ...actForm, status_code: e.target.value })}>
+                  {ATTENDANCE_STATUS_OPTIONS.map((st, idx) => (
+                    <option key={idx} value={st.value}>{st.label}</option>
+                  ))}
                 </select>
               </div>
-              <input placeholder="ملاحظات الافتقاد أو الغياب..." className="w-full p-2.5 border rounded-xl" value={actForm.notes} onChange={e => setActForm({ ...actForm, notes: e.target.value })} />
+              <input placeholder="ملاحظات الحضور أو الانصراف أو الافتقاد..." className="w-full p-2.5 border rounded-xl" value={actForm.notes} onChange={e => setActForm({ ...actForm, notes: e.target.value })} />
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setActModal(false)} className="px-4 py-2 border rounded-xl cursor-pointer">إلغاء</button>
-                <button type="submit" className="px-5 py-2 bg-[#7a1c24] text-white rounded-xl cursor-pointer">حفظ حالة الحضور</button>
+                <button type="submit" className="px-5 py-2 bg-[#7a1c24] text-white rounded-xl cursor-pointer">حفظ الحالة</button>
               </div>
             </form>
           </div>
