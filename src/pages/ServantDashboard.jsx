@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase';
 import BirthdayBanner from '../components/BirthdayBanner';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
 import { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/ServiceGroupFeed';
+import MonthlyAnalyticsAndRewards from '../components/MonthlyAnalyticsAndRewards';
 
 const STAGE_OPTIONS = [
   'حضانة',
@@ -91,7 +92,6 @@ const getBirthMonthDay = (dobStr) => {
   if (!dobStr) return null;
   const parts = String(dobStr).trim().split(/[-/]/);
   if (parts.length < 3) return null;
-  // يدعم YYYY-MM-DD أو DD/MM/YYYY
   if (parts[0].length === 4) {
     return { month: Number(parts[1]), day: Number(parts[2]) };
   }
@@ -174,7 +174,6 @@ export default function ServantDashboard({
   const cameraInputRef = useRef(null);
   const pendingPhotoMemberRef = useRef(null);
 
-  // إشعارات أعياد الميلاد جوه شاشة الخادم: 'members' | 'servants'
   const [birthdayTab, setBirthdayTab] = useState('members');
 
   const [noteTags, setNoteTags] = useState(() => {
@@ -224,7 +223,6 @@ export default function ServantDashboard({
     }
   });
 
-  // حد المواظبة لاستحقاق رحلة مجانية أو مكافأة
   const [rewardStreakThreshold, setRewardStreakThreshold] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(CUSTOM_ITEMS_STORAGE_KEY) || '{}');
@@ -654,7 +652,6 @@ export default function ServantDashboard({
 
   const [selectedGenderFilter, setSelectedGenderFilter] = useState(defaultGenderScope);
 
-  // 'search' | 'attendance' | 'followup' | 'cases'
   const [activeServiceModule, setActiveServiceModule] = useState('search');
   const [selectedCaseTagFilter, setSelectedCaseTagFilter] = useState('الكل');
 
@@ -662,7 +659,6 @@ export default function ServantDashboard({
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
 
-  // نافذة فورية تفتح تلقائياً عند الضغط على (تأخير / انصراف مبكر / معتذر) مع تاريخ اليوم مقفول والتوقيت الفعلي
   const [quickStatusModal, setQuickStatusModal] = useState({
     open: false,
     member: null,
@@ -676,7 +672,6 @@ export default function ServantDashboard({
     reason: ''
   });
 
-  // نافذة تسجيل رحلة مجانية / مكافأة للمخدوم المواظب
   const [rewardModal, setRewardModal] = useState({
     open: false,
     member: null,
@@ -1067,7 +1062,6 @@ export default function ServantDashboard({
   const allMembers = users.filter(u => u.role === 'member');
   const allServants = users.filter(u => u.role && u.role !== 'member');
 
-  // إشعارات أعياد الميلاد في الشهر الحالي: للمخدومين وللخدام
   const currentMonth = new Date().getMonth() + 1;
   const currentToday = new Date().getDate();
 
@@ -1099,6 +1093,16 @@ export default function ServantDashboard({
   const visibleClassesForSelection = currentYearObj
     ? currentYearObj.classes
     : currentScopeStructure.groupClasses;
+
+  const hasClassesInCurrentScope = currentScopeStructure.groupClasses.length > 0;
+  const boundClassesForServant = [
+    ...new Set([
+      ...splitCommaClasses(assignedClass),
+      ...extraServices.filter(item =>
+        currentScopeStructure.groupClasses.some(c => c.class_name === item)
+      )
+    ])
+  ];
 
   const scopeMemberIds = new Set(scopeMembers.map(m => m.id));
   const scopeBirthdays = birthdays.filter(b => scopeMemberIds.has(b.id));
@@ -1250,7 +1254,6 @@ export default function ServantDashboard({
       DEFAULT_ATTENDANCE_STATUSES.find(s => s.code === formObj.status_code) ||
       attendanceStatuses[0] || { code: 'present', label: 'حاضر', attended: true };
 
-    // التاريخ دائماً تاريخ اليوم الفعلي غير قابل للتعديل من الخادم
     const lockedTodayDate = getTodayLocalDate();
     const nowTime = getNowHHMM();
     const effectiveCheckIn = formObj.check_in_time || nowTime;
@@ -1316,7 +1319,6 @@ export default function ServantDashboard({
     };
   };
 
-  // تسجيل مباشر وفوري بتاريخ اليوم وتوقيت اللحظة الفعلية
   const handleQuickMemberAttendance = (member, statusCode) => {
     const todayStr = getTodayLocalDate();
     const nowStr = getNowHHMM();
@@ -1523,7 +1525,6 @@ export default function ServantDashboard({
 
       <BirthdayBanner birthdays={scopeBirthdays} />
 
-      {/* إشعارات أعياد الميلاد جوه شاشة الخادم: تابتين للمخدومين وللخدام */}
       <div className="bg-white p-4 rounded-3xl border border-pink-200/80 shadow-2xs space-y-3 text-xs">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 font-black text-gray-900">
@@ -2299,7 +2300,6 @@ export default function ServantDashboard({
         </div>
       </div>
 
-      {/* قسم الخدمة المفتوحة: رأس الخدمة + 4 كروت بنود */}
       <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-4 text-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
@@ -2435,6 +2435,17 @@ export default function ServantDashboard({
             </span>
           </button>
         </div>
+
+        <MonthlyAnalyticsAndRewards
+          servant={servant}
+          allMembers={allMembers}
+          scopedMembers={scopeMembers}
+          activities={activities}
+          availableServices={availableServicesList}
+          selectedScope={selectedScope}
+          hasClassesInScope={hasClassesInCurrentScope}
+          boundClasses={boundClassesForServant}
+        />
 
         <div className="bg-[#fbfaf7] p-3 rounded-2xl border border-gray-200 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
           <div className="relative flex-1">
@@ -2731,7 +2742,6 @@ export default function ServantDashboard({
         </div>
       )}
 
-      {/* نافذة فورية عند اختيار (تأخير / انصراف مبكر / معتذر) مع تاريخ اليوم مقفول والتوقيت الفعلي */}
       {quickStatusModal.open && quickStatusModal.member && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-55">
           <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-3 text-xs font-bold">
@@ -2852,7 +2862,6 @@ export default function ServantDashboard({
         </div>
       )}
 
-      {/* نافذة تسجيل رحلة مجانية أو مكافأة للمخدوم المواظب */}
       {rewardModal.open && rewardModal.member && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-55">
           <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-3 text-xs font-bold">
