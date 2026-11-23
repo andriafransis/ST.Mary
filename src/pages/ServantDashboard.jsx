@@ -63,13 +63,12 @@ const DEFAULT_ATTENDANCE_STATUSES = [
 
 const CUSTOM_ITEMS_STORAGE_KEY = 'servant_custom_service_items_v1';
 
-const parseTimeToMinutes = (timeStr = '') => {
-  const match = String(timeStr || '').trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return null;
-  const hrs = Number(match[1]);
-  const mins = Number(match[2]);
-  if (Number.isNaN(hrs) || Number.isNaN(mins)) return null;
-  return hrs * 60 + mins;
+const getTodayLocalDate = () => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 };
 
 const getNowHHMM = () => {
@@ -77,6 +76,15 @@ const getNowHHMM = () => {
   const hh = String(now.getHours()).padStart(2, '0');
   const mm = String(now.getMinutes()).padStart(2, '0');
   return `${hh}:${mm}`;
+};
+
+const parseTimeToMinutes = (timeStr = '') => {
+  const match = String(timeStr || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  const hrs = Number(match[1]);
+  const mins = Number(match[2]);
+  if (Number.isNaN(hrs) || Number.isNaN(mins)) return null;
+  return hrs * 60 + mins;
 };
 
 const compressPhotoFile = (file, maxSide = 480, quality = 0.72) =>
@@ -125,11 +133,26 @@ const isPrepOrSecondaryScope = (scope = '') => {
   );
 };
 
+const canManageOfficialSchedule = (user) => {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  const roleStr = `${user.role || ''} ${user.job_title || ''} ${user.service_role || ''}`.toLowerCase();
+  return (
+    roleStr.includes('priest') ||
+    roleStr.includes('father') ||
+    roleStr.includes('أبونا') ||
+    roleStr.includes('ابونا') ||
+    roleStr.includes('كاهن') ||
+    user.permissions?.can_manage_schedule === true
+  );
+};
+
 export default function ServantDashboard({
   servant, users = [], services = [], serviceGroups = [], activities = [], memberNotes = [], birthdays = [],
   onAddMember, onSaveActivity, onSaveMemberNote, onAcknowledgeNote, onRefresh, onUpdateServiceStructure
 }) {
   const isAdminUser = servant?.role === 'admin';
+  const canEditSchedule = canManageOfficialSchedule(servant);
   const canAdd = isAdminUser || servant?.permissions?.can_add !== false;
   const canManageStructure = true;
   const canExtractSheet = canExtractMasterSheet(servant);
@@ -187,6 +210,27 @@ export default function ServantDashboard({
     }
   });
 
+  // المواعيد الرسمية وفترة السماح التي يحددها الأدمن أو أبونا
+  const [officialStartTime, setOfficialStartTime] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CUSTOM_ITEMS_STORAGE_KEY) || '{}');
+      return saved.officialStartTime || '10:00';
+    } catch {
+      return '10:00';
+    }
+  });
+
+  const [graceMinutes, setGraceMinutes] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CUSTOM_ITEMS_STORAGE_KEY) || '{}');
+      return Number.isFinite(Number(saved.graceMinutes)) && Number(saved.graceMinutes) >= 0
+        ? Number(saved.graceMinutes)
+        : 10;
+    } catch {
+      return 10;
+    }
+  });
+
   const [showItemsManager, setShowItemsManager] = useState(false);
   const [newNoteTagInput, setNewNoteTagInput] = useState('');
   const [newActivityTypeInput, setNewActivityTypeInput] = useState('');
@@ -199,14 +243,18 @@ export default function ServantDashboard({
     nextActivityTypes,
     nextAttendanceStatuses,
     nextIrregularThreshold = irregularThreshold,
-    nextAbsenceDaysThreshold = absenceDaysThreshold
+    nextAbsenceDaysThreshold = absenceDaysThreshold,
+    nextOfficialStartTime = officialStartTime,
+    nextGraceMinutes = graceMinutes
   ) => {
     const payload = {
       noteTags: nextNoteTags,
       activityTypes: nextActivityTypes,
       attendanceStatuses: nextAttendanceStatuses,
       irregularThreshold: nextIrregularThreshold,
-      absenceDaysThreshold: nextAbsenceDaysThreshold
+      absenceDaysThreshold: nextAbsenceDaysThreshold,
+      officialStartTime: nextOfficialStartTime,
+      graceMinutes: nextGraceMinutes
     };
     try {
       localStorage.setItem(CUSTOM_ITEMS_STORAGE_KEY, JSON.stringify(payload));
@@ -258,6 +306,12 @@ export default function ServantDashboard({
         }
         if (Number(data.value.absenceDaysThreshold) > 0) {
           setAbsenceDaysThreshold(Number(data.value.absenceDaysThreshold));
+        }
+        if (data.value.officialStartTime) {
+          setOfficialStartTime(data.value.officialStartTime);
+        }
+        if (Number.isFinite(Number(data.value.graceMinutes)) && Number(data.value.graceMinutes) >= 0) {
+          setGraceMinutes(Number(data.value.graceMinutes));
         }
       } catch {
         // تجاهل إذا لم يكن الجدول موجوداً
@@ -593,22 +647,36 @@ export default function ServantDashboard({
   const [showAddModal, setShowAddModal] = useState(false);
 
   const [batchActForm, setBatchActForm] = useState({
-    activity_date: new Date().toISOString().split('T')[0],
+    activity_date: getTodayLocalDate(),
     activity_type: activityTypes[0] || 'مدارس أحد',
-    status_code: attendanceStatuses[0]?.code || 'present',
-    expected_time: '10:00',
+    status_code: 'present',
+    expected_time: officialStartTime,
     check_in_time: getNowHHMM(),
     check_out_time: '',
     notes: ''
   });
 
+  // نافذة تفصيلية تفتح تلقائياً عند الضغط على (تأخير / انصراف مبكر / معتذر) مع أخذ تاريخ اليوم والوقت الحالي
+  const [quickStatusModal, setQuickStatusModal] = useState({
+    open: false,
+    member: null,
+    statusCode: 'late',
+    statusLabel: 'تأخير',
+    activity_date: getTodayLocalDate(),
+    activity_type: activityTypes[0] || 'مدارس أحد',
+    expected_time: officialStartTime,
+    check_in_time: getNowHHMM(),
+    check_out_time: getNowHHMM(),
+    reason: ''
+  });
+
   const [actModal, setActModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState(null);
   const [actForm, setActForm] = useState({
-    activity_date: new Date().toISOString().split('T')[0],
+    activity_date: getTodayLocalDate(),
     activity_type: activityTypes[0] || 'مدارس أحد',
-    status_code: attendanceStatuses[0]?.code || 'present',
-    expected_time: '10:00',
+    status_code: 'present',
+    expected_time: officialStartTime,
     check_in_time: getNowHHMM(),
     check_out_time: '',
     attended: true,
@@ -1122,64 +1190,136 @@ export default function ServantDashboard({
       (m.assigned_class || '')
     ).toLowerCase().includes(searchQuery.toLowerCase()));
 
-  const buildActivityPayload = (formObj) => {
+  const buildActivityPayload = (formObj, reasonText = '') => {
     const statusObj =
       attendanceStatuses.find(s => s.code === formObj.status_code) ||
+      DEFAULT_ATTENDANCE_STATUSES.find(s => s.code === formObj.status_code) ||
       attendanceStatuses[0] || { code: 'present', label: 'حاضر', attended: true };
 
-    const expectedMins = parseTimeToMinutes(formObj.expected_time);
-    const checkInMins = parseTimeToMinutes(formObj.check_in_time);
-    const delayMinutes =
+    const effectiveDate = formObj.activity_date || getTodayLocalDate();
+    const nowTime = getNowHHMM();
+    const effectiveCheckIn = formObj.check_in_time || nowTime;
+    const effectiveExpected = formObj.expected_time || officialStartTime || '10:00';
+    const effectiveCheckOut = formObj.check_out_time || '';
+
+    const expectedMins = parseTimeToMinutes(effectiveExpected);
+    const checkInMins = parseTimeToMinutes(effectiveCheckIn);
+
+    const rawDiff =
       expectedMins !== null && checkInMins !== null && checkInMins > expectedMins
         ? checkInMins - expectedMins
         : 0;
 
+    const countedDelayMinutes =
+      formObj.status_code === 'late' || rawDiff > graceMinutes
+        ? Math.max(rawDiff, formObj.status_code === 'late' ? Math.max(rawDiff, 1) : 0)
+        : 0;
+
     const earlyLeaveMinutes =
-      formObj.status_code === 'early_leave' && formObj.check_out_time
+      formObj.status_code === 'early_leave'
         ? 15
         : 0;
 
-    const timeSummaryParts = [];
-    if (formObj.expected_time) timeSummaryParts.push(`موعد متوقع/معلن: ${formObj.expected_time}`);
-    if (formObj.check_in_time) timeSummaryParts.push(`دخول: ${formObj.check_in_time}`);
-    if (formObj.check_out_time) timeSummaryParts.push(`انصراف: ${formObj.check_out_time}`);
-    if (delayMinutes > 0) timeSummaryParts.push(`تأخير ${delayMinutes} دقيقة`);
+    const cleanReason = (reasonText || formObj.notes || '').trim();
+    const notesParts = [];
 
-    const combinedNotes = [
-      statusObj.label !== 'حاضر' ? `حالة: ${statusObj.label}` : '',
-      timeSummaryParts.join(' | '),
-      (formObj.notes || '').trim()
-    ]
-      .filter(Boolean)
-      .join(' — ');
+    if (formObj.status_code === 'present') {
+      notesParts.push(`حضر الساعة ${effectiveCheckIn}`);
+      if (rawDiff > 0 && rawDiff <= graceMinutes) {
+        notesParts.push(`ضمن فترة السماح (${graceMinutes} د)`);
+      } else if (countedDelayMinutes > 0) {
+        notesParts.push(`تأخر ${countedDelayMinutes} دقيقة`);
+      }
+    } else if (formObj.status_code === 'absent') {
+      notesParts.push('غائب');
+    } else if (formObj.status_code === 'early_leave') {
+      notesParts.push(`انصراف مبكر الساعة ${effectiveCheckOut || nowTime}`);
+    } else if (formObj.status_code === 'late') {
+      notesParts.push(`تأخير — وصل الساعة ${effectiveCheckIn}${countedDelayMinutes > 0 ? ` (${countedDelayMinutes} د)` : ''}`);
+    } else if (formObj.status_code === 'excused') {
+      notesParts.push('معتذر');
+    } else {
+      notesParts.push(statusObj.label);
+    }
+
+    if (cleanReason) {
+      notesParts.push(`السبب: ${cleanReason}`);
+    }
 
     return {
-      activity_date: formObj.activity_date,
-      activity_type: formObj.activity_type,
+      activity_date: effectiveDate,
+      activity_type: formObj.activity_type || activityTypes[0] || 'مدارس أحد',
       status_code: statusObj.code,
-      expected_time: formObj.expected_time || null,
-      check_in_time: formObj.check_in_time || null,
-      check_out_time: formObj.check_out_time || null,
-      delay_minutes: delayMinutes,
+      expected_time: effectiveExpected,
+      check_in_time: formObj.status_code === 'absent' || formObj.status_code === 'excused' ? null : effectiveCheckIn,
+      check_out_time: formObj.status_code === 'early_leave' ? (effectiveCheckOut || nowTime) : (effectiveCheckOut || null),
+      delay_minutes: countedDelayMinutes,
       early_leave_minutes: earlyLeaveMinutes,
       attended: Boolean(statusObj.attended),
-      notes: combinedNotes
+      notes: notesParts.join(' — ')
     };
   };
 
+  // عند الضغط على حاضر أو غائب أو أي تاب حالة في الكارت
   const handleQuickMemberAttendance = (member, statusCode) => {
-    if (typeof onSaveActivity !== 'function') return;
-    const nowTime = getNowHHMM();
-    const payload = buildActivityPayload({
-      activity_date: batchActForm.activity_date,
-      activity_type: batchActForm.activity_type,
-      status_code: statusCode,
-      expected_time: batchActForm.expected_time,
-      check_in_time: batchActForm.check_in_time || nowTime,
-      check_out_time: statusCode === 'early_leave' ? (batchActForm.check_out_time || nowTime) : batchActForm.check_out_time,
-      notes: batchActForm.notes
-    });
-    onSaveActivity(member.id, payload);
+    const todayStr = getTodayLocalDate();
+    const nowStr = getNowHHMM();
+    const statusObj =
+      attendanceStatuses.find(s => s.code === statusCode) ||
+      DEFAULT_ATTENDANCE_STATUSES.find(s => s.code === statusCode) ||
+      { code: statusCode, label: statusCode, attended: true };
+
+    // إذا ضغط على (تأخير / انصراف مبكر / معتذر) يفتح له نافذة فورية لتحديد التوقيت والسبب
+    if (statusCode === 'late' || statusCode === 'early_leave' || statusCode === 'excused') {
+      setQuickStatusModal({
+        open: true,
+        member,
+        statusCode,
+        statusLabel: statusObj.label,
+        activity_date: todayStr,
+        activity_type: batchActForm.activity_type || activityTypes[0] || 'مدارس أحد',
+        expected_time: batchActForm.expected_time || officialStartTime || '10:00',
+        check_in_time: nowStr,
+        check_out_time: nowStr,
+        reason: batchActForm.notes || ''
+      });
+      return;
+    }
+
+    // حاضر أو غائب يسجل فوراً بتاريخ اليوم والتوقيت الفعلي
+    if (typeof onSaveActivity === 'function') {
+      const payload = buildActivityPayload({
+        activity_date: todayStr,
+        activity_type: batchActForm.activity_type || activityTypes[0] || 'مدارس أحد',
+        status_code: statusCode,
+        expected_time: batchActForm.expected_time || officialStartTime || '10:00',
+        check_in_time: nowStr,
+        check_out_time: '',
+        notes: batchActForm.notes || ''
+      });
+      onSaveActivity(member.id, payload);
+    }
+  };
+
+  const handleConfirmQuickStatusModal = (e) => {
+    e.preventDefault();
+    if (!quickStatusModal.member || typeof onSaveActivity !== 'function') return;
+
+    const payload = buildActivityPayload(
+      {
+        activity_date: quickStatusModal.activity_date || getTodayLocalDate(),
+        activity_type: quickStatusModal.activity_type,
+        status_code: quickStatusModal.statusCode,
+        expected_time: quickStatusModal.expected_time,
+        check_in_time: quickStatusModal.check_in_time,
+        check_out_time: quickStatusModal.check_out_time,
+        notes: ''
+      },
+      quickStatusModal.reason
+    );
+
+    onSaveActivity(quickStatusModal.member.id, payload);
+    setQuickStatusModal(prev => ({ ...prev, open: false, reason: '' }));
   };
 
   const openAddMemberModal = () => {
@@ -1288,7 +1428,7 @@ export default function ServantDashboard({
             📋 {isAdminUser ? 'بصفتك سوبر أدمن' : 'بصفتك أمين الخدمة'}، يمكنك سحب شيت التسلسل والافتقاد والترحيم وتصديره أو طباعته.
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {isAdminUser && (
+            {canEditSchedule && (
               <button
                 type="button"
                 onClick={() => setShowItemsManager(prev => !prev)}
@@ -1296,7 +1436,7 @@ export default function ServantDashboard({
                   showItemsManager ? 'bg-[#7a1c24] text-white' : 'bg-white text-[#7a1c24] border border-teal-300 hover:bg-teal-100/50'
                 }`}
               >
-                <SlidersHorizontal size={14} /> إدارة البنود والتنبيهات
+                <SlidersHorizontal size={14} /> المواعيد الرسمية والبنود
               </button>
             )}
             <button
@@ -1310,13 +1450,13 @@ export default function ServantDashboard({
         </div>
       )}
 
-      {isAdminUser && showItemsManager && (
+      {canEditSchedule && showItemsManager && (
         <div className="bg-white p-4 sm:p-5 rounded-3xl border border-[#7a1c24]/30 shadow-sm space-y-4 text-xs">
           <div className="flex items-center justify-between border-b pb-2.5">
             <div>
-              <h3 className="text-sm font-black text-[#7a1c24]">⚙️ إدارة بنود الملاحظات والحضور والانصراف وعلامات المتابعة (للأدمن)</h3>
+              <h3 className="text-sm font-black text-[#7a1c24]">⚙️ إعداد المواعيد الرسمية وفترة السماح والبنود (أدمن / أبونا)</h3>
               <p className="text-[11px] text-gray-500 font-bold mt-0.5">
-                تحكم في البنود، وعدد مرات التكرار المسبب لظهور علامات الاستفهام (❓❓)، ومدة الانقطاع للافتقاد.
+                حدد الموعد الرسمي ومدة السماح المسموحة للتأخير (بالدقائق) ومدة الانقطاع وعلامات المتابعة.
               </p>
             </div>
             <button
@@ -1328,39 +1468,68 @@ export default function ServantDashboard({
             </button>
           </div>
 
-          <div className="bg-amber-50/70 p-3 rounded-2xl border border-amber-200 flex flex-wrap items-center gap-4">
-            <label className="flex items-center gap-2 font-bold text-amber-950">
-              <span>تكرار التأخير/الانصراف المبكر لظهور ❓❓:</span>
+          <div className="bg-indigo-50/70 p-3.5 rounded-2xl border border-indigo-200 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <label className="font-bold text-indigo-950 space-y-1">
+              <span className="block text-[11px]">⏰ الموعد الرسمي للخدمة/الاجتماع:</span>
+              <input
+                type="time"
+                className="w-full px-2.5 py-1.5 bg-white border rounded-xl font-black"
+                value={officialStartTime}
+                onChange={e => {
+                  const val = e.target.value || '10:00';
+                  setOfficialStartTime(val);
+                  setBatchActForm(prev => ({ ...prev, expected_time: val }));
+                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, irregularThreshold, absenceDaysThreshold, val, graceMinutes);
+                }}
+              />
+            </label>
+
+            <label className="font-bold text-indigo-950 space-y-1">
+              <span className="block text-[11px]">⏳ سماح التأخير المسموح (دقائق):</span>
+              <input
+                type="number"
+                min="0"
+                max="120"
+                className="w-full px-2.5 py-1.5 bg-white border rounded-xl font-black"
+                value={graceMinutes}
+                onChange={e => {
+                  const val = Math.max(0, Number(e.target.value) || 0);
+                  setGraceMinutes(val);
+                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, irregularThreshold, absenceDaysThreshold, officialStartTime, val);
+                }}
+              />
+            </label>
+
+            <label className="font-bold text-amber-950 space-y-1">
+              <span className="block text-[11px]">❓❓ تكرار التأخير/الانصراف لظهور التنبيه:</span>
               <input
                 type="number"
                 min="1"
                 max="15"
-                className="w-16 px-2 py-1 bg-white border rounded-xl text-center font-black"
+                className="w-full px-2.5 py-1.5 bg-white border rounded-xl font-black"
                 value={irregularThreshold}
                 onChange={e => {
                   const val = Math.max(1, Number(e.target.value) || 2);
                   setIrregularThreshold(val);
-                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, val, absenceDaysThreshold);
+                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, val, absenceDaysThreshold, officialStartTime, graceMinutes);
                 }}
               />
-              <span>مرات (آخر 30 يوم)</span>
             </label>
 
-            <label className="flex items-center gap-2 font-bold text-amber-950">
-              <span>حد أيام الانقطاع للظهور في الافتقاد:</span>
+            <label className="font-bold text-red-950 space-y-1">
+              <span className="block text-[11px]">📅 أيام الانقطاع للظهور في الافتقاد:</span>
               <input
                 type="number"
                 min="1"
                 max="90"
-                className="w-16 px-2 py-1 bg-white border rounded-xl text-center font-black"
+                className="w-full px-2.5 py-1.5 bg-white border rounded-xl font-black"
                 value={absenceDaysThreshold}
                 onChange={e => {
                   const val = Math.max(1, Number(e.target.value) || 14);
                   setAbsenceDaysThreshold(val);
-                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, irregularThreshold, val);
+                  persistCustomItems(noteTags, activityTypes, attendanceStatuses, irregularThreshold, val, officialStartTime, graceMinutes);
                 }}
               />
-              <span>يوم</span>
             </label>
           </div>
 
@@ -1929,7 +2098,7 @@ export default function ServantDashboard({
               {selectedGenderFilter !== 'الكل' ? ` (${selectedGenderFilter})` : ''}
             </h2>
             <p className="text-gray-500 font-bold mt-0.5">
-              المسؤول: {servant?.full_name || ''} • اختر البند المناسب للعمل داخل الخدمة مباشرة
+              المسؤول: {servant?.full_name || ''} • الموعد الرسمي: <strong className="text-gray-800">{officialStartTime}</strong> • السماح: <strong className="text-gray-800">{graceMinutes} د</strong>
             </p>
           </div>
 
@@ -2083,7 +2252,7 @@ export default function ServantDashboard({
         {activeServiceModule === 'attendance' && (
           <div className="bg-emerald-50/70 p-3.5 rounded-2xl border border-emerald-200 space-y-2.5">
             <div className="font-black text-emerald-950 text-xs flex items-center gap-1.5">
-              <Clock size={14} /> شريط تسجيل الحضور والانصراف والأوقات (الموعد المعلن/المتوقع، وقت الدخول، ووقت الانصراف):
+              <Clock size={14} /> شريط الحضور والانصراف (يأخذ تاريخ اليوم والتوقيت الفعلي تلقائياً):
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2">
               <select
@@ -2102,7 +2271,7 @@ export default function ServantDashboard({
                 onChange={e => setBatchActForm({ ...batchActForm, activity_date: e.target.value })}
               />
               <div>
-                <label className="text-[10px] font-bold text-emerald-900 block mb-0.5">موعد معلن/متوقع</label>
+                <label className="text-[10px] font-bold text-emerald-900 block mb-0.5">موعد رسمي/متوقع</label>
                 <input
                   type="time"
                   className="w-full p-1.5 bg-white border border-emerald-200 rounded-xl text-xs font-bold"
@@ -2130,7 +2299,7 @@ export default function ServantDashboard({
               </div>
               <input
                 type="text"
-                placeholder="ملاحظة (مثلاً: قال لوالده 10:00 وجه 11:00)..."
+                placeholder="سبب/ملاحظة عامة..."
                 className="p-2 bg-white border border-emerald-200 rounded-xl text-xs font-bold"
                 value={batchActForm.notes}
                 onChange={e => setBatchActForm({ ...batchActForm, notes: e.target.value })}
@@ -2322,10 +2491,10 @@ export default function ServantDashboard({
                       const firstStatus = attendanceStatuses[0] || { code: 'present', attended: true };
                       setSelectedMember(m);
                       setActForm({
-                        activity_date: new Date().toISOString().split('T')[0],
+                        activity_date: getTodayLocalDate(),
                         activity_type: activityTypes[0] || 'مدارس أحد',
                         status_code: firstStatus.code,
-                        expected_time: '10:00',
+                        expected_time: officialStartTime || '10:00',
                         check_in_time: getNowHHMM(),
                         check_out_time: '',
                         attended: firstStatus.attended,
@@ -2387,6 +2556,127 @@ export default function ServantDashboard({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* نافذة فورية عند اختيار (تأخير / انصراف مبكر / معتذر) لتحديد الوقت والسبب */}
+      {quickStatusModal.open && quickStatusModal.member && (
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-55">
+          <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-3 text-xs font-bold">
+            <div className="flex justify-between items-center border-b pb-2">
+              <h3 className="font-extrabold text-sm text-[#7a1c24]">
+                {quickStatusModal.statusLabel} — {quickStatusModal.member.full_name}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setQuickStatusModal(prev => ({ ...prev, open: false }))}
+                className="p-1.5 bg-gray-100 rounded-xl cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmQuickStatusModal} className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="block mb-1 text-gray-600">تاريخ اليوم</label>
+                  <input
+                    type="date"
+                    className="w-full p-2 border rounded-xl bg-white"
+                    value={quickStatusModal.activity_date}
+                    onChange={e => setQuickStatusModal(prev => ({ ...prev, activity_date: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1 text-gray-600">النوع</label>
+                  <select
+                    className="w-full p-2 border rounded-xl bg-white"
+                    value={quickStatusModal.activity_type}
+                    onChange={e => setQuickStatusModal(prev => ({ ...prev, activity_type: e.target.value }))}
+                  >
+                    {activityTypes.map((actType, idx) => (
+                      <option key={idx} value={actType}>{actType}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {quickStatusModal.statusCode === 'late' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-amber-50/60 p-2.5 rounded-2xl border border-amber-200">
+                  <div>
+                    <label className="block mb-1 text-amber-950">الموعد الرسمي ({graceMinutes} د سماح)</label>
+                    <input
+                      type="time"
+                      className="w-full p-2 border rounded-xl bg-white"
+                      value={quickStatusModal.expected_time}
+                      onChange={e => setQuickStatusModal(prev => ({ ...prev, expected_time: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 text-amber-950">وقت الوصول الفعلي</label>
+                    <input
+                      type="time"
+                      className="w-full p-2 border rounded-xl bg-white"
+                      value={quickStatusModal.check_in_time}
+                      onChange={e => setQuickStatusModal(prev => ({ ...prev, check_in_time: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {quickStatusModal.statusCode === 'early_leave' && (
+                <div className="bg-orange-50/60 p-2.5 rounded-2xl border border-orange-200">
+                  <label className="block mb-1 text-orange-950">وقت الانصراف المبكر</label>
+                  <input
+                    type="time"
+                    className="w-full p-2 border rounded-xl bg-white"
+                    value={quickStatusModal.check_out_time}
+                    onChange={e => setQuickStatusModal(prev => ({ ...prev, check_out_time: e.target.value }))}
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block mb-1 text-gray-700">
+                  {quickStatusModal.statusCode === 'early_leave'
+                    ? 'هيمشي بدري ليه؟ (السبب)'
+                    : quickStatusModal.statusCode === 'late'
+                    ? 'اتأخر ليه؟ (السبب)'
+                    : 'معتذر ليه؟ (مسافر / ظرف / عذر...)'}
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder={
+                    quickStatusModal.statusCode === 'early_leave'
+                      ? 'مثلاً: عنده مشوار / ظرف أسري...'
+                      : quickStatusModal.statusCode === 'late'
+                      ? 'مثلاً: مواصلات / زحمة / صحى متأخر...'
+                      : 'مثلاً: مسافر / تعبان / امتحان...'
+                  }
+                  className="w-full p-2.5 border rounded-xl bg-white"
+                  value={quickStatusModal.reason}
+                  onChange={e => setQuickStatusModal(prev => ({ ...prev, reason: e.target.value }))}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setQuickStatusModal(prev => ({ ...prev, open: false }))}
+                  className="px-4 py-2 border rounded-xl cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-[#7a1c24] text-white rounded-xl cursor-pointer"
+                >
+                  حفظ التسجيل
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -2551,7 +2841,7 @@ export default function ServantDashboard({
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div>
-                  <label className="block mb-1 text-gray-600">موعد معلن/متوقع</label>
+                  <label className="block mb-1 text-gray-600">موعد رسمي/متوقع</label>
                   <input type="time" className="w-full p-2 border rounded-xl" value={actForm.expected_time} onChange={e => setActForm({ ...actForm, expected_time: e.target.value })} />
                 </div>
                 <div>
@@ -2563,7 +2853,7 @@ export default function ServantDashboard({
                   <input type="time" className="w-full p-2 border rounded-xl" value={actForm.check_out_time} onChange={e => setActForm({ ...actForm, check_out_time: e.target.value })} />
                 </div>
               </div>
-              <input placeholder="ملاحظات (مثلاً: قال لوالده 10:00 ووصل 11:00 أو انصراف بدري)..." className="w-full p-2.5 border rounded-xl" value={actForm.notes} onChange={e => setActForm({ ...actForm, notes: e.target.value })} />
+              <input placeholder="ملاحظات أو سبب..." className="w-full p-2.5 border rounded-xl" value={actForm.notes} onChange={e => setActForm({ ...actForm, notes: e.target.value })} />
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setActModal(false)} className="px-4 py-2 border rounded-xl cursor-pointer">إلغاء</button>
                 <button type="submit" className="px-5 py-2 bg-[#7a1c24] text-white rounded-xl cursor-pointer">حفظ الحالة والأوقات</button>
