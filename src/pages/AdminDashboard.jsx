@@ -168,8 +168,8 @@ export default function AdminDashboard({
   const [servicesSubTab, setServicesSubTab] = useState('browse');
   const [nestedRootId, setNestedRootId] = useState(null);
   const [activeCustomInfoCard, setActiveCustomInfoCard] = useState(null);
-  const [adminCardsConfig, setAdminCardsConfig] = useState({ rowId: null, overrides: {}, customScreenCards: [] });
-  const [rootNestedCards, setRootNestedCards] = useState([]);
+  const [adminCardsConfig, setAdminCardsConfig] = useState({ rowId: null, overrides: {}, customScreenCards: [], cardMeta: {} });
+  const [activeNestedRows, setActiveNestedRows] = useState([]);
 
   const [userSubTab, setUserSubTab] = useState(null);
   const [searchQ, setSearchQ] = useState('');
@@ -273,12 +273,12 @@ export default function AdminDashboard({
       supabase
         .from('nested_cards')
         .select('*')
-        .is('parent_id', null)
         .eq('is_active', true)
         .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true })
     ]);
     setAdminCardsConfig(cfg);
-    if (!nestedRes.error) setRootNestedCards(nestedRes.data || []);
+    if (!nestedRes.error) setActiveNestedRows(nestedRes.data || []);
   };
 
   useEffect(() => {
@@ -1132,8 +1132,8 @@ export default function AdminDashboard({
       id: 'nested_cards',
       icon: '🧩',
       title: 'إضافة وتعديل كروت',
-      desc: 'عرض كروت كل الشاشات وإضافة وتعديل وتشغيل وحذف الكروت وتعديل بياناتها، أو إنشاء كروت متداخلة',
-      count: 'كروت الشاشات',
+      desc: 'كروت جوا كروت + صلاحية مكان الظهور (في شاشة كذا أم جوا كارت كذا) + صلاحية الأدوار',
+      count: `${activeNestedRows.length} كارت مضاف`,
       color: 'border-rose-300 bg-rose-50/30'
     },
     ...(isAdmin ? [{
@@ -1144,7 +1144,7 @@ export default function AdminDashboard({
       count: 'للأدمن فقط',
       color: 'border-indigo-300 bg-indigo-50/40'
     }] : [])
-  ], [users.length, roleTemplatesCount, isAdmin]);
+  ], [users.length, roleTemplatesCount, activeNestedRows.length, isAdmin]);
 
   const rawAdminCards = useMemo(() => [
     {
@@ -1172,83 +1172,135 @@ export default function AdminDashboard({
     { id: 'custom_cards', icon: '📌', title: 'كروت إضافية للكاهن', desc: 'إنشاء كروت مخصصة تظهر داخل شاشة الأب الكاهن', count: `${customCards.length} كارت`, color: 'border-purple-200 bg-white' }
   ], [rawSetupCards.length, canExtractSheet, users.length, events.length, dbServiceGroups.length, services.length, caseCategories.length, customCards.length]);
 
-  const applyOverridesAndCustoms = (baseCards, screenKey) => {
-    const overrides = adminCardsConfig.overrides || {};
-    const mappedBase = baseCards.map(c => {
-      const ov = overrides[c.id];
-      if (!ov) return c;
-      return {
-        ...c,
-        title: ov.title || c.title,
-        desc: ov.desc !== undefined ? ov.desc : c.desc,
-        icon: ov.icon || c.icon,
-        is_active: ov.is_active !== false
-      };
-    });
-
-    const customForScreen = (adminCardsConfig.customScreenCards || [])
-      .filter(cc => (cc.screenKey || 'admin_hub') === screenKey)
-      .map(cc => ({
-        id: cc.id,
-        icon: cc.icon || '📌',
-        title: cc.title,
-        desc: cc.desc || '',
-        count: cc.target_action === 'link' ? 'رابط' : cc.target_action === 'screen' ? 'شاشة' : 'مخصص',
-        color: screenKey === 'setup_hub' ? 'border-amber-300 bg-amber-50/40' : 'border-rose-200 bg-rose-50/30',
-        isCustom: true,
-        is_active: cc.is_active !== false,
-        customConfig: cc
-      }));
-
-    return [...mappedBase, ...customForScreen];
+  const isRoleAllowedForCard = (allowedRoles) => {
+    if (!Array.isArray(allowedRoles) || allowedRoles.length === 0 || allowedRoles.includes('all')) return true;
+    return allowedRoles.includes(effectiveUser?.role);
   };
 
-  const allSetupCardsWithOverrides = useMemo(() => applyOverridesAndCustoms(rawSetupCards, 'setup_hub'), [rawSetupCards, adminCardsConfig]);
-  const allAdminCardsWithOverrides = useMemo(() => applyOverridesAndCustoms(rawAdminCards, 'admin_hub'), [rawAdminCards, adminCardsConfig]);
+  const countChildrenInKey = (parentKey) => {
+    const metaMap = adminCardsConfig.cardMeta || {};
+    const ovMap = adminCardsConfig.overrides || {};
+    const nestedChildren = activeNestedRows.filter(r => {
+      const pk = r.parent_id ? `nested:${r.parent_id}` : (metaMap[r.id]?.parent_key || null);
+      return pk === parentKey;
+    }).length;
+    const builtinChildren = Object.values(ovMap).filter(ov => ov?.parent_key === parentKey && ov?.is_active !== false).length;
+    return nestedChildren + builtinChildren;
+  };
 
-  const visibleSetupCards = useMemo(() => allSetupCardsWithOverrides.filter(c => c.is_active !== false), [allSetupCardsWithOverrides]);
-  const visibleAdminCards = useMemo(() => {
-    const baseVisible = allAdminCardsWithOverrides.filter(c => c.is_active !== false);
-    const nestedRoots = rootNestedCards.map(nc => ({
-      id: `nested-root-${nc.id}`,
-      icon: nc.icon || '🗂️',
-      title: nc.title,
-      desc: nc.description || nc.subtitle || 'كارت متداخل مخصص',
-      count: nc.badge_text || 'متداخل',
-      color: 'border-indigo-200 bg-indigo-50/30',
-      isNestedRoot: true,
-      nestedData: nc
-    }));
-    return [...baseVisible, ...nestedRoots];
-  }, [allAdminCardsWithOverrides, rootNestedCards]);
+  const resolveScreenCards = (screenKey) => {
+    const overrides = adminCardsConfig.overrides || {};
+    const cardMeta = adminCardsConfig.cardMeta || {};
+
+    const allBuiltins = [
+      ...rawAdminCards.map(c => ({ ...c, defaultScreen: 'admin_hub' })),
+      ...rawSetupCards.map(c => ({ ...c, defaultScreen: 'setup_hub' }))
+    ];
+
+    const builtinsForScreen = allBuiltins
+      .map(c => {
+        const ov = overrides[c.id] || {};
+        return {
+          ...c,
+          title: ov.title || c.title,
+          desc: ov.desc !== undefined ? ov.desc : c.desc,
+          icon: ov.icon || c.icon,
+          is_active: ov.is_active !== undefined ? ov.is_active : true,
+          placement_screen: ov.placement_screen || c.defaultScreen,
+          parent_key: ov.parent_key || null,
+          allowed_roles: Array.isArray(ov.allowed_roles) && ov.allowed_roles.length > 0 ? ov.allowed_roles : ['all'],
+          innerCount: countChildrenInKey(`builtin:${c.id}`)
+        };
+      })
+      .filter(c =>
+        c.is_active !== false &&
+        !c.parent_key &&
+        c.placement_screen === screenKey &&
+        isRoleAllowedForCard(c.allowed_roles)
+      );
+
+    const nestedForScreen = activeNestedRows
+      .filter(row => {
+        if (row.parent_id) return false;
+        const meta = cardMeta[row.id] || {};
+        if (meta.parent_key) return false;
+        const targetScreen = meta.placement_screen || 'admin_hub';
+        if (targetScreen !== screenKey) return false;
+        return isRoleAllowedForCard(meta.allowed_roles);
+      })
+      .map(nc => {
+        const meta = cardMeta[nc.id] || {};
+        const innerCount = countChildrenInKey(`nested:${nc.id}`);
+        return {
+          id: `nested-root-${nc.id}`,
+          icon: nc.icon || '🗂️',
+          title: nc.title,
+          desc: nc.description || nc.subtitle || 'كارت متداخل مخصص',
+          count: nc.badge_text || (innerCount > 0 ? `${innerCount} بالداخل` : 'مخصص'),
+          color: screenKey === 'setup_hub' ? 'border-amber-200 bg-amber-50/30' : 'border-indigo-200 bg-indigo-50/30',
+          isNestedRoot: true,
+          nestedData: nc,
+          nestedMeta: meta,
+          innerCount
+        };
+      });
+
+    return [...builtinsForScreen, ...nestedForScreen];
+  };
+
+  const visibleAdminCards = useMemo(() => resolveScreenCards('admin_hub'), [rawAdminCards, rawSetupCards, adminCardsConfig, activeNestedRows, effectiveUser?.role]);
+  const visibleSetupCards = useMemo(() => resolveScreenCards('setup_hub'), [rawAdminCards, rawSetupCards, adminCardsConfig, activeNestedRows, effectiveUser?.role]);
+
+  const cardsInsideCurrentScreen = useMemo(() => {
+    if (!activeCard || activeCard === 'hub' || activeCard === 'setup_hub' || activeCard === 'nested_cards') return [];
+    const targetKey = `builtin:${activeCard}`;
+    const cardMeta = adminCardsConfig.cardMeta || {};
+    const overrides = adminCardsConfig.overrides || {};
+
+    const nestedInside = activeNestedRows
+      .filter(r => !r.parent_id && cardMeta[r.id]?.parent_key === targetKey && isRoleAllowedForCard(cardMeta[r.id]?.allowed_roles))
+      .map(nc => ({
+        id: `nested-root-${nc.id}`,
+        icon: nc.icon || '🗂️',
+        title: nc.title,
+        desc: nc.description || nc.subtitle || '',
+        isNestedRoot: true,
+        nestedData: nc,
+        nestedMeta: cardMeta[nc.id] || {}
+      }));
+
+    const builtinsInside = [...rawAdminCards, ...rawSetupCards]
+      .filter(c => overrides[c.id]?.parent_key === targetKey && overrides[c.id]?.is_active !== false && isRoleAllowedForCard(overrides[c.id]?.allowed_roles))
+      .map(c => ({
+        ...c,
+        title: overrides[c.id]?.title || c.title,
+        icon: overrides[c.id]?.icon || c.icon,
+        desc: overrides[c.id]?.desc !== undefined ? overrides[c.id].desc : c.desc
+      }));
+
+    return [...builtinsInside, ...nestedInside];
+  }, [activeCard, activeNestedRows, adminCardsConfig, rawAdminCards, rawSetupCards, effectiveUser?.role]);
 
   const handleLaunchAdminOrSetupCard = (card) => {
     if (card.isNestedRoot && card.nestedData) {
       const nc = card.nestedData;
-      if (nc.target_action === 'link' && nc.target_url) {
+      const meta = card.nestedMeta || {};
+      const action = meta.target_action || nc.target_action || 'children';
+
+      if (action === 'link' && nc.target_url) {
         window.open(nc.target_url, '_blank', 'noopener,noreferrer');
         return;
       }
-      if (nc.target_action === 'info') {
+      if (action === 'screen' && meta.target_screen) {
+        setActiveCard(meta.target_screen);
+        return;
+      }
+      if (action === 'info') {
         setActiveCustomInfoCard({ icon: nc.icon, title: nc.title, desc: nc.description || nc.subtitle });
         return;
       }
       setNestedRootId(nc.id);
       setActiveCard('nested_cards');
-      return;
-    }
-
-    if (card.isCustom && card.customConfig) {
-      const cc = card.customConfig;
-      if (cc.target_action === 'link' && cc.target_url) {
-        window.open(cc.target_url, '_blank', 'noopener,noreferrer');
-        return;
-      }
-      if (cc.target_action === 'screen' && cc.target_screen) {
-        setActiveCard(cc.target_screen);
-        return;
-      }
-      setActiveCustomInfoCard({ icon: cc.icon, title: cc.title, desc: cc.desc });
       return;
     }
 
@@ -1316,38 +1368,57 @@ export default function AdminDashboard({
   );
 
   const renderTopBack = (title) => (
-    <div className="bg-white p-3.5 rounded-2xl border shadow-2xs flex flex-wrap justify-between items-center gap-2 print:hidden">
-      <div className="flex items-center gap-2 flex-wrap">
-        <button
-          type="button"
-          onClick={() => {
-            setNestedRootId(null);
-            setActiveCard(isSetupChildCard ? 'setup_hub' : 'hub');
-          }}
-          className="px-3.5 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer"
-        >
-          <ArrowRight size={14} /> {isSetupChildCard ? 'رجوع لكروت الإعدادات SETUP' : 'رجوع لكروت الإدارة'}
-        </button>
-        {isSetupChildCard && (
+    <div className="space-y-2 print:hidden">
+      <div className="bg-white p-3.5 rounded-2xl border shadow-2xs flex flex-wrap justify-between items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
-            onClick={() => { setNestedRootId(null); setActiveCard('hub'); }}
-            className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-200 rounded-xl text-xs font-black cursor-pointer"
+            onClick={() => {
+              setNestedRootId(null);
+              setActiveCard(isSetupChildCard ? 'setup_hub' : 'hub');
+            }}
+            className="px-3.5 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer"
           >
-            🏠 الرئيسية للإدارة
+            <ArrowRight size={14} /> {isSetupChildCard ? 'رجوع لكروت الإعدادات SETUP' : 'رجوع لكروت الإدارة'}
+          </button>
+          {isSetupChildCard && (
+            <button
+              type="button"
+              onClick={() => { setNestedRootId(null); setActiveCard('hub'); }}
+              className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-200 rounded-xl text-xs font-black cursor-pointer"
+            >
+              🏠 الرئيسية للإدارة
+            </button>
+          )}
+          <h2 className="text-sm md:text-base font-black text-[#7a1c24]">{title}</h2>
+          {!isAdmin && !canExtractSheet && (
+            <span className="px-2.5 py-1 bg-red-100 text-red-800 rounded-full text-[10px] font-black flex items-center gap-1">
+              <Lock size={11} /> قراءة فقط
+            </span>
+          )}
+        </div>
+        {onRefresh && (
+          <button type="button" onClick={handleFullRefresh} className="px-3 py-2 bg-white border hover:bg-gray-50 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
+            <RefreshCw size={13} /> تحديث
           </button>
         )}
-        <h2 className="text-sm md:text-base font-black text-[#7a1c24]">{title}</h2>
-        {!isAdmin && !canExtractSheet && (
-          <span className="px-2.5 py-1 bg-red-100 text-red-800 rounded-full text-[10px] font-black flex items-center gap-1">
-            <Lock size={11} /> قراءة فقط
-          </span>
-        )}
       </div>
-      {onRefresh && (
-        <button type="button" onClick={handleFullRefresh} className="px-3 py-2 bg-white border hover:bg-gray-50 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
-          <RefreshCw size={13} /> تحديث
-        </button>
+
+      {cardsInsideCurrentScreen.length > 0 && (
+        <div className="bg-amber-50/70 p-2.5 rounded-2xl border border-amber-200 flex items-center gap-2 overflow-x-auto">
+          <span className="text-[11px] font-black text-amber-950 shrink-0">🧩 كروت مضافة داخل هذا القسم:</span>
+          {cardsInsideCurrentScreen.map(subC => (
+            <button
+              key={subC.id}
+              type="button"
+              onClick={() => handleLaunchAdminOrSetupCard(subC)}
+              className="px-3 py-1.5 bg-white hover:bg-amber-100 border border-amber-300 rounded-xl text-[11px] font-black text-gray-900 shrink-0 flex items-center gap-1 cursor-pointer shadow-2xs"
+            >
+              <span>{subC.icon}</span>
+              <span>{subC.title}</span>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -1388,9 +1459,16 @@ export default function AdminDashboard({
                 onClick={() => handleLaunchAdminOrSetupCard(c)}
                 className={`${c.color} border-2 p-4 rounded-2xl text-right shadow-2xs hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-2.5 cursor-pointer`}
               >
-                <div className="flex justify-between items-start w-full">
+                <div className="flex justify-between items-start w-full gap-1">
                   <span className="text-3xl">{c.icon}</span>
-                  <span className="px-2.5 py-0.5 bg-[#f9ecee] text-[#7a1c24] rounded-full text-[11px] font-black">{c.count}</span>
+                  <div className="flex items-center gap-1 flex-wrap justify-end">
+                    {c.innerCount > 0 && (
+                      <span className="px-2 py-0.5 bg-indigo-100 text-indigo-900 rounded-full text-[10px] font-black">
+                        🧩 {c.innerCount} جواه
+                      </span>
+                    )}
+                    <span className="px-2.5 py-0.5 bg-[#f9ecee] text-[#7a1c24] rounded-full text-[11px] font-black">{c.count}</span>
+                  </div>
                 </div>
                 <div>
                   <h3 className="text-base font-black text-gray-900">{c.title}</h3>
@@ -1450,9 +1528,16 @@ export default function AdminDashboard({
                 onClick={() => handleLaunchAdminOrSetupCard(c)}
                 className={`${c.color} border-2 p-4 rounded-2xl text-right shadow-2xs hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-2.5 cursor-pointer`}
               >
-                <div className="flex justify-between items-start w-full">
+                <div className="flex justify-between items-start w-full gap-1">
                   <span className="text-3xl">{c.icon}</span>
-                  <span className="px-2.5 py-0.5 bg-[#f9ecee] text-[#7a1c24] rounded-full text-[11px] font-black">{c.count}</span>
+                  <div className="flex items-center gap-1 flex-wrap justify-end">
+                    {c.innerCount > 0 && (
+                      <span className="px-2 py-0.5 bg-indigo-100 text-indigo-900 rounded-full text-[10px] font-black">
+                        🧩 {c.innerCount} جواه
+                      </span>
+                    )}
+                    <span className="px-2.5 py-0.5 bg-[#f9ecee] text-[#7a1c24] rounded-full text-[11px] font-black">{c.count}</span>
+                  </div>
                 </div>
                 <div>
                   <h3 className="text-base font-black text-gray-900">{c.title}</h3>
@@ -1519,14 +1604,14 @@ export default function AdminDashboard({
       <div className="max-h-[calc(100vh-195px)] overflow-y-auto pr-1 space-y-3">
         {activeCard === 'nested_cards' && (
           <div className="space-y-3">
-            {renderTopBack('🧩 إضافة وتعديل وتشغيل الكروت')}
+            {renderTopBack('🧩 إضافة وتعديل كروت (كروت جوا كروت وصلاحيات الظهور)')}
             <NestedCardsBuilder
               currentUser={effectiveUser}
               isAdmin={isAdmin}
               rootParentId={nestedRootId}
-              title="إضافة وتعديل وتشغيل كروت الشاشات والكروت المتداخلة"
-              hubCards={allAdminCardsWithOverrides}
-              setupCards={allSetupCardsWithOverrides}
+              title="إدارة الكروت المتداخلة وصلاحيات الظهور"
+              hubCards={rawAdminCards}
+              setupCards={rawSetupCards}
               serviceGroups={effectiveGroups}
               services={services}
               caseCategories={caseCategories}
