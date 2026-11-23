@@ -19,7 +19,7 @@ import {
   ArrowRight, Lock, Globe, Trash2, Edit3, X, Printer,
   Sun, Moon, MessageCircle, UserPlus, Link2, Bus,
   Upload, Paperclip, Eye, ExternalLink, Cake, BellRing, AlertTriangle,
-  Award, ClipboardCheck, Gift
+  Award, ClipboardCheck, Gift, ClipboardList, School
 } from 'lucide-react';
 
 const MASS_AUDIENCES = [
@@ -38,6 +38,7 @@ const ATTACHMENT_TYPES = ['صورة بطاقة', 'عقد إيجار', 'تحال�
 
 export default function PriestDashboard({ priest, users = [], onRefresh }) {
   const [activeCard, setActiveCard] = useState('hub');
+  const [serviceSubTab, setServiceSubTab] = useState('sequence');
   const [localUsers, setLocalUsers] = useState(users);
 
   useEffect(() => {
@@ -292,6 +293,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
 
   const goBackToHub = () => {
     setActiveCard('hub');
+    setServiceSubTab('sequence');
     setConfSubView('menu');
     setSelectedStage(null);
     setServiceSubCard('menu');
@@ -325,6 +327,21 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   };
 
   const handleNavigateFromBell = (cardId) => {
+    if (cardId === 'master_sheet') {
+      setActiveCard('service_hub');
+      setServiceSubTab('sequence');
+      return;
+    }
+    if (cardId === 'commitment_rewards') {
+      setActiveCard('service_hub');
+      setServiceSubTab('commitment');
+      return;
+    }
+    if (cardId === 'services') {
+      setActiveCard('service_hub');
+      setServiceSubTab('schedule');
+      return;
+    }
     setActiveCard(cardId);
     if (cardId === 'confessions') setConfSubView('confessors');
   };
@@ -869,201 +886,263 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   );
 
   // ==============================================================
-  // Hub (الشاشة الرئيسية لأبونا)
+  // مكوّن داخلي لجدول الخدمة داخل التبويب الفرعي الثالث
   // ==============================================================
-  if (activeCard === 'hub') {
-    const cards = [
-      {
-        id: 'master_sheet',
-        icon: '📋',
-        title: 'شيت التسلسل والافتقاد والترحيم',
-        desc: 'عرض كل خدمة على حدة وبند المعاشات + حالة الافتقاد وذكرى الترحيم + تصدير وطباعة',
-        count: `${localUsers.length} مسجل`,
-        color: 'border-teal-300 bg-teal-50/40'
-      },
-      {
-        id: 'commitment_rewards',
-        icon: '🏅',
-        title: 'الالتزام والكفاءة والعروض والرحلات',
-        desc: 'متابعة الالتزام والغياب والتأخير، ومنح العروض والخصومات، والملاحظات لولي الأمر',
-        count: `${rewardCampaigns.length} عرض • ${memberRewards.length} مكافأة`,
-        color: 'border-amber-300 bg-amber-50/40'
-      },
-      { id: 'confessions', icon: '🙏', title: 'الاعترافات', desc: 'المواعيد بالمدة، المعترفون (داخل/خارج الكنيسة) والملف الروحي، والافتقاد', count: `${myConfessors.length} معترف • ${confessionSlots.length} موعد`, color: 'border-red-200 bg-white' },
-      { id: 'services', icon: '🏫', title: 'جدول الخدمة', desc: 'كروت الخدمات، القيادات، الفصول، الخدام، وافتقاد الخدمة', count: `${stagesMap.length} خدمة`, color: 'border-amber-200 bg-white' },
-      { id: 'masses', icon: '⛪', title: 'جدول القداسات', desc: 'اسم القداس، كاهن خادم أو شريك، والفئات', count: `${masses.length} قداس`, color: 'border-blue-200 bg-white' },
-      { id: 'personal', icon: '📅', title: 'الجدول الخاص بالكاهن', desc: 'طشت، خطوبة، أكاليل، رحلات ومؤتمرات بالأقساط والأتوبيسات وطباعة الكشوفات', count: `${personalItems.length} موعد`, color: 'border-purple-200 bg-white' },
-      { id: 'cases', icon: '🔍', title: 'بحث الحالة / العيلة', desc: 'البحث، التصنيفات، الإضافة، المرفقات (بطاقة/إيجار/تحاليل)، وطباعة PDF', count: `${families.length} أسرة`, color: 'border-emerald-200 bg-white' },
-      { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل التعليمية، المواد الدراسية، الأسعار، وتسجيل الحضور', count: 'مركز الدروس', color: 'border-indigo-200 bg-white' },
-      {
-        id: 'joseph_arimathea',
-        icon: '🕊️',
-        title: 'خدمة يوسف الرامي',
-        desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، وخط سير السائق ومكان الدفن',
-        count: totalJosephAlerts > 0 ? `🚨 ${totalJosephAlerts} بحاجة للمتابعة` : `${josephCases.length} حالة مسجلة`,
-        color: totalJosephAlerts > 0 ? 'border-red-400 bg-red-50/50' : 'border-slate-300 bg-white'
-      }
-    ];
-
-    const displayedBdays = bdayTab === 'week' ? weekBirthdays : monthBirthdays;
+  const renderServiceScheduleContent = () => {
+    const stageClasses = selectedStage ? myServices.filter(s => s.stage_name === selectedStage) : [];
+    const stageServants = selectedStage
+      ? allServants.filter(
+          u =>
+            (u.detailed_stage || u.service_stage || '').includes(selectedStage) ||
+            (u.sector || '').includes(selectedStage) ||
+            stageClasses.some(c => c.class_name === u.assigned_class)
+        )
+      : [];
+    const stageMembers = selectedStage ? getMembersForStage(selectedStage) : [];
+    const stageVisitations = visitations.filter(v => v.category === 'افتقاد خدمة' && v.service_stage === selectedStage);
 
     return (
       <div className="space-y-4 text-sm md:text-base">
-        {liveJosephAlert && (
-          <div className="bg-linear-to-r from-red-800 to-[#7a1c24] text-white p-4 rounded-3xl shadow-xl border-2 border-amber-300 flex flex-wrap justify-between items-center gap-3 animate-bounce">
-            <div className="flex items-center gap-2.5">
-              <span className="p-2 bg-amber-400 text-red-950 rounded-2xl"><AlertTriangle size={20} /></span>
-              <div>
-                <strong className="block text-amber-200 text-sm md:text-base">{liveJosephAlert.title}</strong>
-                <span className="text-xs md:text-sm text-white/90">{liveJosephAlert.message}</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
+        {!selectedStage ? (
+          <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3">
+            {stagesMap.map(st => (
               <button
                 type="button"
-                onClick={() => { setActiveCard('joseph_arimathea'); setLiveJosephAlert(null); }}
-                className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-red-950 font-black rounded-xl text-xs shadow cursor-pointer"
+                key={st}
+                onClick={() => { setSelectedStage(st); setServiceSubCard('menu'); }}
+                className="bg-white p-5 rounded-3xl border-2 hover:border-[#7a1c24] text-right shadow-sm space-y-2 cursor-pointer"
               >
-                فتح ومتابعة فوراً ↗
+                <span className="text-3xl">📖</span>
+                <h3 className="text-lg font-black">{st}</h3>
+                <p className="text-sm text-gray-600">
+                  {myServices.filter(s => s.stage_name === st).length} فصل • {getMembersForStage(st).length} مخدوم
+                </p>
               </button>
-              <button type="button" onClick={() => setLiveJosephAlert(null)} className="text-white/70 hover:text-white text-xs">✕</button>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => { setSelectedStage(null); setServiceSubCard('menu'); setSelectedClass(null); }}
+                className="px-4 py-2 bg-white border rounded-xl font-bold text-sm"
+              >
+                ← كل الخدمات
+              </button>
+              {serviceSubCard !== 'menu' && (
+                <button
+                  type="button"
+                  onClick={() => setServiceSubCard('menu')}
+                  className="px-4 py-2 bg-amber-100 rounded-xl font-bold text-sm"
+                >
+                  ← كروت {selectedStage}
+                </button>
+              )}
             </div>
+
+            {serviceSubCard === 'menu' && (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <button type="button" onClick={() => setServiceSubCard('leaders')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer">
+                  <span className="text-3xl block">👑</span>
+                  <strong className="text-base block">القيادات</strong>
+                </button>
+                <button type="button" onClick={() => setServiceSubCard('classes')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer">
+                  <span className="text-3xl block">🏫</span>
+                  <strong className="text-base block">الفصول والمخدومين ({stageClasses.length})</strong>
+                </button>
+                <button type="button" onClick={() => setServiceSubCard('servants')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer">
+                  <span className="text-3xl block">👥</span>
+                  <strong className="text-base block">الخدام ({stageServants.length})</strong>
+                </button>
+                <button type="button" onClick={() => setServiceSubCard('visitations')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer">
+                  <span className="text-3xl block">🕊️</span>
+                  <strong className="text-base block">افتقاد {selectedStage} ({stageVisitations.length})</strong>
+                </button>
+              </div>
+            )}
+
+            {serviceSubCard === 'leaders' && (
+              <div className="bg-white p-5 rounded-3xl border grid md:grid-cols-2 gap-3">
+                <div className="p-4 bg-[#fbfaf7] rounded-2xl border">
+                  <span className="text-gray-500 block">أمين الخدمة:</span>
+                  <strong className="text-base">{stageClasses[0]?.head_servant_name || 'غير محدد'}</strong>
+                </div>
+                <div className="p-4 bg-[#fbfaf7] rounded-2xl border">
+                  <span className="text-gray-500 block">مساعد الأمين:</span>
+                  <strong className="text-base">{stageClasses[0]?.vice_head_name || 'غير محدد'}</strong>
+                </div>
+              </div>
+            )}
+
+            {serviceSubCard === 'classes' && (
+              <div className="space-y-4">
+                <div className="grid sm:grid-cols-3 gap-3">
+                  {stageClasses.map(cls => (
+                    <button
+                      type="button"
+                      key={cls.id}
+                      onClick={() => setSelectedClass(selectedClass?.id === cls.id ? null : cls)}
+                      className={`p-4 rounded-2xl border-2 text-right ${selectedClass?.id === cls.id ? 'bg-[#f9ecee] border-[#7a1c24]' : 'bg-white'}`}
+                    >
+                      <strong className="text-base block">{cls.class_name}</strong>
+                      <span className="text-sm text-gray-600">⏰ {cls.meeting_time}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="bg-white p-4 rounded-3xl border grid sm:grid-cols-2 gap-2.5">
+                  {(selectedClass
+                    ? stageMembers.filter(m => m.assigned_class === selectedClass.class_name || (m.detailed_stage || '').includes(selectedClass.class_name))
+                    : stageMembers
+                  ).map(m => (
+                    <button
+                      type="button"
+                      key={m.id}
+                      onClick={() => setInspectMember(m)}
+                      className="p-3.5 bg-[#fbfaf7] rounded-2xl border text-right flex justify-between items-center"
+                    >
+                      <div>
+                        <strong className="text-base">{m.full_name}</strong>
+                        <span className="block text-sm text-gray-600">🎂 {calcAge(m.dob)}</span>
+                      </div>
+                      <span className="text-[#7a1c24] font-bold">التفاصيل</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {serviceSubCard === 'servants' && (
+              <div className="bg-white p-4 rounded-3xl border space-y-2.5">
+                {stageServants.map(sv => (
+                  <div key={sv.id} className="p-3.5 bg-[#fbfaf7] rounded-2xl border flex flex-wrap justify-between items-center gap-2">
+                    <div>
+                      <strong className="text-base">{sv.full_name}</strong>
+                      <span className="mr-2 px-2.5 py-0.5 rounded bg-amber-100 text-amber-950 text-xs font-bold">
+                        {sv.servant_training_status || 'خادم متكلم (اجتاز إعداد خدام)'}
+                      </span>
+                      <p className="text-sm text-gray-600 mt-0.5">
+                        💼 {sv.job_title || '—'} {sv.assigned_class && `• 🏫 فصل: ${sv.assigned_class}`}
+                      </p>
+                    </div>
+                    <div className="flex gap-1.5">
+                      {sv.phone && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => openWhatsAppComposer({ name: sv.full_name, phone: sv.phone, targetId: sv.id, defaultCategory: 'افتقاد' })}
+                            className="px-3 py-2 bg-green-600 text-white rounded-xl font-bold text-xs cursor-pointer"
+                          >
+                            <MessageCircle size={14} />
+                          </button>
+                          <a href={`tel:${sv.phone}`} className="px-3.5 py-2 bg-white border rounded-xl font-bold text-sm">
+                            {sv.phone}
+                          </a>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {serviceSubCard === 'visitations' && (
+              <div className="bg-white p-4 rounded-3xl border space-y-3">
+                <h4 className="font-black text-base text-[#7a1c24]">🕊️ متابعة وافتقاد فصول ({selectedStage})</h4>
+                <form onSubmit={e => handleSaveVisitation(e, 'افتقاد خدمة', selectedStage)} className="space-y-2 font-bold">
+                  <div className="grid md:grid-cols-3 gap-2">
+                    <select className="p-2.5 border rounded-xl" value={visitForm.class_name} onChange={e => setVisitForm({ ...visitForm, class_name: e.target.value })}>
+                      <option value="">-- اختر الفصل --</option>
+                      {stageClasses.map(c => <option key={c.id} value={c.class_name}>{c.class_name}</option>)}
+                    </select>
+                    <select
+                      className="p-2.5 border rounded-xl"
+                      value={visitForm.target_user_id}
+                      onChange={e => {
+                        const u = allMembers.find(x => x.id === e.target.value);
+                        setVisitForm({ ...visitForm, target_user_id: e.target.value, target_name: u?.full_name || '' });
+                      }}
+                    >
+                      <option value="">-- اختر المخدوم --</option>
+                      {(stageMembers.length > 0 ? stageMembers : allMembers).map(m => (
+                        <option key={m.id} value={m.id}>{m.full_name} ({m.detailed_stage})</option>
+                      ))}
+                    </select>
+                    <input
+                      required
+                      placeholder="الاسم *"
+                      className="p-2.5 border rounded-xl"
+                      value={visitForm.target_name}
+                      onChange={e => setVisitForm({ ...visitForm, target_name: e.target.value })}
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-3 items-center">
+                    <label className="flex items-center gap-1.5">
+                      <input type="checkbox" checked={visitForm.needs_visit} onChange={e => setVisitForm({ ...visitForm, needs_visit: e.target.checked })} /> يحتاج افتقاد
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <input type="checkbox" checked={visitForm.needs_confession} onChange={e => setVisitForm({ ...visitForm, needs_confession: e.target.checked })} /> يحتاج اعتراف
+                    </label>
+                    <button type="submit" className="px-5 py-2.5 bg-[#7a1c24] text-white rounded-xl">حفظ</button>
+                  </div>
+                </form>
+                {stageVisitations.map(v => {
+                  const targetObj = allMembers.find(m => m.id === v.target_user_id);
+                  return (
+                    <div key={v.id} className="p-3.5 bg-[#fbfaf7] rounded-2xl border flex justify-between items-center">
+                      <div>
+                        <strong>{v.target_name}</strong> {v.class_name && `(${v.class_name})`} {v.needs_visit && '• 🕊️ يحتاج افتقاد'} {v.needs_confession && '• 🙏 يحتاج اعتراف'}
+                      </div>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openWhatsAppComposer({ name: v.target_name, phone: targetObj?.phone || '', targetId: v.target_user_id, defaultCategory: 'افتقاد' })}
+                          className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs cursor-pointer"
+                        >
+                          <MessageCircle size={14} />
+                        </button>
+                        <button type="button" onClick={() => deleteVisitation(v.id)} className="p-2 bg-red-50 text-red-700 rounded-lg">
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
-        <div className="bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-6 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
-          <div>
-            <h2 className="text-xl font-black text-amber-200">مكتب رعاية: {priest.full_name}</h2>
-            <p className="text-sm text-white/85 mt-1">اختر الكارت للدخول إلى التفاصيل الكاملة</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {renderBellPanel()}
-            <button
-              type="button"
-              onClick={() => openWhatsAppComposer({ name: '', phone: '', defaultCategory: 'افتقاد' })}
-              className="px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-2xl font-black text-xs md:text-sm flex items-center gap-2 cursor-pointer shadow"
-            >
-              <MessageCircle size={17} /> إرسال رسالة واتساب / بحث بالاسم
-            </button>
-          </div>
-        </div>
-
-        <div className="bg-linear-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-3xl p-4 shadow-sm space-y-3">
-          <div className="flex flex-wrap justify-between items-center gap-2">
-            <div className="flex items-center gap-2">
-              <span className="p-2 bg-amber-500 text-white rounded-2xl shadow-xs"><BellRing size={18} /></span>
-              <div>
-                <h3 className="text-sm md:text-base font-black text-amber-950 flex items-center gap-1.5">
-                  <Cake size={16} className="text-[#7a1c24]" /> تنبيه أعياد الميلاد (الأسبوع الحالي & شهر {currentMonthName})
-                </h3>
-                <p className="text-xs text-amber-900">
-                  هذا الأسبوع: <strong>{weekBirthdays.length}</strong> • خلال شهر {currentMonthName}: <strong>{monthBirthdays.length}</strong>
-                </p>
+        {inspectMember && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-3xl w-full max-w-md p-6 space-y-2 text-sm">
+              <div className="flex justify-between border-b pb-2">
+                <strong className="text-lg text-[#7a1c24]">{inspectMember.full_name}</strong>
+                <button type="button" onClick={() => setInspectMember(null)}><X size={18} /></button>
               </div>
-            </div>
-
-            <div className="flex flex-wrap gap-1.5 items-center">
-              <button type="button" onClick={() => setBdayTab('week')} className={`px-3 py-1.5 rounded-xl text-xs font-black border cursor-pointer ${bdayTab === 'week' ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-amber-950 border-amber-300'}`}>
-                🎂 هذا الأسبوع ({weekBirthdays.length})
-              </button>
-              <button type="button" onClick={() => setBdayTab('month')} className={`px-3 py-1.5 rounded-xl text-xs font-black border cursor-pointer ${bdayTab === 'month' ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-amber-950 border-amber-300'}`}>
-                📅 كل شهر {currentMonthName} ({monthBirthdays.length})
-              </button>
-              <select className="p-1.5 border border-amber-300 rounded-xl bg-white text-xs font-bold text-amber-950" value={bdayScope} onChange={e => setBdayScope(e.target.value)}>
-                <option value="confessors">معترفي أبونا فقط</option>
-                <option value="all">كل شعب الكنيسة</option>
-              </select>
+              <p>🎂 {inspectMember.dob} ({calcAge(inspectMember.dob)}) • 🎓 {inspectMember.detailed_stage}</p>
+              <p>📍 {inspectMember.address || '—'} • 📞 {inspectMember.phone}</p>
+              {inspectMember.phone && (
+                <button
+                  type="button"
+                  onClick={() => openWhatsAppComposer({ name: inspectMember.full_name, phone: inspectMember.phone, targetId: inspectMember.id, defaultCategory: 'افتقاد' })}
+                  className="px-3 py-1.5 bg-green-600 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <MessageCircle size={14} /> إرسال واتساب
+                </button>
+              )}
+              {siblings.filter(s => s.member_id === inspectMember.id).map(sib => (
+                <div key={sib.id} className="p-2 bg-amber-50 rounded-xl">• الأخ: {sib.sibling_full_name} ({sib.stage_or_job})</div>
+              ))}
             </div>
           </div>
-
-          {displayedBdays.length === 0 ? (
-            <div className="bg-white/80 p-3 rounded-2xl border border-amber-200 text-xs text-amber-900 text-center">
-              لا توجد أعياد ميلاد مسجلة في هذه الفترة ({bdayTab === 'week' ? 'الأسبوع الحالي' : `شهر ${currentMonthName}`}).
-            </div>
-          ) : (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-56 overflow-y-auto">
-              {displayedBdays.map(b => {
-                const isToday = b.daysLeft === 0;
-                return (
-                  <div key={b.id} className={`p-3 rounded-2xl border flex justify-between items-center gap-2 ${isToday ? 'bg-red-50 border-red-400' : 'bg-white border-amber-200'}`}>
-                    <div className="min-w-0">
-                      <strong className="text-xs md:text-sm text-gray-900 block truncate">{b.full_name}</strong>
-                      <span className="text-[11px] text-gray-600 block">
-                        🎂 {b.dob}
-                        {b.daysLeft === 0 && <strong className="mr-1 text-red-700">• اليوم 🎉</strong>}
-                        {b.daysLeft > 0 && <strong className="mr-1 text-amber-800">• خلال {b.daysLeft} يوم</strong>}
-                      </span>
-                    </div>
-                    {b.phone ? (
-                      <button
-                        type="button"
-                        onClick={() => openWhatsAppComposer({ name: b.full_name, phone: b.phone, targetId: b.id, defaultCategory: 'معايدة' })}
-                        className="px-2.5 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shrink-0 cursor-pointer"
-                      >
-                        <MessageCircle size={13} /> معايدة
-                      </button>
-                    ) : (
-                      <span className="text-[10px] text-gray-400 shrink-0">بدون رقم</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {cards.map(c => (
-            <button type="button" key={c.id} onClick={() => setActiveCard(c.id)} className={`${c.color} border-2 p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer`}>
-              <div className="flex justify-between items-start w-full">
-                <span className="text-4xl">{c.icon}</span>
-                <span className="px-3 py-1 bg-[#f9ecee] text-[#7a1c24] rounded-full text-xs font-black">{c.count}</span>
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-gray-900">{c.title}</h3>
-                <p className="text-sm text-gray-600 mt-1">{c.desc}</p>
-              </div>
-            </button>
-          ))}
-          {customCards.map(cc => (
-            <button type="button" key={cc.id} onClick={() => setActiveCard('custom:' + cc.id)} className="bg-amber-50/50 border-2 border-amber-300 p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer">
-              <div className="flex justify-between items-start w-full">
-                <span className="text-4xl">{cc.card_icon || '📌'}</span>
-                <span className="px-3 py-1 bg-amber-200 text-amber-950 rounded-full text-xs font-black">كارت مضاف</span>
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-gray-900">{cc.card_title}</h3>
-                <p className="text-sm text-gray-700 mt-1">{cc.description || 'سجل مضاف من الأدمن'}</p>
-              </div>
-            </button>
-          ))}
-        </div>
-
-        {renderGlobalModals()}
+        )}
       </div>
     );
-  }
+  };
 
-  // شيت التسلسل والافتقاد والترحيم داخل لوحة أبونا الكاهن
-  if (activeCard === 'master_sheet') {
-    return (
-      <div className="space-y-4">
-        {renderTopBar('📋 شيت التسلسل والافتقاد والترحيم')}
-        <MasterCongregationSheet
-          users={localUsers}
-          services={services}
-          serviceGroups={serviceGroups}
-          currentUser={priest}
-          onUpdateUser={handleUpdateUserFromSheet}
-          onRefresh={loadPriestData}
-        />
-        {renderGlobalModals()}
-      </div>
-    );
-  }
-
-  // قسم الالتزام والكفاءة والعروض والرحلات وملاحظات ولي الأمر
-  if (activeCard === 'commitment_rewards') {
+  // مكوّن داخلي للالتزام والكفاءة والعروض والرحلات وملاحظات ولي الأمر داخل التبويب الفرعي الثاني
+  const renderCommitmentRewardsContent = () => {
     const filteredCommitments = commitmentStats.filter(item => {
       if (commitmentFilter !== 'all' && item.commitment_code !== commitmentFilter) return false;
       if (!commitmentSearch.trim()) return true;
@@ -1077,8 +1156,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
 
     return (
       <div className="space-y-4 text-sm md:text-base">
-        {renderTopBar('🏅 الالتزام والكفاءة والعروض والرحلات وملاحظات ولي الأمر')}
-
         <div className="grid lg:grid-cols-2 gap-4">
           <form onSubmit={handleGrantReward} className="bg-white p-5 rounded-3xl border space-y-3 font-bold shadow-2xs">
             <h3 className="text-base font-black text-[#7a1c24] flex items-center gap-1.5">
@@ -1300,6 +1377,259 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
             </div>
           </div>
         )}
+      </div>
+    );
+  };
+
+  // ==============================================================
+  // Hub (الشاشة الرئيسية لأبونا)
+  // ==============================================================
+  if (activeCard === 'hub') {
+    const cards = [
+      {
+        id: 'service_hub',
+        icon: '🏫',
+        title: 'الخدمة ومدارس الأحد',
+        desc: 'يضم 3 تابات داخلية: شيت التسلسل والافتقاد والترحيم • الالتزام والكفاءة والعروض والرحلات • جدول الخدمة',
+        count: `${stagesMap.length} خدمة • ${localUsers.length} مسجل`,
+        color: 'border-teal-300 bg-teal-50/40'
+      },
+      { id: 'confessions', icon: '🙏', title: 'الاعترافات', desc: 'المواعيد بالمدة، المعترفون (داخل/خارج الكنيسة) والملف الروحي، والافتقاد', count: `${myConfessors.length} معترف • ${confessionSlots.length} موعد`, color: 'border-red-200 bg-white' },
+      { id: 'masses', icon: '⛪', title: 'جدول القداسات', desc: 'اسم القداس، كاهن خادم أو شريك، والفئات', count: `${masses.length} قداس`, color: 'border-blue-200 bg-white' },
+      { id: 'personal', icon: '📅', title: 'الجدول الخاص بالكاهن', desc: 'طشت، خطوبة، أكاليل، رحلات ومؤتمرات بالأقساط والأتوبيسات وطباعة الكشوفات', count: `${personalItems.length} موعد`, color: 'border-purple-200 bg-white' },
+      { id: 'cases', icon: '🔍', title: 'بحث الحالة / العيلة', desc: 'البحث، التصنيفات، الإضافة، المرفقات (بطاقة/إيجار/تحاليل)، وطباعة PDF', count: `${families.length} أسرة`, color: 'border-emerald-200 bg-white' },
+      { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل التعليمية، المواد الدراسية، الأسعار، وتسجيل الحضور', count: 'مركز الدروس', color: 'border-indigo-200 bg-white' },
+      {
+        id: 'joseph_arimathea',
+        icon: '🕊️',
+        title: 'خدمة يوسف الرامي',
+        desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، وخط سير السائق ومكان الدفن',
+        count: totalJosephAlerts > 0 ? `🚨 ${totalJosephAlerts} بحاجة للمتابعة` : `${josephCases.length} حالة مسجلة`,
+        color: totalJosephAlerts > 0 ? 'border-red-400 bg-red-50/50' : 'border-slate-300 bg-white'
+      }
+    ];
+
+    const displayedBdays = bdayTab === 'week' ? weekBirthdays : monthBirthdays;
+
+    return (
+      <div className="space-y-4 text-sm md:text-base">
+        {liveJosephAlert && (
+          <div className="bg-linear-to-r from-red-800 to-[#7a1c24] text-white p-4 rounded-3xl shadow-xl border-2 border-amber-300 flex flex-wrap justify-between items-center gap-3 animate-bounce">
+            <div className="flex items-center gap-2.5">
+              <span className="p-2 bg-amber-400 text-red-950 rounded-2xl"><AlertTriangle size={20} /></span>
+              <div>
+                <strong className="block text-amber-200 text-sm md:text-base">{liveJosephAlert.title}</strong>
+                <span className="text-xs md:text-sm text-white/90">{liveJosephAlert.message}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => { setActiveCard('joseph_arimathea'); setLiveJosephAlert(null); }}
+                className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-red-950 font-black rounded-xl text-xs shadow cursor-pointer"
+              >
+                فتح ومتابعة فوراً ↗
+              </button>
+              <button type="button" onClick={() => setLiveJosephAlert(null)} className="text-white/70 hover:text-white text-xs">✕</button>
+            </div>
+          </div>
+        )}
+
+        <div className="bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-6 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
+          <div>
+            <h2 className="text-xl font-black text-amber-200">مكتب رعاية: {priest.full_name}</h2>
+            <p className="text-sm text-white/85 mt-1">اختر الكارت للدخول إلى التفاصيل الكاملة</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {renderBellPanel()}
+            <button
+              type="button"
+              onClick={() => openWhatsAppComposer({ name: '', phone: '', defaultCategory: 'افتقاد' })}
+              className="px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-2xl font-black text-xs md:text-sm flex items-center gap-2 cursor-pointer shadow"
+            >
+              <MessageCircle size={17} /> إرسال رسالة واتساب / بحث بالاسم
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-linear-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-3xl p-4 shadow-sm space-y-3">
+          <div className="flex flex-wrap justify-between items-center gap-2">
+            <div className="flex items-center gap-2">
+              <span className="p-2 bg-amber-500 text-white rounded-2xl shadow-xs"><BellRing size={18} /></span>
+              <div>
+                <h3 className="text-sm md:text-base font-black text-amber-950 flex items-center gap-1.5">
+                  <Cake size={16} className="text-[#7a1c24]" /> تنبيه أعياد الميلاد (الأسبوع الحالي & شهر {currentMonthName})
+                </h3>
+                <p className="text-xs text-amber-900">
+                  هذا الأسبوع: <strong>{weekBirthdays.length}</strong> • خلال شهر {currentMonthName}: <strong>{monthBirthdays.length}</strong>
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5 items-center">
+              <button type="button" onClick={() => setBdayTab('week')} className={`px-3 py-1.5 rounded-xl text-xs font-black border cursor-pointer ${bdayTab === 'week' ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-amber-950 border-amber-300'}`}>
+                🎂 هذا الأسبوع ({weekBirthdays.length})
+              </button>
+              <button type="button" onClick={() => setBdayTab('month')} className={`px-3 py-1.5 rounded-xl text-xs font-black border cursor-pointer ${bdayTab === 'month' ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-amber-950 border-amber-300'}`}>
+                📅 كل شهر {currentMonthName} ({monthBirthdays.length})
+              </button>
+              <select className="p-1.5 border border-amber-300 rounded-xl bg-white text-xs font-bold text-amber-950" value={bdayScope} onChange={e => setBdayScope(e.target.value)}>
+                <option value="confessors">معترفي أبونا فقط</option>
+                <option value="all">كل شعب الكنيسة</option>
+              </select>
+            </div>
+          </div>
+
+          {displayedBdays.length === 0 ? (
+            <div className="bg-white/80 p-3 rounded-2xl border border-amber-200 text-xs text-amber-900 text-center">
+              لا توجد أعياد ميلاد مسجلة في هذه الفترة ({bdayTab === 'week' ? 'الأسبوع الحالي' : `شهر ${currentMonthName}`}).
+            </div>
+          ) : (
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-56 overflow-y-auto">
+              {displayedBdays.map(b => {
+                const isToday = b.daysLeft === 0;
+                return (
+                  <div key={b.id} className={`p-3 rounded-2xl border flex justify-between items-center gap-2 ${isToday ? 'bg-red-50 border-red-400' : 'bg-white border-amber-200'}`}>
+                    <div className="min-w-0">
+                      <strong className="text-xs md:text-sm text-gray-900 block truncate">{b.full_name}</strong>
+                      <span className="text-[11px] text-gray-600 block">
+                        🎂 {b.dob}
+                        {b.daysLeft === 0 && <strong className="mr-1 text-red-700">• اليوم 🎉</strong>}
+                        {b.daysLeft > 0 && <strong className="mr-1 text-amber-800">• خلال {b.daysLeft} يوم</strong>}
+                      </span>
+                    </div>
+                    {b.phone ? (
+                      <button
+                        type="button"
+                        onClick={() => openWhatsAppComposer({ name: b.full_name, phone: b.phone, targetId: b.id, defaultCategory: 'معايدة' })}
+                        className="px-2.5 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shrink-0 cursor-pointer"
+                      >
+                        <MessageCircle size={13} /> معايدة
+                      </button>
+                    ) : (
+                      <span className="text-[10px] text-gray-400 shrink-0">بدون رقم</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {cards.map(c => (
+            <button type="button" key={c.id} onClick={() => setActiveCard(c.id)} className={`${c.color} border-2 p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer`}>
+              <div className="flex justify-between items-start w-full">
+                <span className="text-4xl">{c.icon}</span>
+                <span className="px-3 py-1 bg-[#f9ecee] text-[#7a1c24] rounded-full text-xs font-black">{c.count}</span>
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-gray-900">{c.title}</h3>
+                <p className="text-sm text-gray-600 mt-1">{c.desc}</p>
+              </div>
+            </button>
+          ))}
+          {customCards.map(cc => (
+            <button type="button" key={cc.id} onClick={() => setActiveCard('custom:' + cc.id)} className="bg-amber-50/50 border-2 border-amber-300 p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer">
+              <div className="flex justify-between items-start w-full">
+                <span className="text-4xl">{cc.card_icon || '📌'}</span>
+                <span className="px-3 py-1 bg-amber-200 text-amber-950 rounded-full text-xs font-black">كارت مضاف</span>
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-gray-900">{cc.card_title}</h3>
+                <p className="text-sm text-gray-700 mt-1">{cc.description || 'سجل مضاف من الأدمن'}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {renderGlobalModals()}
+      </div>
+    );
+  }
+
+  // ==============================================================
+  // التبويب المجمع: الخدمة ومدارس الأحد (يضم 3 تابات داخلية فقط)
+  // ==============================================================
+  if (activeCard === 'service_hub') {
+    const subTabs = [
+      {
+        id: 'sequence',
+        title: 'شيت التسلسل والافتقاد والترحيم',
+        desc: 'عرض كل خدمة على حدة وبند المعاشات + حالة الافتقاد وذكرى الترحيم + تصدير وطباعة',
+        badge: `${localUsers.length} مسجل`,
+        icon: ClipboardList
+      },
+      {
+        id: 'commitment',
+        title: 'الالتزام والكفاءة والعروض والرحلات',
+        desc: 'متابعة الالتزام والغياب والتأخير، ومنح العروض والخصومات، والملاحظات لولي الأمر',
+        badge: `${rewardCampaigns.length} عرض • ${memberRewards.length} مكافأة`,
+        icon: Award
+      },
+      {
+        id: 'schedule',
+        title: 'جدول الخدمة',
+        desc: 'كروت الخدمات، القيادات، الفصول، الخدام، وافتقاد الخدمة',
+        badge: `${stagesMap.length} خدمة`,
+        icon: School
+      }
+    ];
+
+    return (
+      <div className="space-y-4 text-sm md:text-base">
+        {renderTopBar('🏫 الخدمة ومدارس الأحد')}
+
+        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {subTabs.map(tab => {
+              const Icon = tab.icon;
+              const isSelected = serviceSubTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setServiceSubTab(tab.id)}
+                  className={`p-3.5 rounded-2xl border text-right flex flex-col justify-between gap-2 transition cursor-pointer ${
+                    isSelected
+                      ? 'bg-[#7a1c24] text-white border-[#7a1c24] shadow-sm'
+                      : 'bg-[#fbfaf7] text-gray-800 border-gray-200 hover:border-[#7a1c24]/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 w-full">
+                    <span className="flex items-center gap-2 font-black text-xs md:text-sm">
+                      <Icon size={17} className={isSelected ? 'text-amber-300 shrink-0' : 'text-[#7a1c24] shrink-0'} />
+                      <span>{tab.title}</span>
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black shrink-0 ${
+                      isSelected ? 'bg-white/15 text-amber-200' : 'bg-amber-100 text-amber-950'
+                    }`}>
+                      {tab.badge}
+                    </span>
+                  </div>
+                  <p className={`text-[11px] leading-relaxed ${isSelected ? 'text-white/85' : 'text-gray-500'}`}>
+                    {tab.desc}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {serviceSubTab === 'sequence' && (
+          <MasterCongregationSheet
+            users={localUsers}
+            services={services}
+            serviceGroups={serviceGroups}
+            currentUser={priest}
+            onUpdateUser={handleUpdateUserFromSheet}
+            onRefresh={loadPriestData}
+          />
+        )}
+
+        {serviceSubTab === 'commitment' && renderCommitmentRewardsContent()}
+
+        {serviceSubTab === 'schedule' && renderServiceScheduleContent()}
 
         {renderGlobalModals()}
       </div>
@@ -1617,136 +1947,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                   </div>
                 );
               })}
-            </div>
-          </div>
-        )}
-        {renderGlobalModals()}
-      </div>
-    );
-  }
-
-  if (activeCard === 'services') {
-    const stageClasses = selectedStage ? myServices.filter(s => s.stage_name === selectedStage) : [];
-    const stageServants = selectedStage ? allServants.filter(u => (u.detailed_stage || u.service_stage || '').includes(selectedStage) || (u.sector || '').includes(selectedStage) || stageClasses.some(c => c.class_name === u.assigned_class)) : [];
-    const stageMembers = selectedStage ? getMembersForStage(selectedStage) : [];
-    const stageVisitations = visitations.filter(v => v.category === 'افتقاد خدمة' && v.service_stage === selectedStage);
-
-    return (
-      <div className="space-y-4 text-sm md:text-base">
-        {renderTopBar('🏫 جدول الخدمات والفصول والخدام')}
-        {!selectedStage ? (
-          <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3">
-            {stagesMap.map(st => (
-              <button type="button" key={st} onClick={() => { setSelectedStage(st); setServiceSubCard('menu'); }} className="bg-white p-5 rounded-3xl border-2 hover:border-[#7a1c24] text-right shadow-sm space-y-2 cursor-pointer">
-                <span className="text-3xl">📖</span><h3 className="text-lg font-black">{st}</h3>
-                <p className="text-sm text-gray-600">{myServices.filter(s => s.stage_name === st).length} فصل • {getMembersForStage(st).length} مخدوم</p>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="flex gap-2">
-              <button type="button" onClick={() => { setSelectedStage(null); setServiceSubCard('menu'); setSelectedClass(null); }} className="px-4 py-2 bg-white border rounded-xl font-bold text-sm">← كل الخدمات</button>
-              {serviceSubCard !== 'menu' && <button type="button" onClick={() => setServiceSubCard('menu')} className="px-4 py-2 bg-amber-100 rounded-xl font-bold text-sm">← كروت {selectedStage}</button>}
-            </div>
-
-            {serviceSubCard === 'menu' && (
-              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <button type="button" onClick={() => setServiceSubCard('leaders')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-3xl block">👑</span><strong className="text-base block">القيادات</strong></button>
-                <button type="button" onClick={() => setServiceSubCard('classes')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-3xl block">🏫</span><strong className="text-base block">الفصول والمخدومين ({stageClasses.length})</strong></button>
-                <button type="button" onClick={() => setServiceSubCard('servants')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-3xl block">👥</span><strong className="text-base block">الخدام ({stageServants.length})</strong></button>
-                <button type="button" onClick={() => setServiceSubCard('visitations')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-3xl block">🕊️</span><strong className="text-base block">افتقاد {selectedStage} ({stageVisitations.length})</strong></button>
-              </div>
-            )}
-
-            {serviceSubCard === 'leaders' && (
-              <div className="bg-white p-5 rounded-3xl border grid md:grid-cols-2 gap-3">
-                <div className="p-4 bg-[#fbfaf7] rounded-2xl border"><span className="text-gray-500 block">أمين الخدمة:</span><strong className="text-base">{stageClasses[0]?.head_servant_name || 'غير محدد'}</strong></div>
-                <div className="p-4 bg-[#fbfaf7] rounded-2xl border"><span className="text-gray-500 block">مساعد الأمين:</span><strong className="text-base">{stageClasses[0]?.vice_head_name || 'غير محدد'}</strong></div>
-              </div>
-            )}
-
-            {serviceSubCard === 'classes' && (
-              <div className="space-y-4">
-                <div className="grid sm:grid-cols-3 gap-3">
-                  {stageClasses.map(cls => (
-                    <button type="button" key={cls.id} onClick={() => setSelectedClass(selectedClass?.id === cls.id ? null : cls)} className={`p-4 rounded-2xl border-2 text-right ${selectedClass?.id === cls.id ? 'bg-[#f9ecee] border-[#7a1c24]' : 'bg-white'}`}>
-                      <strong className="text-base block">{cls.class_name}</strong><span className="text-sm text-gray-600">⏰ {cls.meeting_time}</span>
-                    </button>
-                  ))}
-                </div>
-                <div className="bg-white p-4 rounded-3xl border grid sm:grid-cols-2 gap-2.5">
-                  {(selectedClass ? stageMembers.filter(m => m.assigned_class === selectedClass.class_name || (m.detailed_stage || '').includes(selectedClass.class_name)) : stageMembers).map(m => (
-                    <button type="button" key={m.id} onClick={() => setInspectMember(m)} className="p-3.5 bg-[#fbfaf7] rounded-2xl border text-right flex justify-between items-center">
-                      <div><strong className="text-base">{m.full_name}</strong><span className="block text-sm text-gray-600">🎂 {calcAge(m.dob)}</span></div>
-                      <span className="text-[#7a1c24] font-bold">التفاصيل</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {serviceSubCard === 'servants' && (
-              <div className="bg-white p-4 rounded-3xl border space-y-2.5">
-                {stageServants.map(sv => (
-                  <div key={sv.id} className="p-3.5 bg-[#fbfaf7] rounded-2xl border flex flex-wrap justify-between items-center gap-2">
-                    <div>
-                      <strong className="text-base">{sv.full_name}</strong>
-                      <span className="mr-2 px-2.5 py-0.5 rounded bg-amber-100 text-amber-950 text-xs font-bold">{sv.servant_training_status || 'خادم متكلم (اجتاز إعداد خدام)'}</span>
-                      <p className="text-sm text-gray-600 mt-0.5">💼 {sv.job_title || '—'} {sv.assigned_class && `• 🏫 فصل: ${sv.assigned_class}`}</p>
-                    </div>
-                    <div className="flex gap-1.5">
-                      {sv.phone && (
-                        <>
-                          <button type="button" onClick={() => openWhatsAppComposer({ name: sv.full_name, phone: sv.phone, targetId: sv.id, defaultCategory: 'افتقاد' })} className="px-3 py-2 bg-green-600 text-white rounded-xl font-bold text-xs cursor-pointer"><MessageCircle size={14} /></button>
-                          <a href={`tel:${sv.phone}`} className="px-3.5 py-2 bg-white border rounded-xl font-bold text-sm">{sv.phone}</a>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {serviceSubCard === 'visitations' && (
-              <div className="bg-white p-4 rounded-3xl border space-y-3">
-                <h4 className="font-black text-base text-[#7a1c24]">🕊️ متابعة وافتقاد فصول ({selectedStage})</h4>
-                <form onSubmit={e => handleSaveVisitation(e, 'افتقاد خدمة', selectedStage)} className="space-y-2 font-bold">
-                  <div className="grid md:grid-cols-3 gap-2">
-                    <select className="p-2.5 border rounded-xl" value={visitForm.class_name} onChange={e => setVisitForm({ ...visitForm, class_name: e.target.value })}><option value="">-- اختر الفصل --</option>{stageClasses.map(c => <option key={c.id} value={c.class_name}>{c.class_name}</option>)}</select>
-                    <select className="p-2.5 border rounded-xl" value={visitForm.target_user_id} onChange={e => { const u = allMembers.find(x => x.id === e.target.value); setVisitForm({ ...visitForm, target_user_id: e.target.value, target_name: u?.full_name || '' }); }}><option value="">-- اختر المخدوم --</option>{(stageMembers.length > 0 ? stageMembers : allMembers).map(m => <option key={m.id} value={m.id}>{m.full_name} ({m.detailed_stage})</option>)}</select>
-                    <input required placeholder="الاسم *" className="p-2.5 border rounded-xl" value={visitForm.target_name} onChange={e => setVisitForm({ ...visitForm, target_name: e.target.value })} />
-                  </div>
-                  <div className="flex flex-wrap gap-3 items-center">
-                    <label className="flex items-center gap-1.5"><input type="checkbox" checked={visitForm.needs_visit} onChange={e => setVisitForm({ ...visitForm, needs_visit: e.target.checked })} /> يحتاج افتقاد</label>
-                    <label className="flex items-center gap-1.5"><input type="checkbox" checked={visitForm.needs_confession} onChange={e => setVisitForm({ ...visitForm, needs_confession: e.target.checked })} /> يحتاج اعتراف</label>
-                    <button type="submit" className="px-5 py-2.5 bg-[#7a1c24] text-white rounded-xl">حفظ</button>
-                  </div>
-                </form>
-                {stageVisitations.map(v => {
-                  const targetObj = allMembers.find(m => m.id === v.target_user_id);
-                  return (
-                    <div key={v.id} className="p-3.5 bg-[#fbfaf7] rounded-2xl border flex justify-between items-center">
-                      <div><strong>{v.target_name}</strong> {v.class_name && `(${v.class_name})`} {v.needs_visit && '• 🕊️ يحتاج افتقاد'} {v.needs_confession && '• 🙏 يحتاج اعتراف'}</div>
-                      <div className="flex gap-1.5">
-                        <button type="button" onClick={() => openWhatsAppComposer({ name: v.target_name, phone: targetObj?.phone || '', targetId: v.target_user_id, defaultCategory: 'افتقاد' })} className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs cursor-pointer"><MessageCircle size={14} /></button>
-                        <button type="button" onClick={() => deleteVisitation(v.id)} className="p-2 bg-red-50 text-red-700 rounded-lg"><Trash2 size={15} /></button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-        {inspectMember && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-3xl w-full max-w-md p-6 space-y-2 text-sm">
-              <div className="flex justify-between border-b pb-2"><strong className="text-lg text-[#7a1c24]">{inspectMember.full_name}</strong><button type="button" onClick={() => setInspectMember(null)}><X size={18} /></button></div>
-              <p>🎂 {inspectMember.dob} ({calcAge(inspectMember.dob)}) • 🎓 {inspectMember.detailed_stage}</p>
-              <p>📍 {inspectMember.address || '—'} • 📞 {inspectMember.phone}</p>
-              {inspectMember.phone && <button type="button" onClick={() => openWhatsAppComposer({ name: inspectMember.full_name, phone: inspectMember.phone, targetId: inspectMember.id, defaultCategory: 'افتقاد' })} className="px-3 py-1.5 bg-green-600 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><MessageCircle size={14} /> إرسال واتساب</button>}
-              {siblings.filter(s => s.member_id === inspectMember.id).map(sib => <div key={sib.id} className="p-2 bg-amber-50 rounded-xl">• الأخ: {sib.sibling_full_name} ({sib.stage_or_job})</div>)}
             </div>
           </div>
         )}
