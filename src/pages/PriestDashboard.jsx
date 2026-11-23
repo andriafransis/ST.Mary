@@ -18,7 +18,8 @@ import {
 import {
   ArrowRight, Lock, Globe, Trash2, Edit3, X, Printer,
   Sun, Moon, MessageCircle, UserPlus, Link2, Bus,
-  Upload, Paperclip, Eye, ExternalLink, Cake, BellRing, AlertTriangle
+  Upload, Paperclip, Eye, ExternalLink, Cake, BellRing, AlertTriangle,
+  Award, ClipboardCheck, Gift
 } from 'lucide-react';
 
 const MASS_AUDIENCES = [
@@ -57,6 +58,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   const [spiritualNotes, setSpiritualNotes] = useState([]);
   const [visitations, setVisitations] = useState([]);
   const [services, setServices] = useState([]);
+  const [serviceGroups, setServiceGroups] = useState([]);
   const [masses, setMasses] = useState([]);
   const [personalItems, setPersonalItems] = useState([]);
   const [families, setFamilies] = useState([]);
@@ -66,6 +68,28 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   const [userChildren, setUserChildren] = useState([]);
   const [customCards, setCustomCards] = useState([]);
   const [customEntries, setCustomEntries] = useState([]);
+
+  // بيانات الالتزام، العروض والرحلات، والملاحظات المرتبطة بالداتابيز الجديدة
+  const [commitmentStats, setCommitmentStats] = useState([]);
+  const [rewardCampaigns, setRewardCampaigns] = useState([]);
+  const [memberRewards, setMemberRewards] = useState([]);
+  const [memberNotes, setMemberNotes] = useState([]);
+  const [commitmentSearch, setCommitmentSearch] = useState('');
+  const [commitmentFilter, setCommitmentFilter] = useState('all');
+  const [rewardForm, setRewardForm] = useState({
+    member_id: '',
+    campaign_id: '',
+    reward_type: 'خصم رحلة',
+    reward_title: '',
+    discount_percent: 25,
+    notes: ''
+  });
+  const [noteForm, setNoteForm] = useState({
+    member_id: '',
+    behavior_tag: 'متابعة روحية',
+    note_text: '',
+    visible_to_parent: false
+  });
 
   const [josephCases, setJosephCases] = useState([]);
   const [josephMemorials, setJosephMemorials] = useState([]);
@@ -157,7 +181,10 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
 
   const loadPriestData = async () => {
     if (!priest?.id) return;
-    const [us, sl, cb, sh, sn, vs, sr, ms, ps, fm, fa, cats, sb, uc, cc, ce, wt, jc, jm] = await Promise.all([
+    const [
+      us, sl, cb, sh, sn, vs, sr, ms, ps, fm, fa, cats, sb, uc, cc, ce, wt, jc, jm,
+      sg, commView, campRes, rewRes, notesRes
+    ] = await Promise.all([
       supabase.from('church_users').select('*').order('created_at', { ascending: true }),
       supabase.from('priest_confession_slots').select('*').eq('priest_id', priest.id).order('slot_date', { ascending: true }),
       supabase.from('confession_bookings').select('*').eq('priest_id', priest.id).order('booking_date', { ascending: true }),
@@ -176,7 +203,12 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
       supabase.from('priest_custom_entries').select('*').eq('priest_id', priest.id).order('created_at', { ascending: false }),
       supabase.from('whatsapp_templates').select('*').or(`priest_id.is.null,priest_id.eq.${priest.id}`).order('created_at', { ascending: true }),
       supabase.from('joseph_arimathea_cases').select('*').order('created_at', { ascending: false }),
-      supabase.from('joseph_memorial_requests').select('*').order('created_at', { ascending: false })
+      supabase.from('joseph_memorial_requests').select('*').order('created_at', { ascending: false }),
+      supabase.from('service_groups').select('*'),
+      supabase.from('v_parent_member_commitment').select('*'),
+      supabase.from('reward_campaigns').select('*').order('created_at', { ascending: false }),
+      supabase.from('member_rewards').select('*').order('created_at', { ascending: false }),
+      supabase.from('member_notes').select('*')
     ]);
     if (us.data) setLocalUsers(us.data);
     if (sl.data) setConfessionSlots(sl.data);
@@ -198,6 +230,11 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     if (jm.data) setJosephMemorials(jm.data);
     if (wt.data && wt.data.length > 0) setWaTemplates(wt.data);
     else setWaTemplates(FALLBACK_WA_TEMPLATES);
+    if (sg?.data) setServiceGroups(sg.data);
+    if (commView?.data) setCommitmentStats(commView.data);
+    if (campRes?.data) setRewardCampaigns(campRes.data);
+    if (rewRes?.data) setMemberRewards(rewRes.data);
+    if (notesRes?.data) setMemberNotes(notesRes.data);
   };
 
   useEffect(() => {
@@ -293,7 +330,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   };
 
   const handleUpdateUserFromSheet = async (updatedRow) => {
-    const { id, serialNo, statusKey, created_at, ...clean } = updatedRow;
+    const { id, serialNo, statusKey, detectedService, created_at, ...clean } = updatedRow;
     const { data, error } = await supabase
       .from('church_users')
       .update(clean)
@@ -315,6 +352,57 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
       });
     }
     if (onRefresh) await onRefresh();
+  };
+
+  const handleGrantReward = async (e) => {
+    e.preventDefault();
+    if (!rewardForm.member_id || !rewardForm.reward_title.trim()) {
+      return alert('اختر المخدوم واكتب اسم المكافأة أو العرض أو الرحلة');
+    }
+    const targetStat = commitmentStats.find(c => String(c.member_id) === String(rewardForm.member_id));
+    const payload = {
+      member_id: String(rewardForm.member_id),
+      campaign_id: rewardForm.campaign_id || null,
+      reward_type: rewardForm.reward_type,
+      reward_title: rewardForm.reward_title.trim(),
+      attendance_streak: Number(targetStat?.present_count || 0),
+      attendance_percentage: Number(targetStat?.attendance_percentage || 0),
+      discount_percent: Number(rewardForm.discount_percent || 0),
+      target_month: todayISO.slice(0, 7),
+      granted_by: priest?.full_name || 'أبونا الكاهن',
+      granted_date: todayISO,
+      notes: rewardForm.notes.trim()
+    };
+    const { data, error } = await supabase.from('member_rewards').insert([payload]).select().single();
+    if (error) return alert('تعذر حفظ المكافأة: ' + error.message);
+    if (data) {
+      setMemberRewards([data, ...memberRewards]);
+      setRewardForm({ member_id: '', campaign_id: '', reward_type: 'خصم رحلة', reward_title: '', discount_percent: 25, notes: '' });
+      alert('تم تسجيل المكافأة / العرض بنجاح!');
+    }
+  };
+
+  const handleAddMemberNote = async (e) => {
+    e.preventDefault();
+    if (!noteForm.member_id || !noteForm.note_text.trim()) {
+      return alert('اختر المخدوم واكتب الملاحظة');
+    }
+    const payload = {
+      member_id: noteForm.member_id,
+      servant_id: priest.id,
+      behavior_tag: noteForm.behavior_tag,
+      note_text: noteForm.note_text.trim(),
+      visible_to_parent: Boolean(noteForm.visible_to_parent),
+      is_read: false,
+      acknowledged: false
+    };
+    const { data, error } = await supabase.from('member_notes').insert([payload]).select().single();
+    if (error) return alert('تعذر حفظ الملاحظة: ' + error.message);
+    if (data) {
+      setMemberNotes([data, ...memberNotes]);
+      setNoteForm({ member_id: '', behavior_tag: 'متابعة روحية', note_text: '', visible_to_parent: false });
+      alert('تم حفظ الملاحظة بنجاح!');
+    }
   };
 
   const renderBellPanel = () => (
@@ -789,9 +877,17 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
         id: 'master_sheet',
         icon: '📋',
         title: 'شيت التسلسل والافتقاد والترحيم',
-        desc: 'سحب الكشف الرسمي بالترقيم التسلسلي للخدام والمخدومين والرعايا + حالة الافتقاد وذكرى الترحيم + تصدير وطباعة',
+        desc: 'عرض كل خدمة على حدة وبند المعاشات + حالة الافتقاد وذكرى الترحيم + تصدير وطباعة',
         count: `${localUsers.length} مسجل`,
         color: 'border-teal-300 bg-teal-50/40'
+      },
+      {
+        id: 'commitment_rewards',
+        icon: '🏅',
+        title: 'الالتزام والكفاءة والعروض والرحلات',
+        desc: 'متابعة الالتزام والغياب والتأخير، ومنح العروض والخصومات، والملاحظات لولي الأمر',
+        count: `${rewardCampaigns.length} عرض • ${memberRewards.length} مكافأة`,
+        color: 'border-amber-300 bg-amber-50/40'
       },
       { id: 'confessions', icon: '🙏', title: 'الاعترافات', desc: 'المواعيد بالمدة، المعترفون (داخل/خارج الكنيسة) والملف الروحي، والافتقاد', count: `${myConfessors.length} معترف • ${confessionSlots.length} موعد`, color: 'border-red-200 bg-white' },
       { id: 'services', icon: '🏫', title: 'جدول الخدمة', desc: 'كروت الخدمات، القيادات، الفصول، الخدام، وافتقاد الخدمة', count: `${stagesMap.length} خدمة`, color: 'border-amber-200 bg-white' },
@@ -955,10 +1051,256 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
         {renderTopBar('📋 شيت التسلسل والافتقاد والترحيم')}
         <MasterCongregationSheet
           users={localUsers}
+          services={services}
+          serviceGroups={serviceGroups}
           currentUser={priest}
           onUpdateUser={handleUpdateUserFromSheet}
           onRefresh={loadPriestData}
         />
+        {renderGlobalModals()}
+      </div>
+    );
+  }
+
+  // قسم الالتزام والكفاءة والعروض والرحلات وملاحظات ولي الأمر
+  if (activeCard === 'commitment_rewards') {
+    const filteredCommitments = commitmentStats.filter(item => {
+      if (commitmentFilter !== 'all' && item.commitment_code !== commitmentFilter) return false;
+      if (!commitmentSearch.trim()) return true;
+      const q = commitmentSearch.trim().toLowerCase();
+      return (
+        (item.member_name || '').toLowerCase().includes(q) ||
+        (item.assigned_class || '').toLowerCase().includes(q) ||
+        (item.service_stage || '').toLowerCase().includes(q)
+      );
+    });
+
+    return (
+      <div className="space-y-4 text-sm md:text-base">
+        {renderTopBar('🏅 الالتزام والكفاءة والعروض والرحلات وملاحظات ولي الأمر')}
+
+        <div className="grid lg:grid-cols-2 gap-4">
+          <form onSubmit={handleGrantReward} className="bg-white p-5 rounded-3xl border space-y-3 font-bold shadow-2xs">
+            <h3 className="text-base font-black text-[#7a1c24] flex items-center gap-1.5">
+              <Gift size={18} /> منح عرض / خصم رحلة أو مكافأة حضور
+            </h3>
+            <div className="grid sm:grid-cols-2 gap-2">
+              <select
+                className="p-2.5 border rounded-xl bg-[#fbfaf7]"
+                value={rewardForm.member_id}
+                onChange={e => setRewardForm({ ...rewardForm, member_id: e.target.value })}
+              >
+                <option value="">-- اختر المخدوم --</option>
+                {allMembers.map(m => (
+                  <option key={m.id} value={m.id}>{m.full_name} ({m.assigned_class || m.service_stage || 'عام'})</option>
+                ))}
+              </select>
+
+              <select
+                className="p-2.5 border rounded-xl bg-[#fbfaf7]"
+                value={rewardForm.campaign_id}
+                onChange={e => setRewardForm({ ...rewardForm, campaign_id: e.target.value })}
+              >
+                <option value="">-- اختر عرض / رحلة متاحة --</option>
+                {rewardCampaigns.map(c => (
+                  <option key={c.id} value={c.id}>{c.title} ({c.target_scope})</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid sm:grid-cols-3 gap-2">
+              <select
+                className="p-2.5 border rounded-xl bg-[#fbfaf7]"
+                value={rewardForm.reward_type}
+                onChange={e => setRewardForm({ ...rewardForm, reward_type: e.target.value })}
+              >
+                <option value="خصم رحلة">خصم رحلة</option>
+                <option value="مكافأة التزام">مكافأة التزام</option>
+                <option value="عرض مؤتمر">عرض مؤتمر</option>
+                <option value="مكافأة تميز">مكافأة تميز</option>
+              </select>
+
+              <input
+                required
+                placeholder="عنوان المكافأة / العرض *"
+                className="p-2.5 border rounded-xl bg-[#fbfaf7]"
+                value={rewardForm.reward_title}
+                onChange={e => setRewardForm({ ...rewardForm, reward_title: e.target.value })}
+              />
+
+              <input
+                type="number"
+                min="0"
+                max="100"
+                placeholder="نسبة الخصم %"
+                className="p-2.5 border rounded-xl bg-[#fbfaf7]"
+                value={rewardForm.discount_percent}
+                onChange={e => setRewardForm({ ...rewardForm, discount_percent: e.target.value })}
+              />
+            </div>
+
+            <input
+              placeholder="ملاحظة إضافية..."
+              className="w-full p-2.5 border rounded-xl bg-[#fbfaf7]"
+              value={rewardForm.notes}
+              onChange={e => setRewardForm({ ...rewardForm, notes: e.target.value })}
+            />
+
+            <button type="submit" className="px-5 py-2.5 bg-[#7a1c24] text-white rounded-xl font-black text-xs cursor-pointer">
+              + تسجيل المكافأة / العرض
+            </button>
+          </form>
+
+          <form onSubmit={handleAddMemberNote} className="bg-white p-5 rounded-3xl border space-y-3 font-bold shadow-2xs">
+            <h3 className="text-base font-black text-[#7a1c24] flex items-center gap-1.5">
+              <ClipboardCheck size={18} /> تسجيل ملاحظة متابعة (تظهر لولي الأمر أو داخلية)
+            </h3>
+            <div className="grid sm:grid-cols-2 gap-2">
+              <select
+                className="p-2.5 border rounded-xl bg-[#fbfaf7]"
+                value={noteForm.member_id}
+                onChange={e => setNoteForm({ ...noteForm, member_id: e.target.value })}
+              >
+                <option value="">-- اختر المخدوم --</option>
+                {allMembers.map(m => (
+                  <option key={m.id} value={m.id}>{m.full_name} ({m.assigned_class || m.service_stage || 'عام'})</option>
+                ))}
+              </select>
+
+              <select
+                className="p-2.5 border rounded-xl bg-[#fbfaf7]"
+                value={noteForm.behavior_tag}
+                onChange={e => setNoteForm({ ...noteForm, behavior_tag: e.target.value })}
+              >
+                <option value="متابعة روحية">متابعة روحية</option>
+                <option value="التزام وكفاءة">التزام وكفاءة</option>
+                <option value="محتاج افتقاد">محتاج افتقاد</option>
+                <option value="تأخير / غياب">تأخير / غياب</option>
+              </select>
+            </div>
+
+            <textarea
+              rows="2"
+              placeholder="اكتب ملاحظة المتابعة..."
+              className="w-full p-2.5 border rounded-xl bg-[#fbfaf7]"
+              value={noteForm.note_text}
+              onChange={e => setNoteForm({ ...noteForm, note_text: e.target.value })}
+            />
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="flex items-center gap-2 text-xs text-gray-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={noteForm.visible_to_parent}
+                  onChange={e => setNoteForm({ ...noteForm, visible_to_parent: e.target.checked })}
+                />
+                <span>إظهار هذه الملاحظة لولي الأمر في شاشة ولي الأمر</span>
+              </label>
+
+              <button type="submit" className="px-5 py-2.5 bg-teal-800 text-white rounded-xl font-black text-xs cursor-pointer">
+                + حفظ الملاحظة
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div className="bg-white p-5 rounded-3xl border space-y-3 shadow-2xs">
+          <div className="flex flex-wrap justify-between items-center gap-2">
+            <h3 className="text-base font-black text-gray-900 flex items-center gap-1.5">
+              <Award size={18} className="text-[#7a1c24]" /> مؤشر الالتزام والكفاءة والغياب والتأخير ({filteredCommitments.length})
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              <input
+                placeholder="بحث بالاسم أو الفصل..."
+                className="p-2 border rounded-xl text-xs bg-[#fbfaf7]"
+                value={commitmentSearch}
+                onChange={e => setCommitmentSearch(e.target.value)}
+              />
+              <select
+                className="p-2 border rounded-xl text-xs font-bold bg-[#fbfaf7]"
+                value={commitmentFilter}
+                onChange={e => setCommitmentFilter(e.target.value)}
+              >
+                <option value="all">كل الحالات</option>
+                <option value="high_commitment">ممتاز وكفء جداً</option>
+                <option value="high_absence">كثير الغياب</option>
+                <option value="needs_encouragement">يحتاج تشجيع / متابعة</option>
+                <option value="unrecorded">لم يُسجل حضور بعد</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto border rounded-2xl">
+            <table className="w-full text-right border-collapse text-xs">
+              <thead>
+                <tr className="bg-[#7a1c24] text-white font-black">
+                  <th className="p-2.5">الاسم</th>
+                  <th className="p-2.5">الخدمة / الفصل</th>
+                  <th className="p-2.5">نسبة الحضور</th>
+                  <th className="p-2.5">حضور / غياب</th>
+                  <th className="p-2.5">تأخير / انصراف مبكر</th>
+                  <th className="p-2.5">تقييم الكفاءة والالتزام</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y font-bold">
+                {filteredCommitments.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-6 text-center text-gray-400">
+                      لا توجد سجلات التزام مطابقة حالياً.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredCommitments.map(row => (
+                    <tr key={row.member_id} className="hover:bg-[#fbfaf7]">
+                      <td className="p-2.5 font-black text-gray-900">{row.member_name}</td>
+                      <td className="p-2.5 text-gray-700">{row.service_stage || '—'} {row.assigned_class ? `(${row.assigned_class})` : ''}</td>
+                      <td className="p-2.5 font-black text-[#7a1c24]">{row.attendance_percentage ?? 0}%</td>
+                      <td className="p-2.5">حضور: {row.present_count ?? 0} • غياب: <span className="text-rose-700">{row.absent_count ?? 0}</span></td>
+                      <td className="p-2.5">تأخير: {row.late_count ?? 0} • مبكر: {row.early_leave_count ?? 0}</td>
+                      <td className="p-2.5">
+                        <span className={`px-2.5 py-1 rounded-xl text-[11px] font-black ${
+                          row.commitment_code === 'high_commitment'
+                            ? 'bg-emerald-100 text-emerald-900'
+                            : row.commitment_code === 'high_absence'
+                              ? 'bg-rose-100 text-rose-900'
+                              : 'bg-amber-100 text-amber-950'
+                        }`}>
+                          {row.commitment_status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {memberNotes.length > 0 && (
+          <div className="bg-white p-4 rounded-3xl border space-y-2 text-xs">
+            <strong className="text-sm font-black text-gray-900 block">آخر ملاحظات المتابعة ({memberNotes.length})</strong>
+            <div className="grid sm:grid-cols-2 gap-2">
+              {memberNotes.slice(0, 8).map(n => {
+                const mem = localUsers.find(u => String(u.id) === String(n.member_id));
+                return (
+                  <div key={n.id} className="p-3 bg-[#fbfaf7] rounded-2xl border flex justify-between items-start gap-2">
+                    <div>
+                      <strong className="text-gray-900 block">{mem?.full_name || n.member_id}</strong>
+                      <span className="text-[11px] text-[#7a1c24] font-bold">{n.behavior_tag || 'ملاحظة'}</span>
+                      <p className="text-gray-700 mt-0.5">{n.note_text}</p>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black shrink-0 ${
+                      n.visible_to_parent ? 'bg-emerald-100 text-emerald-900' : 'bg-gray-200 text-gray-700'
+                    }`}>
+                      {n.visible_to_parent ? 'ظاهر لولي الأمر' : 'داخلي فقط'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {renderGlobalModals()}
       </div>
     );
@@ -1028,7 +1370,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <input type="date" className="p-2 border rounded-xl" value={slotForm.slot_date} onChange={e => setSlotForm({ ...slotForm, slot_date: e.target.value })} />
                   <input required type="time" className="p-2 border rounded-xl" value={slotForm.start_time} onChange={e => setSlotForm({ ...slotForm, start_time: e.target.value })} />
-                  <input type="time" className="p-2 border rounded-xl" value={slotForm.end_time} onChange={e => setSlotForm({ ...slotForm, end_time: e.target.value })} />
+                  <input required type="time" className="p-2 border rounded-xl" value={slotForm.end_time} onChange={e => setSlotForm({ ...slotForm, end_time: e.target.value })} />
                   <input required type="number" min="1" className="p-2 border rounded-xl" value={slotForm.max_confessors} onChange={e => setSlotForm({ ...slotForm, max_confessors: e.target.value })} />
                 </div>
                 {!editingSlotId && (
