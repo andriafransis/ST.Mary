@@ -3,7 +3,7 @@ import {
   Phone, Search, UserPlus, Calendar, MessageSquareText, Layers,
   MessageCircle, AlertTriangle, Users, MapPin, X, FileSpreadsheet,
   ArrowRight, BookOpen, Plus, Pencil, Trash2, Check, LayoutGrid, List,
-  ClipboardCheck, HeartHandshake, CheckCircle2
+  ClipboardCheck, HeartHandshake, CheckCircle2, SlidersHorizontal
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BirthdayBanner from '../components/BirthdayBanner';
@@ -34,17 +34,17 @@ const CORE_SERVICE_GROUPS = [
 
 const GENDER_SCOPES = ['الكل', 'بنين', 'بنات'];
 
-const NOTE_TAG_OPTIONS = [
+const DEFAULT_NOTE_TAGS = [
   'عادي',
-  'يحتاج متابعة خاصة',
-  'مشاكل عائلية',
+  'يحتاج متابعة',
+  'مشاكل',
   'مجد ومجتهد',
   'ظروف صحية',
   'متابعة دراسية / سلوكية',
   'احتياج افتقاد'
 ];
 
-const ACTIVITY_TYPE_OPTIONS = [
+const DEFAULT_ACTIVITY_TYPES = [
   'مدارس أحد',
   'قداس إلهي',
   'صلاة عشية',
@@ -53,13 +53,15 @@ const ACTIVITY_TYPE_OPTIONS = [
   'مؤتمر / خلوة / رحلة'
 ];
 
-const ATTENDANCE_STATUS_OPTIONS = [
-  { value: 'present', label: 'حاضر ✅', attended: true },
-  { value: 'absent', label: 'غائب ❌', attended: false },
-  { value: 'early_leave', label: 'انصراف مبكر 🚪', attended: true },
-  { value: 'late', label: 'حضور متأخر ⏱️', attended: true },
-  { value: 'excused', label: 'معتذر بعذر 📝', attended: false }
+const DEFAULT_ATTENDANCE_STATUSES = [
+  { code: 'present', label: 'حاضر', emoji: '✅', attended: true },
+  { code: 'absent', label: 'غائب', emoji: '❌', attended: false },
+  { code: 'early_leave', label: 'انصراف مبكر', emoji: '🚪', attended: true },
+  { code: 'late', label: 'تأخير', emoji: '⏱️', attended: true },
+  { code: 'excused', label: 'معتذر', emoji: '📝', attended: false }
 ];
+
+const CUSTOM_ITEMS_STORAGE_KEY = 'servant_custom_service_items_v1';
 
 const isMaleMember = (m) => {
   const g = String(m?.gender || '').trim();
@@ -92,6 +94,185 @@ export default function ServantDashboard({
   const canManageStructure = true;
   const canExtractSheet = canExtractMasterSheet(servant);
   const [showMasterSheet, setShowMasterSheet] = useState(false);
+
+  // البنود القابلة للإضافة والحذف بواسطة الأدمن
+  const [noteTags, setNoteTags] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CUSTOM_ITEMS_STORAGE_KEY) || '{}');
+      return Array.isArray(saved.noteTags) && saved.noteTags.length > 0 ? saved.noteTags : DEFAULT_NOTE_TAGS;
+    } catch {
+      return DEFAULT_NOTE_TAGS;
+    }
+  });
+
+  const [activityTypes, setActivityTypes] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CUSTOM_ITEMS_STORAGE_KEY) || '{}');
+      return Array.isArray(saved.activityTypes) && saved.activityTypes.length > 0 ? saved.activityTypes : DEFAULT_ACTIVITY_TYPES;
+    } catch {
+      return DEFAULT_ACTIVITY_TYPES;
+    }
+  });
+
+  const [attendanceStatuses, setAttendanceStatuses] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CUSTOM_ITEMS_STORAGE_KEY) || '{}');
+      return Array.isArray(saved.attendanceStatuses) && saved.attendanceStatuses.length > 0
+        ? saved.attendanceStatuses
+        : DEFAULT_ATTENDANCE_STATUSES;
+    } catch {
+      return DEFAULT_ATTENDANCE_STATUSES;
+    }
+  });
+
+  const [showItemsManager, setShowItemsManager] = useState(false);
+  const [newNoteTagInput, setNewNoteTagInput] = useState('');
+  const [newActivityTypeInput, setNewActivityTypeInput] = useState('');
+  const [newStatusLabelInput, setNewStatusLabelInput] = useState('');
+  const [newStatusEmojiInput, setNewStatusEmojiInput] = useState('📌');
+  const [newStatusAttendedInput, setNewStatusAttendedInput] = useState(true);
+
+  const persistCustomItems = async (nextNoteTags, nextActivityTypes, nextAttendanceStatuses) => {
+    const payload = {
+      noteTags: nextNoteTags,
+      activityTypes: nextActivityTypes,
+      attendanceStatuses: nextAttendanceStatuses
+    };
+    try {
+      localStorage.setItem(CUSTOM_ITEMS_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      // تجاهل خطأ التخزين المحلي
+    }
+
+    if (supabase && typeof supabase.from === 'function') {
+      try {
+        await supabase
+          .from('service_settings')
+          .upsert(
+            {
+              key: 'servant_custom_items',
+              value: payload,
+              updated_at: new Date().toISOString()
+            },
+            { onConflict: 'key' }
+          );
+      } catch {
+        // يعمل محلياً حتى لو جدول service_settings غير منشأ بعد
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!supabase || typeof supabase.from !== 'function') return;
+    let active = true;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('service_settings')
+          .select('value')
+          .eq('key', 'servant_custom_items')
+          .maybeSingle();
+
+        if (!active || error || !data?.value) return;
+        if (Array.isArray(data.value.noteTags) && data.value.noteTags.length > 0) {
+          setNoteTags(data.value.noteTags);
+        }
+        if (Array.isArray(data.value.activityTypes) && data.value.activityTypes.length > 0) {
+          setActivityTypes(data.value.activityTypes);
+        }
+        if (Array.isArray(data.value.attendanceStatuses) && data.value.attendanceStatuses.length > 0) {
+          setAttendanceStatuses(data.value.attendanceStatuses);
+        }
+      } catch {
+        // تجاهل إذا لم يكن الجدول موجوداً
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleAddNoteTagItem = (e) => {
+    e.preventDefault();
+    const trimmed = newNoteTagInput.trim();
+    if (!trimmed) return;
+    if (noteTags.includes(trimmed)) {
+      setNewNoteTagInput('');
+      return;
+    }
+    const updated = [...noteTags, trimmed];
+    setNoteTags(updated);
+    setNewNoteTagInput('');
+    persistCustomItems(updated, activityTypes, attendanceStatuses);
+  };
+
+  const handleRemoveNoteTagItem = (tagToRemove) => {
+    if (noteTags.length <= 1) return alert('يجب الإبقاء على بند واحد على الأقل.');
+    const updated = noteTags.filter(t => t !== tagToRemove);
+    setNoteTags(updated);
+    if (selectedCaseTagFilter === tagToRemove) setSelectedCaseTagFilter('الكل');
+    if (newNoteTag === tagToRemove) setNewNoteTag(updated[0]);
+    persistCustomItems(updated, activityTypes, attendanceStatuses);
+  };
+
+  const handleAddActivityTypeItem = (e) => {
+    e.preventDefault();
+    const trimmed = newActivityTypeInput.trim();
+    if (!trimmed) return;
+    if (activityTypes.includes(trimmed)) {
+      setNewActivityTypeInput('');
+      return;
+    }
+    const updated = [...activityTypes, trimmed];
+    setActivityTypes(updated);
+    setNewActivityTypeInput('');
+    persistCustomItems(noteTags, updated, attendanceStatuses);
+  };
+
+  const handleRemoveActivityTypeItem = (typeToRemove) => {
+    if (activityTypes.length <= 1) return alert('يجب الإبقاء على نوع واحد على الأقل.');
+    const updated = activityTypes.filter(t => t !== typeToRemove);
+    setActivityTypes(updated);
+    if (batchActForm.activity_type === typeToRemove) {
+      setBatchActForm(prev => ({ ...prev, activity_type: updated[0] }));
+    }
+    if (actForm.activity_type === typeToRemove) {
+      setActForm(prev => ({ ...prev, activity_type: updated[0] }));
+    }
+    persistCustomItems(noteTags, updated, attendanceStatuses);
+  };
+
+  const handleAddAttendanceStatusItem = (e) => {
+    e.preventDefault();
+    const label = newStatusLabelInput.trim();
+    if (!label) return;
+    const code = `custom_${Date.now()}`;
+    const updated = [
+      ...attendanceStatuses,
+      {
+        code,
+        label,
+        emoji: (newStatusEmojiInput || '📌').trim(),
+        attended: Boolean(newStatusAttendedInput)
+      }
+    ];
+    setAttendanceStatuses(updated);
+    setNewStatusLabelInput('');
+    persistCustomItems(noteTags, activityTypes, updated);
+  };
+
+  const handleRemoveAttendanceStatusItem = (codeToRemove) => {
+    if (attendanceStatuses.length <= 1) return alert('يجب الإبقاء على حالة واحدة على الأقل.');
+    const updated = attendanceStatuses.filter(s => s.code !== codeToRemove);
+    setAttendanceStatuses(updated);
+    if (batchActForm.status_code === codeToRemove) {
+      setBatchActForm(prev => ({ ...prev, status_code: updated[0].code }));
+    }
+    if (actForm.status_code === codeToRemove) {
+      setActForm(prev => ({ ...prev, status_code: updated[0].code, attended: updated[0].attended }));
+    }
+    persistCustomItems(noteTags, activityTypes, updated);
+  };
 
   const acknowledgedStorageKey = `acked_member_notes_${servant?.id || servant?.username || 'default'}`;
 
@@ -268,7 +449,6 @@ export default function ServantDashboard({
 
   const [selectedGenderFilter, setSelectedGenderFilter] = useState(defaultGenderScope);
 
-  // التبويب الرئيسي داخل الخدمة المختارة:
   // 'search' | 'attendance' | 'followup' | 'cases'
   const [activeServiceModule, setActiveServiceModule] = useState('search');
   const [selectedCaseTagFilter, setSelectedCaseTagFilter] = useState('الكل');
@@ -277,11 +457,10 @@ export default function ServantDashboard({
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
 
-  // تسجيل حضور / انصراف سريع جماعي أو فردي داخل بند الحضور والانصراف
   const [batchActForm, setBatchActForm] = useState({
     activity_date: new Date().toISOString().split('T')[0],
-    activity_type: 'مدارس أحد',
-    status_code: 'present',
+    activity_type: activityTypes[0] || 'مدارس أحد',
+    status_code: attendanceStatuses[0]?.code || 'present',
     notes: ''
   });
 
@@ -289,8 +468,8 @@ export default function ServantDashboard({
   const [selectedMember, setSelectedMember] = useState(null);
   const [actForm, setActForm] = useState({
     activity_date: new Date().toISOString().split('T')[0],
-    activity_type: 'مدارس أحد',
-    status_code: 'present',
+    activity_type: activityTypes[0] || 'مدارس أحد',
+    status_code: attendanceStatuses[0]?.code || 'present',
     attended: true,
     notes: ''
   });
@@ -298,7 +477,7 @@ export default function ServantDashboard({
   const [noteModal, setNoteModal] = useState(false);
   const [noteMember, setNoteMember] = useState(null);
   const [newNoteText, setNewNoteText] = useState('');
-  const [newNoteTag, setNewNoteTag] = useState('عادي');
+  const [newNoteTag, setNewNoteTag] = useState(noteTags[0] || 'عادي');
 
   const emptyMember = {
     username: '',
@@ -725,7 +904,7 @@ export default function ServantDashboard({
     const activeNotes = getMemberActiveNotes(m.id);
     if (activeNotes.length === 0) return false;
     if (selectedCaseTagFilter === 'الكل') return true;
-    return activeNotes.some(n => (n.behavior_tag || 'عادي') === selectedCaseTagFilter);
+    return activeNotes.some(n => (n.behavior_tag || noteTags[0] || 'عادي') === selectedCaseTagFilter);
   });
 
   const modulePool =
@@ -748,11 +927,11 @@ export default function ServantDashboard({
 
   const buildActivityPayload = (formObj) => {
     const statusObj =
-      ATTENDANCE_STATUS_OPTIONS.find(s => s.value === formObj.status_code) ||
-      ATTENDANCE_STATUS_OPTIONS[0];
-    const statusLabel = statusObj.label.replace(/\s*[✅❌🚪⏱️📝]\s*$/, '');
+      attendanceStatuses.find(s => s.code === formObj.status_code) ||
+      attendanceStatuses[0] || { label: 'حاضر', attended: true };
+
     const combinedNotes = [
-      statusLabel !== 'حاضر' ? `حالة: ${statusLabel}` : '',
+      statusObj.label !== 'حاضر' ? `حالة: ${statusObj.label}` : '',
       (formObj.notes || '').trim()
     ]
       .filter(Boolean)
@@ -761,7 +940,7 @@ export default function ServantDashboard({
     return {
       activity_date: formObj.activity_date,
       activity_type: formObj.activity_type,
-      attended: statusObj.attended,
+      attended: Boolean(statusObj.attended),
       notes: combinedNotes
     };
   };
@@ -831,7 +1010,12 @@ export default function ServantDashboard({
     e.preventDefault();
     if (!newNoteText.trim()) return;
     if (typeof onSaveMemberNote === 'function') {
-      onSaveMemberNote({ member_id: noteMember.id, author_id: servant?.id, note_text: newNoteText, behavior_tag: newNoteTag });
+      onSaveMemberNote({
+        member_id: noteMember.id,
+        author_id: servant?.id,
+        note_text: newNoteText,
+        behavior_tag: newNoteTag || noteTags[0] || 'عادي'
+      });
     }
     setNewNoteText('');
     setNoteModal(false);
@@ -868,13 +1052,182 @@ export default function ServantDashboard({
           <div className="font-bold text-teal-950">
             📋 {isAdminUser ? 'بصفتك سوبر أدمن' : 'بصفتك أمين الخدمة'}، يمكنك سحب شيت التسلسل والافتقاد والترحيم وتصديره أو طباعته.
           </div>
-          <button
-            type="button"
-            onClick={() => setShowMasterSheet(true)}
-            className="px-4 py-2 bg-teal-800 hover:bg-teal-900 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
-          >
-            <FileSpreadsheet size={15} /> فتح شيت التسلسل والافتقاد
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {isAdminUser && (
+              <button
+                type="button"
+                onClick={() => setShowItemsManager(prev => !prev)}
+                className={`px-3.5 py-2 rounded-xl font-black flex items-center gap-1.5 cursor-pointer transition ${
+                  showItemsManager ? 'bg-[#7a1c24] text-white' : 'bg-white text-[#7a1c24] border border-teal-300 hover:bg-teal-100/50'
+                }`}
+              >
+                <SlidersHorizontal size={14} /> إدارة بنود الملاحظات والحضور
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowMasterSheet(true)}
+              className="px-4 py-2 bg-teal-800 hover:bg-teal-900 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
+            >
+              <FileSpreadsheet size={15} /> فتح شيت التسلسل والافتقاد
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* لوحة إضافة وحذف البنود للأدمن */}
+      {isAdminUser && showItemsManager && (
+        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-[#7a1c24]/30 shadow-sm space-y-4 text-xs">
+          <div className="flex items-center justify-between border-b pb-2.5">
+            <div>
+              <h3 className="text-sm font-black text-[#7a1c24]">⚙️ إدارة بنود الملاحظات والحضور والانصراف (للأدمن)</h3>
+              <p className="text-[11px] text-gray-500 font-bold mt-0.5">
+                أضف أو احذف أي بند لتظهر فوراً في قوائم الملاحظات والحضور والانصراف وتُحفظ في الداتابيز.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowItemsManager(false)}
+              className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded-xl cursor-pointer"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* 1. بنود الملاحظات والمتابعة */}
+            <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-amber-200 space-y-2.5">
+              <strong className="text-amber-950 block font-black">1) بنود الملاحظات ومتابعة الحالة:</strong>
+              <form onSubmit={handleAddNoteTagItem} className="flex gap-1.5">
+                <input
+                  type="text"
+                  placeholder="مثال: يحتاج متابعة أو مشاكل..."
+                  className="flex-1 px-2.5 py-1.5 bg-white border rounded-xl text-xs font-bold"
+                  value={newNoteTagInput}
+                  onChange={e => setNewNoteTagInput(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  className="px-3 py-1.5 bg-[#7a1c24] text-white rounded-xl font-black cursor-pointer shrink-0"
+                >
+                  إضافة
+                </button>
+              </form>
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {noteTags.map((tag, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-amber-200 rounded-xl text-[11px] font-bold text-gray-800"
+                  >
+                    {tag}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveNoteTagItem(tag)}
+                      className="text-red-600 hover:text-red-800 cursor-pointer"
+                      title="حذف البند"
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* 2. أنواع اللقاءات والأنشطة */}
+            <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-emerald-200 space-y-2.5">
+              <strong className="text-emerald-950 block font-black">2) أنواع الحضور والانصراف:</strong>
+              <form onSubmit={handleAddActivityTypeItem} className="flex gap-1.5">
+                <input
+                  type="text"
+                  placeholder="مثال: مدارس أحد أو قداس..."
+                  className="flex-1 px-2.5 py-1.5 bg-white border rounded-xl text-xs font-bold"
+                  value={newActivityTypeInput}
+                  onChange={e => setNewActivityTypeInput(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  className="px-3 py-1.5 bg-emerald-700 text-white rounded-xl font-black cursor-pointer shrink-0"
+                >
+                  إضافة
+                </button>
+              </form>
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {activityTypes.map((actType, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-emerald-200 rounded-xl text-[11px] font-bold text-gray-800"
+                  >
+                    {actType}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveActivityTypeItem(actType)}
+                      className="text-red-600 hover:text-red-800 cursor-pointer"
+                      title="حذف النوع"
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* 3. حالات الحضور والانصراف */}
+            <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-blue-200 space-y-2.5">
+              <strong className="text-blue-950 block font-black">3) حالات الحضور والانصراف:</strong>
+              <form onSubmit={handleAddAttendanceStatusItem} className="space-y-1.5">
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    placeholder="اسم الحالة (مثال: انصراف مبكر)"
+                    className="flex-1 px-2.5 py-1.5 bg-white border rounded-xl text-xs font-bold"
+                    value={newStatusLabelInput}
+                    onChange={e => setNewStatusLabelInput(e.target.value)}
+                  />
+                  <input
+                    type="text"
+                    className="w-12 px-2 py-1.5 bg-white border rounded-xl text-xs font-bold text-center"
+                    value={newStatusEmojiInput}
+                    onChange={e => setNewStatusEmojiInput(e.target.value)}
+                    title="رمز"
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <select
+                    className="flex-1 px-2.5 py-1.5 bg-white border rounded-xl text-[11px] font-bold"
+                    value={newStatusAttendedInput ? 'yes' : 'no'}
+                    onChange={e => setNewStatusAttendedInput(e.target.value === 'yes')}
+                  >
+                    <option value="yes">يُحسب ضمن الحضور ✅</option>
+                    <option value="no">يُحسب ضمن الغياب/الافتقاد ❌</option>
+                  </select>
+                  <button
+                    type="submit"
+                    className="px-3 py-1.5 bg-blue-700 text-white rounded-xl font-black cursor-pointer shrink-0"
+                  >
+                    إضافة
+                  </button>
+                </div>
+              </form>
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {attendanceStatuses.map(st => (
+                  <span
+                    key={st.code}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-blue-200 rounded-xl text-[11px] font-bold text-gray-800"
+                  >
+                    {st.label} {st.emoji}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAttendanceStatusItem(st.code)}
+                      className="text-red-600 hover:text-red-800 cursor-pointer"
+                      title="حذف الحالة"
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1298,7 +1651,7 @@ export default function ServantDashboard({
         </div>
       </div>
 
-      {/* قسم الخدمة المفتوحة: رأس الخدمة + كروت البنود الأربعة (بحث / حضور وانصراف / افتقاد / متابعة حالة) */}
+      {/* قسم الخدمة المفتوحة: رأس الخدمة + 4 كروت بنود */}
       <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-4 text-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
@@ -1347,7 +1700,6 @@ export default function ServantDashboard({
           </div>
         </div>
 
-        {/* 4 كروت بنود رئيسية أسفل الخدمة المختارة */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
           <button
             type="button"
@@ -1436,7 +1788,6 @@ export default function ServantDashboard({
           </button>
         </div>
 
-        {/* شريط البحث السريع المشترك */}
         <div className="bg-[#fbfaf7] p-3 rounded-2xl border border-gray-200 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
           <div className="relative flex-1">
             <Search size={16} className="absolute right-3.5 top-2.5 text-[#7a1c24]" />
@@ -1462,7 +1813,6 @@ export default function ServantDashboard({
           </span>
         </div>
 
-        {/* إعدادات تسجيل الحضور والانصراف السريع عند فتح بند "حضور وانصراف" */}
         {activeServiceModule === 'attendance' && (
           <div className="bg-emerald-50/70 p-3.5 rounded-2xl border border-emerald-200 space-y-2.5">
             <div className="font-black text-emerald-950 text-xs">
@@ -1474,7 +1824,7 @@ export default function ServantDashboard({
                 value={batchActForm.activity_type}
                 onChange={e => setBatchActForm({ ...batchActForm, activity_type: e.target.value })}
               >
-                {ACTIVITY_TYPE_OPTIONS.map((actType, idx) => (
+                {activityTypes.map((actType, idx) => (
                   <option key={idx} value={actType}>{actType}</option>
                 ))}
               </select>
@@ -1495,11 +1845,10 @@ export default function ServantDashboard({
           </div>
         )}
 
-        {/* فلاتر نوع الحالة عند فتح بند "متابعة حالة" */}
         {activeServiceModule === 'cases' && (
           <div className="bg-amber-50/70 p-3 rounded-2xl border border-amber-200 flex flex-wrap items-center gap-1.5">
             <span className="font-black text-amber-950 ml-1">تصفية الحالات:</span>
-            {['الكل', ...NOTE_TAG_OPTIONS].map(tag => (
+            {['الكل', ...noteTags].map(tag => (
               <button
                 key={tag}
                 type="button"
@@ -1588,37 +1937,22 @@ export default function ServantDashboard({
                   </div>
                 </div>
 
-                {/* أزرار تسجيل الحضور والانصراف المباشرة عند فتح بند "حضور وانصراف" */}
                 {activeServiceModule === 'attendance' && (
                   <div className="bg-emerald-50/50 p-2.5 rounded-2xl border border-emerald-200/80 flex flex-wrap gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => handleQuickMemberAttendance(m, 'present')}
-                      className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-bold text-[11px] cursor-pointer"
-                    >
-                      حاضر ✅
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleQuickMemberAttendance(m, 'absent')}
-                      className="px-2.5 py-1.5 bg-red-700 hover:bg-red-800 text-white rounded-xl font-bold text-[11px] cursor-pointer"
-                    >
-                      غائب ❌
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleQuickMemberAttendance(m, 'early_leave')}
-                      className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-[11px] cursor-pointer"
-                    >
-                      انصراف مبكر 🚪
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleQuickMemberAttendance(m, 'late')}
-                      className="px-2.5 py-1.5 bg-sky-700 hover:bg-sky-800 text-white rounded-xl font-bold text-[11px] cursor-pointer"
-                    >
-                      تأخير ⏱️
-                    </button>
+                    {attendanceStatuses.map(st => (
+                      <button
+                        key={st.code}
+                        type="button"
+                        onClick={() => handleQuickMemberAttendance(m, st.code)}
+                        className={`px-2.5 py-1.5 rounded-xl font-bold text-[11px] cursor-pointer text-white ${
+                          st.attended
+                            ? 'bg-emerald-700 hover:bg-emerald-800'
+                            : 'bg-red-700 hover:bg-red-800'
+                        }`}
+                      >
+                        {st.label} {st.emoji}
+                      </button>
+                    ))}
                   </div>
                 )}
 
@@ -1652,7 +1986,11 @@ export default function ServantDashboard({
                   )}
                   <button
                     type="button"
-                    onClick={() => { setNoteMember(m); setNoteModal(true); }}
+                    onClick={() => {
+                      setNoteMember(m);
+                      setNewNoteTag(noteTags[0] || 'عادي');
+                      setNoteModal(true);
+                    }}
                     className="px-2.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition"
                   >
                     <MessageSquareText size={13} /> ملاحظة ({mNotes.length})
@@ -1660,12 +1998,13 @@ export default function ServantDashboard({
                   <button
                     type="button"
                     onClick={() => {
+                      const firstStatus = attendanceStatuses[0] || { code: 'present', attended: true };
                       setSelectedMember(m);
                       setActForm({
                         activity_date: new Date().toISOString().split('T')[0],
-                        activity_type: 'مدارس أحد',
-                        status_code: 'present',
-                        attended: true,
+                        activity_type: activityTypes[0] || 'مدارس أحد',
+                        status_code: firstStatus.code,
+                        attended: firstStatus.attended,
                         notes: ''
                       });
                       setActModal(true);
@@ -1684,7 +2023,7 @@ export default function ServantDashboard({
                     {mNotes.map(n => (
                       <div key={n.id} className="bg-white p-2.5 rounded-xl border border-amber-200 flex flex-col sm:flex-row justify-between sm:items-center gap-2">
                         <div className="space-y-1">
-                          <span className="px-1.5 py-0.5 bg-red-100 text-[#7a1c24] rounded text-[9px] font-bold ml-1">{n.behavior_tag || 'عادي'}</span>
+                          <span className="px-1.5 py-0.5 bg-red-100 text-[#7a1c24] rounded text-[9px] font-bold ml-1">{n.behavior_tag || noteTags[0] || 'عادي'}</span>
                           <span className="text-gray-800 font-bold">{n.note_text}</span>
                         </div>
                         <button
@@ -1836,7 +2175,7 @@ export default function ServantDashboard({
             </div>
             <form onSubmit={handleNoteSubmit} className="space-y-3">
               <select className="w-full p-2.5 border rounded-xl bg-white" value={newNoteTag} onChange={e => setNewNoteTag(e.target.value)}>
-                {NOTE_TAG_OPTIONS.map((tag, idx) => (
+                {noteTags.map((tag, idx) => (
                   <option key={idx} value={tag}>{tag}</option>
                 ))}
               </select>
@@ -1868,15 +2207,15 @@ export default function ServantDashboard({
               className="space-y-3"
             >
               <select className="w-full p-2.5 border rounded-xl bg-white" value={actForm.activity_type} onChange={e => setActForm({ ...actForm, activity_type: e.target.value })}>
-                {ACTIVITY_TYPE_OPTIONS.map((actType, idx) => (
+                {activityTypes.map((actType, idx) => (
                   <option key={idx} value={actType}>{actType}</option>
                 ))}
               </select>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <input type="date" className="w-full p-2.5 border rounded-xl" value={actForm.activity_date} onChange={e => setActForm({ ...actForm, activity_date: e.target.value })} />
                 <select className="w-full p-2.5 border rounded-xl bg-white" value={actForm.status_code} onChange={e => setActForm({ ...actForm, status_code: e.target.value })}>
-                  {ATTENDANCE_STATUS_OPTIONS.map((st, idx) => (
-                    <option key={idx} value={st.value}>{st.label}</option>
+                  {attendanceStatuses.map(st => (
+                    <option key={st.code} value={st.code}>{st.label} {st.emoji}</option>
                   ))}
                 </select>
               </div>
