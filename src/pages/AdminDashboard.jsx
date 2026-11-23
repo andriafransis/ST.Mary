@@ -132,7 +132,7 @@ const STAGE_OPTIONS = [
 ];
 
 const SERVANT_ROLES = ['head_servant', 'vice_head_servant', 'servant', 'meeting_servant', 'mercy_servant'];
-const SETUP_SUB_CARDS = ['users', 'roles_permissions', 'page_designer', 'settings', 'logs'];
+const SETUP_SUB_CARDS = ['users', 'roles_permissions', 'page_designer', 'settings', 'logs', 'nested_cards'];
 
 const detectGuardianType = (u) => {
   if (!u) return 'father';
@@ -1135,6 +1135,14 @@ export default function AdminDashboard({
       count: 'تخصيص كامل',
       color: 'border-amber-300 bg-amber-50/40'
     },
+    {
+      id: 'nested_cards',
+      icon: '🧩',
+      title: 'إضافة وتعديل كروت',
+      desc: 'عرض كروت كل الشاشات وإضافة وتعديل وحذف الكروت وتعديل بياناتها، أو إنشاء كروت متداخلة',
+      count: 'كروت الشاشات',
+      color: 'border-rose-300 bg-rose-50/30'
+    },
     ...(isAdmin ? [{
       id: 'logs',
       icon: '📊',
@@ -1145,41 +1153,33 @@ export default function AdminDashboard({
     }] : [])
   ];
 
-  if (activeCard === 'hub') {
-    const adminCards = [
-      {
-        id: 'setup_hub',
-        icon: '🛠️',
-        title: 'الإعدادات SETUP',
-        desc: 'حسابات الكنيسة، الصلاحيات، التصميم، الإعدادات، وسجل النشاط',
-        count: `${setupCards.length} كروت`,
-        color: 'border-rose-300 bg-rose-50/40'
-      },
-      {
-        id: 'nested_cards',
-        icon: '🧩',
-        title: 'كروت داخل كروت',
-        desc: 'إضافة وتعديل وحذف كروت متداخلة بأي عمق مباشرة من الصفحة وحفظها في قاعدة البيانات',
-        count: 'ديناميكي',
-        color: 'border-rose-300 bg-white'
-      },
-      ...(canExtractSheet ? [{
-        id: 'master_sheet',
-        icon: '📋',
-        title: 'شيت التسلسل والافتقاد والترحيم',
-        desc: 'سحب الشيت الرسمي بالترقيم التسلسلي للخدام والمخدومين والرعايا + حالة الافتقاد وذكرى الترحيم + تصدير وطباعة (أدمن / أب كاهن / أمين خدمة)',
-        count: `${users.length} مسجل`,
-        color: 'border-teal-300 bg-teal-50/30'
-      }] : []),
-      { id: 'events', icon: '⛪', title: 'مواعيد القداسات والاجتماعات', desc: 'إضافة وتعديل مواعيد القداسات، العشيات، والاجتماعات العامة', count: `${events.length} موعد`, color: 'border-amber-200 bg-white' },
-      { id: 'services', icon: '🏫', title: 'الخدمات والاجتماعات والفصول', desc: 'تصفح متدرج بالكروت: الخدمة ← السنة الدراسية ← الفصول، مع الإضافة والتعديل والنقل من جوه الكروت', count: `${dbServiceGroups.length} خدمة • ${services.length} فصل`, color: 'border-blue-200 bg-white' },
-      { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل، المواد، الأسعار، حضور الطلاب والمدرسين، وشيت المحاسبة', count: 'إدارة الدروس', color: 'border-indigo-200 bg-white' },
-      { id: 'joseph_arimathea', icon: '🕊️', title: 'خدمة يوسف الرامي', desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، خط سير السائق، ومتابعة المرافقين', count: 'خدمة المنتقلين', color: 'border-slate-300 bg-white' },
-      { id: 'burial_and_caskets', icon: '⚰️', title: 'أماكن الدفن والصناديق وألحان يوسف الرامي', desc: 'جدول أماكن الدفن بالترقيم المتسلسل ورسوم الانتقال + مخزون الصناديق + ألحان يوسف الرامي وسلايدر الصوت', count: 'جداول وألحان', color: 'border-cyan-200 bg-white' },
-      { id: 'categories', icon: '📂', title: 'كروت بحث الحالة', desc: 'تعديل وإضافة تصنيفات الأسر في مكتب الكاهن', count: `${caseCategories.length} تصنيف`, color: 'border-emerald-200 bg-white' },
-      { id: 'custom_cards', icon: '📌', title: 'كروت إضافية للكاهن', desc: 'إنشاء كروت مخصصة تظهر داخل شاشة الأب الكاهن', count: `${customCards.length} كارت`, color: 'border-purple-200 bg-white' }
-    ];
+  const adminCards = [
+    {
+      id: 'setup_hub',
+      icon: '🛠️',
+      title: 'الإعدادات SETUP',
+      desc: 'حسابات الكنيسة، الصلاحيات، التصميم، الإعدادات، إضافة وتعديل كروت، وسجل النشاط',
+      count: `${setupCards.length} كروت`,
+      color: 'border-rose-300 bg-rose-50/40'
+    },
+    ...(canExtractSheet ? [{
+      id: 'master_sheet',
+      icon: '📋',
+      title: 'شيت التسلسل والافتقاد والترحيم',
+      desc: 'سحب الشيت الرسمي بالترقيم التسلسلي للخدام والمخدومين والرعايا + حالة الافتقاد وذكرى الترحيم + تصدير وطباعة (أدمن / أب كاهن / أمين خدمة)',
+      count: `${users.length} مسجل`,
+      color: 'border-teal-300 bg-teal-50/30'
+    }] : []),
+    { id: 'events', icon: '⛪', title: 'مواعيد القداسات والاجتماعات', desc: 'إضافة وتعديل مواعيد القداسات، العشيات، والاجتماعات العامة', count: `${events.length} موعد`, color: 'border-amber-200 bg-white' },
+    { id: 'services', icon: '🏫', title: 'الخدمات والاجتماعات والفصول', desc: 'تصفح متدرج بالكروت: الخدمة ← السنة الدراسية ← الفصول، مع الإضافة والتعديل والنقل من جوه الكروت', count: `${dbServiceGroups.length} خدمة • ${services.length} فصل`, color: 'border-blue-200 bg-white' },
+    { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل، المواد، الأسعار، حضور الطلاب والمدرسين، وشيت المحاسبة', count: 'إدارة الدروس', color: 'border-indigo-200 bg-white' },
+    { id: 'joseph_arimathea', icon: '🕊️', title: 'خدمة يوسف الرامي', desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، خط سير السائق، ومتابعة المرافقين', count: 'خدمة المنتقلين', color: 'border-slate-300 bg-white' },
+    { id: 'burial_and_caskets', icon: '⚰️', title: 'أماكن الدفن والصناديق وألحان يوسف الرامي', desc: 'جدول أماكن الدفن بالترقيم المتسلسل ورسوم الانتقال + مخزون الصناديق + ألحان يوسف الرامي وسلايدر الصوت', count: 'جداول وألحان', color: 'border-cyan-200 bg-white' },
+    { id: 'categories', icon: '📂', title: 'كروت بحث الحالة', desc: 'تعديل وإضافة تصنيفات الأسر في مكتب الكاهن', count: `${caseCategories.length} تصنيف`, color: 'border-emerald-200 bg-white' },
+    { id: 'custom_cards', icon: '📌', title: 'كروت إضافية للكاهن', desc: 'إنشاء كروت مخصصة تظهر داخل شاشة الأب الكاهن', count: `${customCards.length} كارت`, color: 'border-purple-200 bg-white' }
+  ];
 
+  if (activeCard === 'hub') {
     return (
       <div className="space-y-4">
         <div className="bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-6 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
@@ -1305,11 +1305,18 @@ export default function AdminDashboard({
     <div className="space-y-4">
       {activeCard === 'nested_cards' && (
         <div className="space-y-4">
-          {renderTopBack('🧩 كروت داخل كروت')}
+          {renderTopBack('🧩 إضافة وتعديل كروت')}
           <NestedCardsBuilder
             currentUser={effectiveUser}
             isAdmin={isAdmin}
-            title="إدارة الكروت المتداخلة"
+            title="إضافة وتعديل كروت الشاشات والكروت المتداخلة"
+            hubCards={adminCards}
+            setupCards={setupCards}
+            serviceGroups={effectiveGroups}
+            services={services}
+            caseCategories={caseCategories}
+            customCards={customCards}
+            onRefresh={onRefresh}
           />
         </div>
       )}
