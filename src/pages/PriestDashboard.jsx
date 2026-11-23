@@ -38,7 +38,8 @@ const ATTACHMENT_TYPES = ['صورة بطاقة', 'عقد إيجار', 'تحال�
 
 export default function PriestDashboard({ priest, users = [], onRefresh }) {
   const [activeCard, setActiveCard] = useState('hub');
-  const [serviceSubTab, setServiceSubTab] = useState('sequence');
+  // null = عرض التلات كروت فقط • 'sequence' | 'commitment' | 'schedule' = الدخول داخل كارت واحد فقط
+  const [activeServiceCard, setActiveServiceCard] = useState(null);
   const [localUsers, setLocalUsers] = useState(users);
 
   useEffect(() => {
@@ -70,7 +71,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   const [customCards, setCustomCards] = useState([]);
   const [customEntries, setCustomEntries] = useState([]);
 
-  // بيانات الالتزام، العروض والرحلات، والملاحظات المرتبطة بالداتابيز الجديدة
   const [commitmentStats, setCommitmentStats] = useState([]);
   const [rewardCampaigns, setRewardCampaigns] = useState([]);
   const [memberRewards, setMemberRewards] = useState([]);
@@ -293,7 +293,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
 
   const goBackToHub = () => {
     setActiveCard('hub');
-    setServiceSubTab('sequence');
+    setActiveServiceCard(null);
     setConfSubView('menu');
     setSelectedStage(null);
     setServiceSubCard('menu');
@@ -329,17 +329,17 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   const handleNavigateFromBell = (cardId) => {
     if (cardId === 'master_sheet') {
       setActiveCard('service_hub');
-      setServiceSubTab('sequence');
+      setActiveServiceCard('sequence');
       return;
     }
     if (cardId === 'commitment_rewards') {
       setActiveCard('service_hub');
-      setServiceSubTab('commitment');
+      setActiveServiceCard('commitment');
       return;
     }
     if (cardId === 'services') {
       setActiveCard('service_hub');
-      setServiceSubTab('schedule');
+      setActiveServiceCard('schedule');
       return;
     }
     setActiveCard(cardId);
@@ -886,7 +886,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   );
 
   // ==============================================================
-  // مكوّن داخلي لجدول الخدمة داخل التبويب الفرعي الثالث
+  // مكوّن داخلي لجدول الخدمة عند الدخول لكارت "جدول الخدمة" فقط
   // ==============================================================
   const renderServiceScheduleContent = () => {
     const stageClasses = selectedStage ? myServices.filter(s => s.stage_name === selectedStage) : [];
@@ -1141,7 +1141,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     );
   };
 
-  // مكوّن داخلي للالتزام والكفاءة والعروض والرحلات وملاحظات ولي الأمر داخل التبويب الفرعي الثاني
+  // مكوّن داخلي للالتزام والكفاءة والعروض والرحلات وملاحظات ولي الأمر عند الدخول لكارتها فقط
   const renderCommitmentRewardsContent = () => {
     const filteredCommitments = commitmentStats.filter(item => {
       if (commitmentFilter !== 'all' && item.commitment_code !== commitmentFilter) return false;
@@ -1390,7 +1390,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
         id: 'service_hub',
         icon: '🏫',
         title: 'الخدمة ومدارس الأحد',
-        desc: 'يضم 3 تابات داخلية: شيت التسلسل والافتقاد والترحيم • الالتزام والكفاءة والعروض والرحلات • جدول الخدمة',
+        desc: '3 كروت مستقلة: شيت التسلسل والافتقاد والترحيم • الالتزام والكفاءة والعروض والرحلات • جدول الخدمة',
         count: `${stagesMap.length} خدمة • ${localUsers.length} مسجل`,
         color: 'border-teal-300 bg-teal-50/40'
       },
@@ -1518,7 +1518,15 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {cards.map(c => (
-            <button type="button" key={c.id} onClick={() => setActiveCard(c.id)} className={`${c.color} border-2 p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer`}>
+            <button
+              type="button"
+              key={c.id}
+              onClick={() => {
+                setActiveCard(c.id);
+                if (c.id === 'service_hub') setActiveServiceCard(null);
+              }}
+              className={`${c.color} border-2 p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer`}
+            >
               <div className="flex justify-between items-start w-full">
                 <span className="text-4xl">{c.icon}</span>
                 <span className="px-3 py-1 bg-[#f9ecee] text-[#7a1c24] rounded-full text-xs font-black">{c.count}</span>
@@ -1549,74 +1557,89 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   }
 
   // ==============================================================
-  // التبويب المجمع: الخدمة ومدارس الأحد (يضم 3 تابات داخلية فقط)
+  // الخدمة ومدارس الأحد: 3 كروت فقط، وكل كارت يفتح حاجته لوحدها
   // ==============================================================
   if (activeCard === 'service_hub') {
-    const subTabs = [
+    const threeServiceCards = [
       {
         id: 'sequence',
         title: 'شيت التسلسل والافتقاد والترحيم',
         desc: 'عرض كل خدمة على حدة وبند المعاشات + حالة الافتقاد وذكرى الترحيم + تصدير وطباعة',
         badge: `${localUsers.length} مسجل`,
-        icon: ClipboardList
+        icon: ClipboardList,
+        color: 'border-emerald-200 bg-white'
       },
       {
         id: 'commitment',
         title: 'الالتزام والكفاءة والعروض والرحلات',
         desc: 'متابعة الالتزام والغياب والتأخير، ومنح العروض والخصومات، والملاحظات لولي الأمر',
         badge: `${rewardCampaigns.length} عرض • ${memberRewards.length} مكافأة`,
-        icon: Award
+        icon: Award,
+        color: 'border-amber-200 bg-white'
       },
       {
         id: 'schedule',
         title: 'جدول الخدمة',
         desc: 'كروت الخدمات، القيادات، الفصول، الخدام، وافتقاد الخدمة',
         badge: `${stagesMap.length} خدمة`,
-        icon: School
+        icon: School,
+        color: 'border-blue-200 bg-white'
       }
     ];
 
+    const currentCardMeta = threeServiceCards.find(c => c.id === activeServiceCard);
+
     return (
       <div className="space-y-4 text-sm md:text-base">
-        {renderTopBar('🏫 الخدمة ومدارس الأحد')}
+        {renderTopBar(currentCardMeta ? `🏫 ${currentCardMeta.title}` : '🏫 الخدمة ومدارس الأحد')}
 
-        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {subTabs.map(tab => {
-              const Icon = tab.icon;
-              const isSelected = serviceSubTab === tab.id;
+        {activeServiceCard && (
+          <div>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveServiceCard(null);
+                setSelectedStage(null);
+                setServiceSubCard('menu');
+                setSelectedClass(null);
+              }}
+              className="px-4 py-2 bg-white border hover:bg-gray-50 rounded-xl font-bold text-sm inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              ← رجوع لكروت الخدمة ومدارس الأحد (3 كروت)
+            </button>
+          </div>
+        )}
+
+        {!activeServiceCard && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {threeServiceCards.map(card => {
+              const Icon = card.icon;
               return (
                 <button
-                  key={tab.id}
+                  key={card.id}
                   type="button"
-                  onClick={() => setServiceSubTab(tab.id)}
-                  className={`p-3.5 rounded-2xl border text-right flex flex-col justify-between gap-2 transition cursor-pointer ${
-                    isSelected
-                      ? 'bg-[#7a1c24] text-white border-[#7a1c24] shadow-sm'
-                      : 'bg-[#fbfaf7] text-gray-800 border-gray-200 hover:border-[#7a1c24]/40'
-                  }`}
+                  onClick={() => setActiveServiceCard(card.id)}
+                  className={`${card.color} border-2 p-6 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-4 cursor-pointer`}
                 >
-                  <div className="flex items-center justify-between gap-2 w-full">
-                    <span className="flex items-center gap-2 font-black text-xs md:text-sm">
-                      <Icon size={17} className={isSelected ? 'text-amber-300 shrink-0' : 'text-[#7a1c24] shrink-0'} />
-                      <span>{tab.title}</span>
+                  <div className="flex justify-between items-start w-full">
+                    <span className="p-3 bg-[#f9ecee] text-[#7a1c24] rounded-2xl">
+                      <Icon size={26} />
                     </span>
-                    <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black shrink-0 ${
-                      isSelected ? 'bg-white/15 text-amber-200' : 'bg-amber-100 text-amber-950'
-                    }`}>
-                      {tab.badge}
+                    <span className="px-3 py-1 bg-amber-100 text-amber-950 rounded-full text-xs font-black">
+                      {card.badge}
                     </span>
                   </div>
-                  <p className={`text-[11px] leading-relaxed ${isSelected ? 'text-white/85' : 'text-gray-500'}`}>
-                    {tab.desc}
-                  </p>
+                  <div>
+                    <h3 className="text-lg font-black text-gray-900">{card.title}</h3>
+                    <p className="text-sm text-gray-600 mt-1">{card.desc}</p>
+                  </div>
                 </button>
               );
             })}
           </div>
-        </div>
+        )}
 
-        {serviceSubTab === 'sequence' && (
+        {activeServiceCard === 'sequence' && (
           <MasterCongregationSheet
             users={localUsers}
             services={services}
@@ -1627,9 +1650,9 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
           />
         )}
 
-        {serviceSubTab === 'commitment' && renderCommitmentRewardsContent()}
+        {activeServiceCard === 'commitment' && renderCommitmentRewardsContent()}
 
-        {serviceSubTab === 'schedule' && renderServiceScheduleContent()}
+        {activeServiceCard === 'schedule' && renderServiceScheduleContent()}
 
         {renderGlobalModals()}
       </div>
