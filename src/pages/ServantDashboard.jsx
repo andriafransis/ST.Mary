@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Phone, Search, UserPlus, Calendar, MessageSquareText, Layers,
   MessageCircle, AlertTriangle, Users, MapPin, X, FileSpreadsheet,
-  ArrowRight, BookOpen, Plus, Pencil, Trash2, Check
+  ArrowRight, BookOpen, Plus, Pencil, Trash2, Check, LayoutGrid, List, Sparkles
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BirthdayBanner from '../components/BirthdayBanner';
@@ -240,6 +240,7 @@ export default function ServantDashboard({
 
   const [selectedGenderFilter, setSelectedGenderFilter] = useState(defaultGenderScope);
   const [viewMode, setViewMode] = useState('list');
+  const [cardDensity, setCardDensity] = useState('compact');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
 
@@ -632,7 +633,13 @@ export default function ServantDashboard({
       .sort((a, b) => new Date(b.activity_date) - new Date(a.activity_date));
 
     if (mActs.length === 0) {
-      return { needsFollowUp: true, label: 'لم يسجل حضور بعد', badgeColor: 'bg-gray-100 text-gray-700' };
+      return {
+        needsFollowUp: true,
+        label: 'لم يسجل حضور بعد',
+        badgeColor: 'bg-gray-100 text-gray-700',
+        accentBar: 'border-r-4 border-r-gray-400',
+        avatarTone: 'bg-slate-100 text-slate-700 border-slate-200'
+      };
     }
     const lastAct = mActs[0];
     const daysSinceLast = Math.floor((Date.now() - new Date(lastAct.activity_date).getTime()) / 86400000);
@@ -640,10 +647,25 @@ export default function ServantDashboard({
       return {
         needsFollowUp: true,
         label: !lastAct.attended ? 'غائب آخر لقاء ⚠️' : `مفتقد منذ ${daysSinceLast} يوم ⚠️`,
-        badgeColor: 'bg-red-100 text-red-800'
+        badgeColor: 'bg-red-100 text-red-800',
+        accentBar: 'border-r-4 border-r-red-600',
+        avatarTone: 'bg-red-50 text-[#7a1c24] border-red-200'
       };
     }
-    return { needsFollowUp: false, label: 'حضر آخر لقاء ✅', badgeColor: 'bg-green-100 text-green-800' };
+    return {
+      needsFollowUp: false,
+      label: 'حضر آخر لقاء ✅',
+      badgeColor: 'bg-green-100 text-green-800',
+      accentBar: 'border-r-4 border-r-emerald-600',
+      avatarTone: 'bg-emerald-50 text-emerald-800 border-emerald-200'
+    };
+  };
+
+  const getInitials = (fullName = '') => {
+    const parts = String(fullName || '').trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return 'م';
+    if (parts.length === 1) return parts[0].slice(0, 2);
+    return `${parts[0][0]}${parts[1][0]}`;
   };
 
   const followUpMembers = scopeMembers.filter(m => getAttendanceInfo(m.id).needsFollowUp);
@@ -656,7 +678,8 @@ export default function ServantDashboard({
       (m.phone || '') + ' ' +
       (m.father_full_name || '') + ' ' +
       (m.mother_full_name || '') + ' ' +
-      (m.address || '')
+      (m.address || '') + ' ' +
+      (m.assigned_class || '')
     ).toLowerCase().includes(searchQuery.toLowerCase()));
 
   const openAddMemberModal = () => {
@@ -1179,7 +1202,8 @@ export default function ServantDashboard({
         </div>
       </div>
 
-      <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3 text-xs">
+      {/* قسم التحكم وكارت البحث السريع في وش الصفحة */}
+      <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3.5 text-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
             <h2 className="text-base sm:text-lg font-black text-gray-900">
@@ -1199,57 +1223,95 @@ export default function ServantDashboard({
             </div>
           </div>
 
-          {canAdd && (
-            <button
-              type="button"
-              onClick={openAddMemberModal}
-              className="w-full md:w-auto px-4 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white text-xs font-black rounded-2xl flex items-center justify-center gap-1.5 shadow cursor-pointer transition"
-            >
-              <UserPlus size={16} /> إضافة مخدوم للفصل
-            </button>
-          )}
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-2 border-t border-gray-100">
-          <div className="grid grid-cols-2 gap-1.5 bg-gray-100 p-1 rounded-2xl">
-            <button
-              type="button"
-              onClick={() => setViewMode('list')}
-              className={`py-2 px-3 rounded-xl font-bold cursor-pointer transition text-center ${
-                viewMode === 'list' ? 'bg-gray-900 text-white shadow-xs' : 'text-gray-700 hover:bg-white/60'
-              }`}
-            >
-              كل المخدومين ({scopeMembers.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('followup')}
-              className={`py-2 px-3 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition ${
-                viewMode === 'followup' ? 'bg-red-700 text-white shadow-xs' : 'text-red-800 hover:bg-red-50'
-              }`}
-            >
-              <AlertTriangle size={14} /> الافتقاد ({followUpMembers.length})
-            </button>
-          </div>
-
-          <div className="relative">
-            <Search size={16} className="absolute right-3.5 top-3 text-gray-400" />
-            <input
-              type="text"
-              placeholder="بحث سريع بالاسم أو التليفون..."
-              className="w-full pr-10 pl-8 py-2.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl text-xs outline-none focus:border-[#7a1c24] focus:bg-white transition"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-            />
-            {searchQuery && (
+          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+            <div className="flex items-center bg-gray-100 p-1 rounded-2xl">
               <button
                 type="button"
-                onClick={() => setSearchQuery('')}
-                className="absolute left-3 top-2.5 text-gray-400 hover:text-gray-700 cursor-pointer"
+                onClick={() => setCardDensity('compact')}
+                className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1 cursor-pointer transition ${
+                  cardDensity === 'compact' ? 'bg-white text-[#7a1c24] shadow-2xs' : 'text-gray-600'
+                }`}
+                title="عرض مدمج لتقليل السكرول"
               >
-                <X size={16} />
+                <LayoutGrid size={13} /> عرض مدمج
+              </button>
+              <button
+                type="button"
+                onClick={() => setCardDensity('detailed')}
+                className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1 cursor-pointer transition ${
+                  cardDensity === 'detailed' ? 'bg-white text-[#7a1c24] shadow-2xs' : 'text-gray-600'
+                }`}
+                title="عرض تفصيلي كامل"
+              >
+                <List size={13} /> عرض تفصيلي
+              </button>
+            </div>
+
+            {canAdd && (
+              <button
+                type="button"
+                onClick={openAddMemberModal}
+                className="flex-1 md:flex-initial px-4 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white text-xs font-black rounded-2xl flex items-center justify-center gap-1.5 shadow cursor-pointer transition"
+              >
+                <UserPlus size={16} /> إضافة مخدوم للفصل
               </button>
             )}
+          </div>
+        </div>
+
+        {/* كارت البحث السريع المباشر في وش الصفحة */}
+        <div className="bg-linear-to-l from-[#fbfaf7] to-red-50/40 p-3.5 rounded-2xl border border-amber-200/90 space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-black text-[#7a1c24] flex items-center gap-1.5 text-xs">
+              <Sparkles size={14} /> كارت البحث السريع (وصول فوري لأي مخدوم بدون سكرول طويل)
+            </span>
+            <span className="text-[11px] font-bold text-gray-600">
+              الظاهر حالياً: <strong className="text-gray-900">{displayedMembers.length}</strong> من {basePool.length}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 items-center">
+            <div className="lg:col-span-7 relative">
+              <Search size={16} className="absolute right-3.5 top-3 text-[#7a1c24]" />
+              <input
+                type="text"
+                placeholder="اكتب اسم المخدوم، الأب، الأم، رقم التليفون، أو العنوان للوصول السريع..."
+                className="w-full pr-10 pl-9 py-2.5 bg-white border border-gray-300 rounded-2xl text-xs font-bold outline-none focus:border-[#7a1c24] transition"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute left-3 top-2.5 text-gray-400 hover:text-gray-700 cursor-pointer"
+                  title="مسح البحث"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+
+            <div className="lg:col-span-5 grid grid-cols-2 gap-1.5 bg-gray-100 p-1 rounded-2xl">
+              <button
+                type="button"
+                onClick={() => setViewMode('list')}
+                className={`py-2 px-3 rounded-xl font-bold cursor-pointer transition text-center ${
+                  viewMode === 'list' ? 'bg-gray-900 text-white shadow-xs' : 'text-gray-700 hover:bg-white/60'
+                }`}
+              >
+                كل المخدومين ({scopeMembers.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('followup')}
+                className={`py-2 px-3 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition ${
+                  viewMode === 'followup' ? 'bg-red-700 text-white shadow-xs' : 'text-red-800 hover:bg-red-50'
+                }`}
+              >
+                <AlertTriangle size={14} /> الافتقاد ({followUpMembers.length})
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1262,7 +1324,7 @@ export default function ServantDashboard({
           <div>
             <p className="text-sm font-black text-gray-800">لا يوجد مخدومون في هذه القائمة حالياً</p>
             <p className="text-xs text-gray-400 mt-0.5">
-              {searchQuery ? 'جرّب البحث بكلمة مختلفة.' : 'يمكنك إضافة أول مخدوم للفصل بسهولة من الزر بالأسفل.'}
+              {searchQuery ? 'جرّب البحث بكلمة مختلفة أو امسح خانة البحث.' : 'يمكنك إضافة أول مخدوم للفصل بسهولة من الزر بالأسفل.'}
             </p>
           </div>
           {!searchQuery && viewMode === 'list' && canAdd && (
@@ -1276,7 +1338,7 @@ export default function ServantDashboard({
           )}
         </div>
       ) : (
-        <div className="grid gap-3">
+        <div className={cardDensity === 'compact' ? 'grid grid-cols-1 xl:grid-cols-2 gap-3' : 'grid gap-3'}>
           {displayedMembers.map((m, index) => {
             const mActs = activities.filter(a => a.member_id === m.id);
             const mNotes = memberNotes.filter(
@@ -1286,47 +1348,91 @@ export default function ServantDashboard({
             const callPhone = m.phone || m.father_phone || m.mother_phone;
 
             return (
-              <div key={m.id} className="p-4 rounded-3xl border text-xs space-y-3 shadow-sm bg-white border-gray-200">
-                <div className="flex flex-col lg:flex-row justify-between items-start gap-3">
-                  <div className="space-y-1.5 w-full">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="px-2.5 py-0.5 bg-[#7a1c24] text-white rounded-lg text-[11px] font-black">#{index + 1}</span>
-                      <h3 className="text-sm sm:text-base font-black text-gray-900">{m.full_name}</h3>
-                      {m.gender && <span className="px-2 py-0.5 bg-pink-50 text-pink-900 rounded-lg text-[10px] font-bold">{m.gender === 'أنثى' ? '♀️ بنات' : '♂️ بنين'}</span>}
-                      {m.assigned_class && <span className="px-2 py-0.5 bg-red-50 text-[#7a1c24] rounded-lg text-[10px] font-bold">⛪ {m.assigned_class}</span>}
-                      <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-bold ${attInfo.badgeColor}`}>{attInfo.label}</span>
+              <div
+                key={m.id}
+                className={`p-4 rounded-3xl border text-xs space-y-3 shadow-2xs hover:shadow-sm transition bg-white border-gray-200 ${attInfo.accentBar}`}
+              >
+                <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
+                  <div className="flex items-start gap-2.5 w-full">
+                    <div className={`w-10 h-10 rounded-2xl border flex items-center justify-center font-black text-xs shrink-0 ${attInfo.avatarTone}`}>
+                      {getInitials(m.full_name)}
                     </div>
 
-                    <div className="text-gray-600 space-y-1">
-                      <p className="flex flex-wrap gap-x-3 gap-y-1">
-                        <span>👨‍👦 الأب: <strong>{m.father_full_name || '—'}</strong> (📞 {m.father_phone || '—'})</span>
-                        <span>👩‍👦 الأم: <strong>{m.mother_full_name || '—'}</strong> (📞 {m.mother_phone || '—'})</span>
-                      </p>
-                      <p className="text-gray-500 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
-                        <span className="inline-flex items-center gap-1"><Phone size={12} /> {m.phone || 'غير مسجل'}</span>
-                        <span className="inline-flex items-center gap-1"><MapPin size={12} /> {m.address || 'بدون عنوان'}</span>
-                      </p>
+                    <div className="space-y-1.5 w-full min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="px-2 py-0.5 bg-[#7a1c24] text-white rounded-lg text-[10px] font-black">#{index + 1}</span>
+                        <h3 className="text-sm font-black text-gray-900">{m.full_name}</h3>
+                        {m.gender && (
+                          <span className="px-2 py-0.5 bg-pink-50 text-pink-900 rounded-lg text-[10px] font-bold">
+                            {m.gender === 'أنثى' ? '♀️ بنات' : '♂️ بنين'}
+                          </span>
+                        )}
+                        {m.assigned_class && (
+                          <span className="px-2 py-0.5 bg-red-50 text-[#7a1c24] rounded-lg text-[10px] font-bold">
+                            ⛪ {m.assigned_class}
+                          </span>
+                        )}
+                        <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${attInfo.badgeColor}`}>
+                          {attInfo.label}
+                        </span>
+                      </div>
+
+                      <div className="text-gray-600 space-y-1 text-[11px]">
+                        <p className="flex flex-wrap gap-x-3 gap-y-1">
+                          <span>👨‍👦 الأب: <strong className="text-gray-800">{m.father_full_name || '—'}</strong> (📞 {m.father_phone || '—'})</span>
+                          <span>👩‍👦 الأم: <strong className="text-gray-800">{m.mother_full_name || '—'}</strong> (📞 {m.mother_phone || '—'})</span>
+                        </p>
+                        <p className="text-gray-500 flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <span className="inline-flex items-center gap-1"><Phone size={11} /> {m.phone || 'غير مسجل'}</span>
+                          <span className="inline-flex items-center gap-1"><MapPin size={11} /> {m.address || 'بدون عنوان'}</span>
+                        </p>
+                      </div>
                     </div>
                   </div>
+                </div>
 
-                  <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 w-full lg:w-auto shrink-0">
-                    {callPhone && (
-                      <>
-                        <a href={`https://wa.me/2${callPhone.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold flex items-center justify-center gap-1">
-                          <MessageCircle size={13} /> واتس
-                        </a>
-                        <a href={`tel:${callPhone}`} className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl font-bold flex items-center justify-center gap-1">
-                          <Phone size={13} /> اتصال
-                        </a>
-                      </>
-                    )}
-                    <button type="button" onClick={() => { setNoteMember(m); setNoteModal(true); }} className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer">
-                      <MessageSquareText size={13} /> ملاحظة ({memberNotes.filter(n => n.member_id === m.id).length})
-                    </button>
-                    <button type="button" onClick={() => { setSelectedMember(m); setActModal(true); }} className="px-3 py-2 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer">
-                      <Calendar size={13} /> حضور ونشاط
-                    </button>
-                  </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 pt-1">
+                  {callPhone ? (
+                    <>
+                      <a
+                        href={`https://wa.me/2${callPhone.replace(/\D/g, '')}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-2.5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold flex items-center justify-center gap-1 transition"
+                      >
+                        <MessageCircle size={13} /> واتس
+                      </a>
+                      <a
+                        href={`tel:${callPhone}`}
+                        className="px-2.5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl font-bold flex items-center justify-center gap-1 transition"
+                      >
+                        <Phone size={13} /> اتصال
+                      </a>
+                    </>
+                  ) : (
+                    <>
+                      <span className="px-2.5 py-2 bg-gray-50 text-gray-400 rounded-xl font-bold flex items-center justify-center gap-1">
+                        <MessageCircle size={13} /> واتس
+                      </span>
+                      <span className="px-2.5 py-2 bg-gray-50 text-gray-400 rounded-xl font-bold flex items-center justify-center gap-1">
+                        <Phone size={13} /> اتصال
+                      </span>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setNoteMember(m); setNoteModal(true); }}
+                    className="px-2.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition"
+                  >
+                    <MessageSquareText size={13} /> ملاحظة ({memberNotes.filter(n => n.member_id === m.id).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedMember(m); setActModal(true); }}
+                    className="px-2.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition"
+                  >
+                    <Calendar size={13} /> حضور ونشاط
+                  </button>
                 </div>
 
                 {mNotes.length > 0 && (
@@ -1350,11 +1456,27 @@ export default function ServantDashboard({
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 bg-[#fbfaf7] p-3 rounded-2xl border border-gray-100 text-[11px]">
-                  <div><span className="text-gray-400 block mb-0.5">أب الاعتراف:</span><strong className="text-[#7a1c24] text-xs">{m.confession_father || 'غير محدد'}</strong></div>
-                  <div><span className="text-gray-400 block mb-0.5">حالة الاعتراف:</span><span className={`px-2 py-0.5 rounded font-bold inline-block ${m.confession_status === 'منتظم' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900'}`}>{m.confession_status}</span></div>
-                  <div><span className="text-gray-400 block mb-0.5">التناول:</span><strong className={m.has_communion ? 'text-green-700' : 'text-red-600'}>{m.has_communion ? 'تناول ✅' : 'لم يتناول ❌'}</strong></div>
-                  <div><span className="text-gray-400 block mb-0.5">سجل الأنشطة:</span><strong className="text-blue-700">{mActs.length} نشاط مسجل</strong></div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-[#fbfaf7] p-2.5 rounded-2xl border border-gray-100 text-[11px]">
+                  <div>
+                    <span className="text-gray-400 block text-[10px]">أب الاعتراف:</span>
+                    <strong className="text-[#7a1c24]">{m.confession_father || 'غير محدد'}</strong>
+                  </div>
+                  <div>
+                    <span className="text-gray-400 block text-[10px]">الاعتراف:</span>
+                    <span className={`px-2 py-0.5 rounded font-bold inline-block text-[10px] ${m.confession_status === 'منتظم' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900'}`}>
+                      {m.confession_status}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-400 block text-[10px]">التناول:</span>
+                    <strong className={m.has_communion ? 'text-green-700' : 'text-red-600'}>
+                      {m.has_communion ? 'تناول ✅' : 'لم يتناول ❌'}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-gray-400 block text-[10px]">الأنشطة:</span>
+                    <strong className="text-blue-700">{mActs.length} نشاط مسجل</strong>
+                  </div>
                 </div>
               </div>
             );
