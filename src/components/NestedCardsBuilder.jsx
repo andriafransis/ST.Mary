@@ -1,92 +1,79 @@
-import { useState, useEffect, useMemo } from 'react';
-import { supabase } from '../lib/supabase';
-import {
-  FolderPlus, Edit3, Trash2, ArrowRight, FolderOpen,
-  Save, X, Layers, ExternalLink, FileText, ChevronLeft, Search, LayoutGrid
-} from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { supabase } from './supabaseClient';
 
-const COLOR_THEMES = {
-  red: {
-    card: 'border-red-200 bg-white hover:border-[#7a1c24]',
-    badge: 'bg-red-50 text-[#7a1c24]',
-    btn: 'bg-[#7a1c24] hover:bg-[#5f141a] text-white'
-  },
-  amber: {
-    card: 'border-amber-200 bg-amber-50/40 hover:border-amber-500',
-    badge: 'bg-amber-100 text-amber-950',
-    btn: 'bg-amber-700 hover:bg-amber-800 text-white'
-  },
-  blue: {
-    card: 'border-blue-200 bg-blue-50/30 hover:border-blue-500',
-    badge: 'bg-blue-100 text-blue-950',
-    btn: 'bg-blue-700 hover:bg-blue-800 text-white'
-  },
-  emerald: {
-    card: 'border-emerald-200 bg-emerald-50/30 hover:border-emerald-500',
-    badge: 'bg-emerald-100 text-emerald-950',
-    btn: 'bg-emerald-700 hover:bg-emerald-800 text-white'
-  },
-  purple: {
-    card: 'border-purple-200 bg-purple-50/30 hover:border-purple-500',
-    badge: 'bg-purple-100 text-purple-950',
-    btn: 'bg-purple-800 hover:bg-purple-900 text-white'
-  },
-  slate: {
-    card: 'border-slate-300 bg-slate-50/50 hover:border-slate-600',
-    badge: 'bg-slate-200 text-slate-900',
-    btn: 'bg-slate-800 hover:bg-slate-900 text-white'
-  }
-};
+const DEFAULT_ICONS = [
+  '⛪', '✝️', '🕊️', '📖', '🙏', '🏫', '👶', '👦', '👧', '🧑',
+  '👴', '👵', '🎵', '🎶', '🎨', '⚽', '🏕️', '❤️', '🌟', '📢',
+  '📋', '🗓️', '👥', '🏠', '🛡️', '🎓', '🎁', '🔥', '💡', '📌'
+];
 
-const makeEmptyCardForm = (parentId = null, nextOrder = 1) => ({
-  id: null,
-  parent_id: parentId || '',
-  title: '',
-  subtitle: '',
-  description: '',
-  icon: '🗂️',
-  badge_text: '',
-  accent_color: 'red',
-  target_action: 'children',
-  target_url: '',
-  sort_order: nextOrder,
-  is_active: true
-});
+const DEFAULT_COLORS = [
+  { name: 'أزرق ملكي', value: '#2563eb' },
+  { name: 'بنفسجي', value: '#7c3aed' },
+  { name: 'زمردي', value: '#059669' },
+  { name: 'عنابي', value: '#be123c' },
+  { name: 'برتقالي دافئ', value: '#ea580c' },
+  { name: 'سماوي', value: '#0284c7' },
+  { name: 'ذهبي داكن', value: '#b45309' },
+  { name: 'رمادي أردوازي', value: '#334155' }
+];
 
 export default function NestedCardsBuilder({
-  currentUser = null,
-  isAdmin = false,
+  mode = 'builder',
   rootParentId = null,
-  title = 'إضافة وتعديل كروت',
+  initialPath = [],
+  onSelectCard,
   onExit,
-  hubCards = [],
-  setupCards = [],
-  serviceGroups = [],
-  services = [],
-  caseCategories = [],
-  customCards = [],
-  onRefresh
+  externalHierarchy = null,
+  onRefresh = null
 }) {
-  const [viewMode, setViewMode] = useState('live');
-  const [screenFilter, setScreenFilter] = useState('all');
-  const [searchQuery, setSearchQuery] = useState('');
-
   const [allCards, setAllCards] = useState([]);
   const [currentParentId, setCurrentParentId] = useState(rootParentId);
-  const [loading, setLoading] = useState(false);
+  const [breadcrumbs, setBreadcrumbs] = useState(initialPath || []);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [cardForm, setCardForm] = useState(() => makeEmptyCardForm(rootParentId, 1));
-  const [selectedInfoCard, setSelectedInfoCard] = useState(null);
+  // تبويب الإدارة في وضع builder: 'nested' | 'screen_cards'
+  const [activeTab, setActiveTab] = useState('nested');
 
-  // حالة تعديل وإضافة الكروت الفعلية في الشاشات
-  const [liveModalOpen, setLiveModalOpen] = useState(false);
+  // بيانات الكروت القادمة من الشاشات الأخرى (الخدمات والاجتماعات والفصول، الخدام، الكهنة، الإعلانات)
+  const [hierarchyData, setHierarchyData] = useState(
+    externalHierarchy || {
+      groups: [],
+      allClasses: [],
+      users: [],
+      priests: [],
+      announcements: []
+    }
+  );
+  const [screenFilter, setScreenFilter] = useState('all'); // 'all' | 'service_group' | 'service_class' | 'servant' | 'priest' | 'announcement'
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // مودال إضافة / تعديل كارت متداخل
+  const [showModal, setShowModal] = useState(false);
+  const [editingCard, setEditingCard] = useState(null);
+  const [formData, setFormData] = useState({
+    title: '',
+    subtitle: '',
+    description: '',
+    icon: '⛪',
+    color: '#2563eb',
+    card_type: 'category',
+    action_type: 'drill_down',
+    action_target: '',
+    badge_text: '',
+    sort_order: 1,
+    is_active: true
+  });
+
+  // مودال تعديل / إضافة كارت تابع لشاشة أخرى
   const [editingLiveCard, setEditingLiveCard] = useState(null);
+  const [showLiveModal, setShowLiveModal] = useState(false);
   const [liveForm, setLiveForm] = useState({
-    sourceType: 'case_category',
-    id: null,
+    sourceType: '',
+    id: '',
     title: '',
     subtitle: '',
     description: '',
@@ -97,7 +84,42 @@ export default function NestedCardsBuilder({
     extra3: '',
     sortOrder: 1
   });
-  const [savingLive, setSavingLive] = useState(false);
+
+  useEffect(() => {
+    setCurrentParentId(rootParentId);
+  }, [rootParentId]);
+
+  useEffect(() => {
+    if (Array.isArray(initialPath) && initialPath.length > 0) {
+      setBreadcrumbs(initialPath);
+    }
+  }, [initialPath]);
+
+  useEffect(() => {
+    if (externalHierarchy) {
+      setHierarchyData({
+        groups: externalHierarchy.groups || [],
+        allClasses: externalHierarchy.allClasses || [],
+        users: externalHierarchy.users || [],
+        priests: externalHierarchy.priests || [],
+        announcements: externalHierarchy.announcements || []
+      });
+    }
+  }, [externalHierarchy]);
+
+  const notifyStatus = (type, msg) => {
+    if (type === 'error') {
+      setErrorMsg(msg);
+      setSuccessMsg('');
+    } else {
+      setSuccessMsg(msg);
+      setErrorMsg('');
+    }
+    setTimeout(() => {
+      setErrorMsg('');
+      setSuccessMsg('');
+    }, 4000);
+  };
 
   const fetchCards = async () => {
     setLoading(true);
@@ -105,352 +127,474 @@ export default function NestedCardsBuilder({
       const { data, error } = await supabase
         .from('nested_cards')
         .select('*')
-        .eq('is_active', true)
         .order('sort_order', { ascending: true })
         .order('created_at', { ascending: true });
 
-      if (error) {
-        console.error(error);
-      } else {
-        setAllCards(data || []);
-      }
+      if (error) throw error;
+      setAllCards(data || []);
+    } catch (err) {
+      console.error('Error loading nested_cards:', err);
+      notifyStatus('error', 'تعذر تحميل الكروت من قاعدة البيانات: ' + (err.message || ''));
     } finally {
       setLoading(false);
     }
   };
 
+  const fetchLiveSourcesIfNeeded = async () => {
+    if (externalHierarchy) return;
+    try {
+      const [groupsRes, classesRes, usersRes, annRes] = await Promise.all([
+        supabase.from('service_groups').select('*').order('sort_order', { ascending: true }),
+        supabase.from('services').select('*').order('id', { ascending: true }),
+        supabase.from('church_users').select('*').order('id', { ascending: true }),
+        supabase.from('church_announcements').select('*').order('id', { ascending: false })
+      ]);
+
+      const usersList = usersRes.data || [];
+      const priestsList = usersList.filter(
+        (u) =>
+          String(u.role || '').toLowerCase().includes('priest') ||
+          String(u.role_ar || '').includes('كاهن') ||
+          String(u.job_title || '').includes('كاهن')
+      );
+
+      setHierarchyData({
+        groups: groupsRes.data || [],
+        allClasses: classesRes.data || [],
+        users: usersList,
+        priests: priestsList,
+        announcements: annRes.data || []
+      });
+    } catch (err) {
+      console.error('Error loading live sources:', err);
+    }
+  };
+
   useEffect(() => {
     fetchCards();
+    fetchLiveSourcesIfNeeded();
   }, []);
 
-  useEffect(() => {
-    setCurrentParentId(rootParentId);
-  }, [rootParentId]);
+  const visibleCards = useMemo(() => {
+    return allCards.filter((card) => {
+      const parentMatches =
+        currentParentId === null || currentParentId === undefined
+          ? card.parent_id === null || card.parent_id === undefined
+          : String(card.parent_id) === String(currentParentId);
 
-  const cardsByParent = useMemo(() => {
-    const map = {};
-    for (const c of allCards) {
-      const key = c.parent_id || '__ROOT__';
-      if (!map[key]) map[key] = [];
-      map[key].push(c);
-    }
-    return map;
-  }, [allCards]);
-
-  const cardById = useMemo(() => {
-    const map = {};
-    for (const c of allCards) {
-      map[c.id] = c;
-    }
-    return map;
-  }, [allCards]);
-
-  const breadcrumbs = useMemo(() => {
-    const trail = [];
-    let cursor = currentParentId ? cardById[currentParentId] : null;
-    const guard = new Set();
-
-    while (cursor && !guard.has(cursor.id)) {
-      guard.add(cursor.id);
-      trail.unshift(cursor);
-      cursor = cursor.parent_id ? cardById[cursor.parent_id] : null;
-    }
-    return trail;
-  }, [currentParentId, cardById]);
-
-  const currentLevelCards = useMemo(() => {
-    const key = currentParentId || '__ROOT__';
-    return cardsByParent[key] || [];
-  }, [currentParentId, cardsByParent]);
-
-  const currentParentCard = currentParentId ? cardById[currentParentId] : null;
-
-  // تجميع الكروت الفعلية من كافة الشاشات
-  const allScreenCards = useMemo(() => {
-    const list = [];
-
-    (hubCards || []).forEach((hc, idx) => {
-      list.push({
-        uid: `hub-${hc.id || idx}`,
-        screenKey: 'admin_hub',
-        screenLabel: 'لوحة الإدارة الرئيسية',
-        sourceType: 'hub_virtual',
-        raw: hc,
-        icon: hc.icon || '🗂️',
-        title: hc.title || '',
-        subtitle: 'كارت شاشة في لوحة الإدارة',
-        description: hc.desc || '',
-        badge: hc.count || '',
-        accent: 'red',
-        editable: false,
-        deletable: false
-      });
+      if (!parentMatches) return false;
+      if (mode === 'viewer') {
+        return card.is_active !== false;
+      }
+      return true;
     });
+  }, [allCards, currentParentId, mode]);
 
-    (setupCards || []).forEach((sc, idx) => {
-      list.push({
-        uid: `setup-${sc.id || idx}`,
-        screenKey: 'setup_hub',
-        screenLabel: 'الإعدادات SETUP',
-        sourceType: 'setup_virtual',
-        raw: sc,
-        icon: sc.icon || '🛠️',
-        title: sc.title || '',
-        subtitle: 'كارت داخل الإعدادات SETUP',
-        description: sc.desc || '',
-        badge: sc.count || '',
-        accent: 'amber',
-        editable: false,
-        deletable: false
-      });
-    });
-
-    (serviceGroups || []).forEach((grp, idx) => {
-      list.push({
-        uid: `grp-${grp.id || idx}`,
-        screenKey: 'services',
-        screenLabel: 'الخدمات والاجتماعات والفصول',
-        sourceType: 'service_group',
-        raw: grp,
-        icon: grp.icon || (grp.has_classes !== false ? '🏫' : '🕊️'),
-        title: grp.group_name || '',
-        subtitle: [
-          grp.gender_target,
-          grp.head_servant_name ? `الأمين: ${grp.head_servant_name}` : '',
-          grp.service_day ? `${grp.service_day} ${grp.start_time || ''}` : ''
-        ].filter(Boolean).join(' • '),
-        description: grp.servants_names ? `الخدام: ${grp.servants_names}` : '',
-        badge: grp.has_classes !== false ? 'خدمة بفصول' : 'اجتماع/خدمة',
-        accent: 'blue',
-        editable: Boolean(grp.id),
-        deletable: Boolean(grp.id)
-      });
-    });
-
-    (services || []).forEach((srv, idx) => {
-      list.push({
-        uid: `srv-${srv.id || idx}`,
-        screenKey: 'services',
-        screenLabel: 'الخدمات والاجتماعات والفصول',
-        sourceType: 'service_class',
-        raw: srv,
-        icon: '📘',
-        title: srv.class_name || '',
-        subtitle: [
-          srv.stage_name ? `المرحلة/الخدمة: ${srv.stage_name}` : '',
-          srv.head_servant_name ? `الأمين: ${srv.head_servant_name}` : ''
-        ].filter(Boolean).join(' • '),
-        description: [
-          srv.vice_head_name ? `الخدام: ${srv.vice_head_name}` : '',
-          srv.meeting_time ? `الموعد: ${srv.meeting_time}` : '',
-          srv.room_name ? `القاعة: ${srv.room_name}` : ''
-        ].filter(Boolean).join(' • '),
-        badge: 'فصل دراسي',
-        accent: 'emerald',
-        editable: Boolean(srv.id),
-        deletable: Boolean(srv.id)
-      });
-    });
-
-    (caseCategories || []).forEach((cat, idx) => {
-      list.push({
-        uid: `cat-${cat.id || idx}`,
-        screenKey: 'categories',
-        screenLabel: 'كروت بحث الحالة',
-        sourceType: 'case_category',
-        raw: cat,
-        icon: cat.icon || '📂',
-        title: cat.name || '',
-        subtitle: 'تصنيف بحث الحالة في مكتب الكاهن',
-        description: '',
-        badge: 'تصنيف حالة',
-        accent: 'emerald',
-        editable: Boolean(cat.id),
-        deletable: Boolean(cat.id)
-      });
-    });
-
-    (customCards || []).forEach((cc, idx) => {
-      list.push({
-        uid: `cc-${cc.id || idx}`,
-        screenKey: 'custom_cards',
-        screenLabel: 'كروت إضافية للكاهن',
-        sourceType: 'custom_card',
-        raw: cc,
-        icon: cc.card_icon || '📌',
-        title: cc.card_title || '',
-        subtitle: 'كارت مخصص في صفحة الأب الكاهن',
-        description: cc.description || '',
-        badge: 'كارت كاهن',
-        accent: 'purple',
-        editable: Boolean(cc.id),
-        deletable: Boolean(cc.id)
-      });
-    });
-
-    return list;
-  }, [hubCards, setupCards, serviceGroups, services, caseCategories, customCards]);
-
-  const filteredScreenCards = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return allScreenCards.filter((item) => {
-      if (screenFilter !== 'all' && item.screenKey !== screenFilter) return false;
-      if (!q) return true;
-      return `${item.title} ${item.subtitle} ${item.description} ${item.screenLabel}`
-        .toLowerCase()
-        .includes(q);
-    });
-  }, [allScreenCards, screenFilter, searchQuery]);
-
-  const openCreateModal = (targetParentId = currentParentId) => {
-    if (!isAdmin) {
-      alert('🔒 إضافة وتعديل الكروت متاح للسوبر أدمن فقط.');
-      return;
-    }
-    const siblings = cardsByParent[targetParentId || '__ROOT__'] || [];
-    setEditingId(null);
-    setCardForm(makeEmptyCardForm(targetParentId, siblings.length + 1));
-    setModalOpen(true);
+  const getChildrenCount = (cardId) => {
+    return allCards.filter((c) => String(c.parent_id) === String(cardId)).length;
   };
 
-  const openEditModal = (card, e) => {
-    if (e) e.stopPropagation();
-    if (!isAdmin) {
-      alert('🔒 تعديل الكروت متاح للسوبر أدمن فقط.');
+  const currentParentCard = useMemo(() => {
+    if (!currentParentId) return null;
+    return allCards.find((c) => String(c.id) === String(currentParentId)) || null;
+  }, [allCards, currentParentId]);
+
+  const handleOpenCard = (card) => {
+    const childrenCount = getChildrenCount(card.id);
+
+    if (mode === 'viewer') {
+      if (card.action_type === 'link' && card.action_target) {
+        if (card.action_target.startsWith('http')) {
+          window.open(card.action_target, '_blank', 'noopener,noreferrer');
+        } else if (onSelectCard) {
+          onSelectCard(card);
+        }
+        return;
+      }
+
+      if (card.action_type === 'select' && onSelectCard) {
+        onSelectCard(card);
+        return;
+      }
+
+      if (childrenCount > 0 || card.action_type === 'drill_down') {
+        setBreadcrumbs((prev) => [...prev, { id: card.id, title: card.title }]);
+        setCurrentParentId(card.id);
+        return;
+      }
+
+      if (onSelectCard) {
+        onSelectCard(card);
+      }
       return;
     }
-    setEditingId(card.id);
-    setCardForm({
-      id: card.id,
-      parent_id: card.parent_id || '',
-      title: card.title || '',
-      subtitle: card.subtitle || '',
-      description: card.description || '',
-      icon: card.icon || '🗂️',
-      badge_text: card.badge_text || '',
-      accent_color: card.accent_color || 'red',
-      target_action: card.target_action || 'children',
-      target_url: card.target_url || '',
-      sort_order: card.sort_order ?? 1,
-      is_active: card.is_active !== false
-    });
-    setModalOpen(true);
+
+    setBreadcrumbs((prev) => [...prev, { id: card.id, title: card.title }]);
+    setCurrentParentId(card.id);
   };
 
-  const openCreateLiveCard = () => {
-    if (!isAdmin) {
-      alert('🔒 إضافة الكروت متاح للسوبر أدمن فقط.');
+  const handleBreadcrumbClick = (index) => {
+    if (index < 0) {
+      setBreadcrumbs([]);
+      setCurrentParentId(rootParentId);
       return;
     }
-    const defaultType =
-      screenFilter === 'services' ? 'service_group' :
-      screenFilter === 'custom_cards' ? 'custom_card' : 'case_category';
+    const target = breadcrumbs[index];
+    setBreadcrumbs(breadcrumbs.slice(0, index + 1));
+    setCurrentParentId(target.id);
+  };
 
-    setEditingLiveCard(null);
-    setLiveForm({
-      sourceType: defaultType,
-      id: null,
+  const goBackOneLevel = () => {
+    if (breadcrumbs.length > 0) {
+      const newCrumbs = breadcrumbs.slice(0, -1);
+      setBreadcrumbs(newCrumbs);
+      const prevCrumb = newCrumbs[newCrumbs.length - 1];
+      setCurrentParentId(prevCrumb ? prevCrumb.id : rootParentId);
+    } else if (currentParentId !== rootParentId) {
+      setCurrentParentId(rootParentId);
+    } else if (onExit) {
+      onExit();
+    }
+  };
+
+  const openAddModal = () => {
+    setEditingCard(null);
+    const nextOrder = visibleCards.length + 1;
+    setFormData({
       title: '',
       subtitle: '',
       description: '',
-      icon: defaultType === 'service_group' ? '🏫' : defaultType === 'custom_card' ? '📌' : '📂',
-      badge: '',
-      extra1: defaultType === 'service_group' ? 'عام (الكل: ذكور وإناث)' : '',
-      extra2: '',
-      extra3: '',
-      sortOrder: 1
+      icon: '⛪',
+      color: '#2563eb',
+      card_type: 'category',
+      action_type: 'drill_down',
+      action_target: '',
+      badge_text: '',
+      sort_order: nextOrder,
+      is_active: true
     });
-    setLiveModalOpen(true);
+    setShowModal(true);
   };
 
-  const openEditLiveCard = (item) => {
-    if (!isAdmin) {
-      alert('🔒 تعديل الكروت متاح للسوبر أدمن فقط.');
-      return;
-    }
-    if (!item.editable) {
-      alert('هذا الكارت ثابت في بنية الكود ويمكن تعديل تسميته أو إظهاره من «التصميم وتعديل الصفحات».');
+  const openEditModal = (e, card) => {
+    e.stopPropagation();
+    setEditingCard(card);
+    setFormData({
+      title: card.title || '',
+      subtitle: card.subtitle || '',
+      description: card.description || '',
+      icon: card.icon || '⛪',
+      color: card.color || '#2563eb',
+      card_type: card.card_type || 'category',
+      action_type: card.action_type || 'drill_down',
+      action_target: card.action_target || '',
+      badge_text: card.badge_text || '',
+      sort_order: card.sort_order ?? 1,
+      is_active: card.is_active !== false
+    });
+    setShowModal(true);
+  };
+
+  const handleSaveCard = async (e) => {
+    e.preventDefault();
+    if (!formData.title.trim()) {
+      notifyStatus('error', 'يرجى إدخال عنوان الكارت.');
       return;
     }
 
+    setSaving(true);
+    try {
+      const payload = {
+        parent_id: currentParentId || null,
+        title: formData.title.trim(),
+        subtitle: formData.subtitle.trim() || null,
+        description: formData.description.trim() || null,
+        icon: formData.icon || '⛪',
+        color: formData.color || '#2563eb',
+        card_type: formData.card_type || 'category',
+        action_type: formData.action_type || 'drill_down',
+        action_target: formData.action_target.trim() || null,
+        badge_text: formData.badge_text.trim() || null,
+        sort_order: Number(formData.sort_order) || 1,
+        is_active: Boolean(formData.is_active)
+      };
+
+      if (editingCard) {
+        const { error } = await supabase
+          .from('nested_cards')
+          .update(payload)
+          .eq('id', editingCard.id);
+        if (error) throw error;
+        notifyStatus('success', 'تم تحديث الكارت بنجاح.');
+      } else {
+        const { error } = await supabase
+          .from('nested_cards')
+          .insert([payload]);
+        if (error) throw error;
+        notifyStatus('success', 'تم إضافة الكارت الجديد بنجاح.');
+      }
+
+      setShowModal(false);
+      setEditingCard(null);
+      await fetchCards();
+      if (onRefresh) await onRefresh();
+    } catch (err) {
+      console.error('Error saving card:', err);
+      notifyStatus('error', 'حدث خطأ أثناء حفظ الكارت: ' + (err.message || ''));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteCard = async (e, card) => {
+    e.stopPropagation();
+    const childrenCount = getChildrenCount(card.id);
+    const confirmMsg =
+      childrenCount > 0
+        ? `سيتم حذف الكارت "${card.title}" وجميع الكروت الفرعية التابعة له (${childrenCount} كارت). هل أنت متأكد؟`
+        : `هل أنت متأكد من حذف الكارت "${card.title}"؟`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    setSaving(true);
+    try {
+      const deleteRecursive = async (targetId) => {
+        const directChildren = allCards.filter((c) => String(c.parent_id) === String(targetId));
+        for (const child of directChildren) {
+          await deleteRecursive(child.id);
+        }
+        const { error } = await supabase.from('nested_cards').delete().eq('id', targetId);
+        if (error) throw error;
+      };
+
+      await deleteRecursive(card.id);
+      notifyStatus('success', 'تم حذف الكارت بنجاح.');
+      await fetchCards();
+      if (onRefresh) await onRefresh();
+    } catch (err) {
+      console.error('Error deleting card:', err);
+      notifyStatus('error', 'تعذر حذف الكارت: ' + (err.message || ''));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleCardActive = async (e, card) => {
+    e.stopPropagation();
+    try {
+      const nextVal = card.is_active === false ? true : false;
+      const { error } = await supabase
+        .from('nested_cards')
+        .update({ is_active: nextVal })
+        .eq('id', card.id);
+      if (error) throw error;
+      setAllCards((prev) =>
+        prev.map((item) => (item.id === card.id ? { ...item, is_active: nextVal } : item))
+      );
+      notifyStatus('success', nextVal ? 'تم تفعيل الكارت.' : 'تم إخفاء الكارت.');
+    } catch (err) {
+      notifyStatus('error', 'تعذر تغيير حالة الكارت: ' + (err.message || ''));
+    }
+  };
+
+  // تجميع الكروت الفعالة من الشاشات الأخرى
+  const allScreenCards = useMemo(() => {
+    const items = [];
+
+    (hierarchyData.groups || []).forEach((g, idx) => {
+      items.push({
+        uid: `grp-${g.id || idx}`,
+        sourceType: 'service_group',
+        sourceLabel: 'الخدمات والاجتماعات',
+        icon: g.icon || '🏫',
+        title: g.group_name || 'مجموعة خدمة',
+        subtitle: g.head_servant_name ? `أمين الخدمة: ${g.head_servant_name}` : g.service_day || '',
+        description: g.servants_names || '',
+        badge: g.has_classes === false ? 'بدون فصول' : 'له فصول',
+        sortOrder: g.sort_order ?? idx + 1,
+        raw: g
+      });
+    });
+
+    (hierarchyData.allClasses || []).forEach((c, idx) => {
+      items.push({
+        uid: `cls-${c.id || idx}`,
+        sourceType: 'service_class',
+        sourceLabel: 'فصل خدمة',
+        icon: '📘',
+        title: c.class_name || 'فصل',
+        subtitle: `${c.group_name || ''} ${c.stage_name ? '— ' + c.stage_name : ''}`.trim(),
+        description: c.servant_name ? `خادم الفصل: ${c.servant_name}` : '',
+        badge: c.meeting_day || '',
+        sortOrder: c.sort_order ?? idx + 1,
+        raw: c
+      });
+    });
+
+    (hierarchyData.priests || []).forEach((p, idx) => {
+      items.push({
+        uid: `pr-${p.id || idx}`,
+        sourceType: 'priest',
+        sourceLabel: 'الآباء الكهنة',
+        icon: '✝️',
+        title: p.full_name || p.name || 'أب كاهن',
+        subtitle: p.service_stage || p.job_title || 'كاهن الخدمة',
+        description: p.phone || '',
+        badge: 'كاهن',
+        sortOrder: idx + 1,
+        raw: p
+      });
+    });
+
+    const nonPriestUsers = (hierarchyData.users || []).filter(
+      (u) =>
+        !(
+          String(u.role || '').toLowerCase().includes('priest') ||
+          String(u.role_ar || '').includes('كاهن') ||
+          String(u.job_title || '').includes('كاهن')
+        )
+    );
+    nonPriestUsers.forEach((u, idx) => {
+      items.push({
+        uid: `usr-${u.id || idx}`,
+        sourceType: 'servant',
+        sourceLabel: 'الخدام والمخدومين',
+        icon: u.gender === 'female' || u.gender === 'أنثى' ? '👩' : '👨',
+        title: u.full_name || u.name || 'مستخدم',
+        subtitle: u.assigned_class || u.service_stage || u.role_ar || u.role || '',
+        description: u.phone || '',
+        badge: u.role_ar || u.role || 'عضو',
+        sortOrder: idx + 1,
+        raw: u
+      });
+    });
+
+    (hierarchyData.announcements || []).forEach((a, idx) => {
+      items.push({
+        uid: `ann-${a.id || idx}`,
+        sourceType: 'announcement',
+        sourceLabel: 'الإعلانات والتنبيهات',
+        icon: '📢',
+        title: a.title || 'إعلان',
+        subtitle: a.created_at ? String(a.created_at).slice(0, 10) : '',
+        description: a.body || a.content || '',
+        badge: a.is_pinned ? 'مثبت' : 'إعلان',
+        sortOrder: idx + 1,
+        raw: a
+      });
+    });
+
+    return items.filter((item) => {
+      if (screenFilter !== 'all' && item.sourceType !== screenFilter) return false;
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.trim().toLowerCase();
+      return (
+        String(item.title).toLowerCase().includes(q) ||
+        String(item.subtitle).toLowerCase().includes(q) ||
+        String(item.description).toLowerCase().includes(q) ||
+        String(item.sourceLabel).toLowerCase().includes(q)
+      );
+    });
+  }, [hierarchyData, screenFilter, searchQuery]);
+
+  const openEditLiveCard = (item) => {
     const raw = item.raw || {};
     setEditingLiveCard(item);
 
     if (item.sourceType === 'service_group') {
       setLiveForm({
         sourceType: 'service_group',
-        id: raw.id,
+        id: raw.id || '',
         title: raw.group_name || '',
         subtitle: raw.head_servant_name || '',
         description: raw.servants_names || '',
         icon: raw.icon || '🏫',
-        badge: raw.has_classes !== false ? 'yes' : 'no',
+        badge: raw.has_classes === false ? 'no' : 'yes',
         extra1: raw.gender_target || 'عام (الكل: ذكور وإناث)',
         extra2: raw.service_day || '',
-        extra3: Array.isArray(raw.stages) ? raw.stages.join(', ') : (raw.stages || ''),
-        sortOrder: raw.sort_order || 1
+        extra3: Array.isArray(raw.stages) ? raw.stages.join('، ') : raw.stages || '',
+        sortOrder: raw.sort_order ?? 1
       });
     } else if (item.sourceType === 'service_class') {
       setLiveForm({
         sourceType: 'service_class',
-        id: raw.id,
+        id: raw.id || '',
         title: raw.class_name || '',
         subtitle: raw.stage_name || '',
-        description: raw.vice_head_name || '',
+        description: raw.servant_name || raw.vice_head_name || '',
         icon: '📘',
-        badge: raw.room_name || '',
-        extra1: raw.head_servant_name || '',
+        badge: raw.meeting_day || '',
+        extra1: raw.group_name || '',
         extra2: raw.meeting_time || '',
         extra3: '',
-        sortOrder: 1
+        sortOrder: raw.sort_order ?? 1
       });
-    } else if (item.sourceType === 'case_category') {
+    } else if (item.sourceType === 'announcement') {
       setLiveForm({
-        sourceType: 'case_category',
-        id: raw.id,
-        title: raw.name || '',
+        sourceType: 'announcement',
+        id: raw.id || '',
+        title: raw.title || '',
         subtitle: '',
-        description: '',
-        icon: raw.icon || '📂',
-        badge: '',
+        description: raw.body || raw.content || '',
+        icon: '📢',
+        badge: raw.is_pinned ? 'pinned' : 'normal',
         extra1: '',
         extra2: '',
         extra3: '',
         sortOrder: 1
       });
-    } else if (item.sourceType === 'custom_card') {
+    } else {
       setLiveForm({
-        sourceType: 'custom_card',
-        id: raw.id,
-        title: raw.card_title || '',
-        subtitle: '',
-        description: raw.description || '',
-        icon: raw.card_icon || '📌',
-        badge: '',
-        extra1: raw.priest_id || '',
+        sourceType: item.sourceType,
+        id: raw.id || '',
+        title: raw.full_name || raw.name || '',
+        subtitle: raw.service_stage || '',
+        description: raw.assigned_class || '',
+        icon: item.icon || '👤',
+        badge: raw.role_ar || raw.role || '',
+        extra1: raw.phone || '',
         extra2: '',
         extra3: '',
         sortOrder: 1
       });
     }
 
-    setLiveModalOpen(true);
+    setShowLiveModal(true);
+  };
+
+  const openAddLiveGroupModal = () => {
+    setEditingLiveCard(null);
+    setLiveForm({
+      sourceType: 'service_group',
+      id: '',
+      title: '',
+      subtitle: '',
+      description: '',
+      icon: '🏫',
+      badge: 'yes',
+      extra1: 'عام (الكل: ذكور وإناث)',
+      extra2: '',
+      extra3: '',
+      sortOrder: (hierarchyData.groups?.length || 0) + 1
+    });
+    setShowLiveModal(true);
   };
 
   const handleSaveLiveCard = async (e) => {
     e.preventDefault();
-    if (!isAdmin) return;
     if (!liveForm.title.trim()) {
-      alert('اكتب عنوان الكارت أولاً');
+      notifyStatus('error', 'يرجى إدخال العنوان / الاسم.');
       return;
     }
 
-    setSavingLive(true);
+    setSaving(true);
     try {
+      const targetRecordId = editingLiveCard?.raw?.id || liveForm.id;
+
       if (liveForm.sourceType === 'service_group') {
         const stagesArr = String(liveForm.extra3 || '')
           .split(/[,،]/)
-          .map(s => s.trim())
+          .map((s) => s.trim())
           .filter(Boolean);
 
         const payload = {
@@ -465,893 +609,1109 @@ export default function NestedCardsBuilder({
           sort_order: Number(liveForm.sortOrder || 1)
         };
 
-        if (editingLiveCard?.id) {
-          const { error } = await supabase.from('service_groups').update(payload).eq('id', editingLiveCard.id);
-          if (error) throw new Error(error.message);
+        if (targetRecordId) {
+          const { error } = await supabase
+            .from('service_groups')
+            .update(payload)
+            .eq('id', targetRecordId);
+          if (error) throw error;
         } else {
-          const { error } = await supabase.from('service_groups').insert([payload]);
-          if (error) throw new Error(error.message);
+          const { error } = await supabase
+            .from('service_groups')
+            .insert([payload]);
+          if (error) throw error;
         }
       } else if (liveForm.sourceType === 'service_class') {
+        if (!targetRecordId) throw new Error('معرّف الفصل غير موجود');
         const payload = {
           class_name: liveForm.title.trim(),
           stage_name: (liveForm.subtitle || '').trim(),
-          head_servant_name: (liveForm.extra1 || '').trim(),
-          vice_head_name: (liveForm.description || '').trim(),
+          servant_name: (liveForm.description || '').trim(),
+          meeting_day: (liveForm.badge || '').trim(),
+          group_name: (liveForm.extra1 || '').trim(),
           meeting_time: (liveForm.extra2 || '').trim(),
-          room_name: (liveForm.badge || '').trim()
+          sort_order: Number(liveForm.sortOrder || 1)
         };
-
-        if (editingLiveCard?.id) {
-          const { error } = await supabase.from('services').update(payload).eq('id', editingLiveCard.id);
-          if (error) throw new Error(error.message);
-        } else {
-          const { error } = await supabase.from('services').insert([payload]);
-          if (error) throw new Error(error.message);
-        }
-      } else if (liveForm.sourceType === 'case_category') {
-        const payload = {
-          name: liveForm.title.trim(),
-          icon: (liveForm.icon || '📂').trim()
-        };
-
-        if (editingLiveCard?.id) {
-          const { error } = await supabase.from('case_categories').update(payload).eq('id', editingLiveCard.id);
-          if (error) throw new Error(error.message);
-        } else {
-          const { error } = await supabase.from('case_categories').insert([payload]);
-          if (error) throw new Error(error.message);
-        }
-      } else if (liveForm.sourceType === 'custom_card') {
-        const payload = {
-          card_title: liveForm.title.trim(),
-          card_icon: (liveForm.icon || '📌').trim(),
-          description: (liveForm.description || '').trim(),
-          priest_id: liveForm.extra1 || null
-        };
-
-        if (editingLiveCard?.id) {
-          const { error } = await supabase.from('priest_custom_cards').update(payload).eq('id', editingLiveCard.id);
-          if (error) throw new Error(error.message);
-        } else {
-          const { error } = await supabase.from('priest_custom_cards').insert([payload]);
-          if (error) throw new Error(error.message);
-        }
-      }
-
-      setLiveModalOpen(false);
-      if (onRefresh) await onRefresh();
-    } catch (err) {
-      alert('تعذر حفظ بيانات الكارت: ' + err.message);
-    } finally {
-      setSavingLive(false);
-    }
-  };
-
-  const handleDeleteLiveCard = async (item) => {
-    if (!isAdmin) return;
-    if (!item.deletable || !item.raw?.id) {
-      alert('هذا الكارت ثابت في الشاشة ولا يُحذف من هنا.');
-      return;
-    }
-    if (!confirm(`هل أنت متأكد من حذف الكارت "${item.title}"؟`)) return;
-
-    const tableMap = {
-      service_group: 'service_groups',
-      service_class: 'services',
-      case_category: 'case_categories',
-      custom_card: 'priest_custom_cards'
-    };
-
-    const tableName = tableMap[item.sourceType];
-    if (!tableName) return;
-
-    const { error } = await supabase.from(tableName).delete().eq('id', item.raw.id);
-    if (error) {
-      alert('تعذر حذف الكارت: ' + error.message);
-      return;
-    }
-    if (onRefresh) await onRefresh();
-  };
-
-  const handleSaveCard = async (e) => {
-    e.preventDefault();
-    if (!isAdmin) return;
-    if (!cardForm.title.trim()) {
-      alert('اكتب عنوان الكارت أولاً');
-      return;
-    }
-
-    const normalizedParentId = cardForm.parent_id || null;
-    if (editingId && normalizedParentId === editingId) {
-      alert('لا يمكن جعل الكارت أباً لنفسه');
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const payload = {
-        parent_id: normalizedParentId,
-        title: cardForm.title.trim(),
-        subtitle: (cardForm.subtitle || '').trim(),
-        description: (cardForm.description || '').trim(),
-        icon: (cardForm.icon || '🗂️').trim(),
-        badge_text: (cardForm.badge_text || '').trim(),
-        accent_color: cardForm.accent_color || 'red',
-        target_action: cardForm.target_action || 'children',
-        target_url: (cardForm.target_url || '').trim(),
-        sort_order: Number(cardForm.sort_order || 1),
-        is_active: true,
-        updated_at: new Date().toISOString()
-      };
-
-      if (editingId) {
-        const { data, error } = await supabase
-          .from('nested_cards')
+        const { error } = await supabase
+          .from('services')
           .update(payload)
-          .eq('id', editingId)
-          .select()
-          .single();
-
-        if (error) throw new Error(error.message);
-        if (data) {
-          setAllCards(prev => prev.map(item => (item.id === editingId ? data : item)));
+          .eq('id', targetRecordId);
+        if (error) throw error;
+      } else if (liveForm.sourceType === 'announcement') {
+        const payload = {
+          title: liveForm.title.trim(),
+          body: (liveForm.description || '').trim(),
+          is_pinned: liveForm.badge === 'pinned'
+        };
+        if (targetRecordId) {
+          const { error } = await supabase
+            .from('church_announcements')
+            .update(payload)
+            .eq('id', targetRecordId);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase
+            .from('church_announcements')
+            .insert([payload]);
+          if (error) throw error;
         }
       } else {
-        const { data, error } = await supabase
-          .from('nested_cards')
-          .insert([{ ...payload, created_by: currentUser?.id || null }])
-          .select()
-          .single();
-
-        if (error) throw new Error(error.message);
-        if (data) {
-          setAllCards(prev => [...prev, data]);
-        }
+        if (!targetRecordId) throw new Error('معرّف المستخدم غير موجود');
+        const payload = {
+          full_name: liveForm.title.trim(),
+          service_stage: (liveForm.subtitle || '').trim(),
+          assigned_class: (liveForm.description || '').trim(),
+          phone: (liveForm.extra1 || '').trim()
+        };
+        const { error } = await supabase
+          .from('church_users')
+          .update(payload)
+          .eq('id', targetRecordId);
+        if (error) throw error;
       }
 
-      setModalOpen(false);
+      notifyStatus('success', 'تم حفظ التعديلات بنجاح.');
+      setShowLiveModal(false);
+      setEditingLiveCard(null);
+      await fetchLiveSourcesIfNeeded();
+      if (onRefresh) await onRefresh();
     } catch (err) {
-      alert('تعذر حفظ الكارت: ' + err.message);
+      console.error('Error saving live card:', err);
+      notifyStatus('error', 'حدث خطأ أثناء الحفظ: ' + (err.message || ''));
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDeleteCard = async (card, e) => {
-    if (e) e.stopPropagation();
-    if (!isAdmin) return;
+  const handleDeleteLiveCard = async (item) => {
+    const rawId = item?.raw?.id;
+    if (!rawId) return;
+    if (!window.confirm(`هل أنت متأكد من حذف "${item.title}"؟`)) return;
 
-    const childrenCount = (cardsByParent[card.id] || []).length;
-    const msg = childrenCount > 0
-      ? `حذف الكارت "${card.title}" سيحذف أيضاً ${childrenCount} كارت فرعي بداخله. هل أنت متأكد؟`
-      : `هل أنت متأكد من حذف الكارت "${card.title}"؟`;
+    setSaving(true);
+    try {
+      let tableName = '';
+      if (item.sourceType === 'service_group') tableName = 'service_groups';
+      else if (item.sourceType === 'service_class') tableName = 'services';
+      else if (item.sourceType === 'announcement') tableName = 'church_announcements';
+      else tableName = 'church_users';
 
-    if (!confirm(msg)) return;
+      const { error } = await supabase.from(tableName).delete().eq('id', rawId);
+      if (error) throw error;
 
-    const { error } = await supabase.from('nested_cards').delete().eq('id', card.id);
-    if (error) {
-      alert('تعذر الحذف: ' + error.message);
-      return;
+      notifyStatus('success', 'تم الحذف بنجاح.');
+      await fetchLiveSourcesIfNeeded();
+      if (onRefresh) await onRefresh();
+    } catch (err) {
+      console.error('Error deleting live card:', err);
+      notifyStatus('error', 'تعذر الحذف: ' + (err.message || ''));
+    } finally {
+      setSaving(false);
     }
-
-    setAllCards(prev => prev.filter(item => item.id !== card.id && item.parent_id !== card.id));
-    if (currentParentId === card.id) {
-      setCurrentParentId(card.parent_id || rootParentId || null);
-    }
-    await fetchCards();
   };
-
-  const handleCardClick = (card) => {
-    if (card.target_action === 'link' && card.target_url) {
-      window.open(card.target_url, '_blank', 'noopener,noreferrer');
-      return;
-    }
-    if (card.target_action === 'info') {
-      setSelectedInfoCard(card);
-      return;
-    }
-    setCurrentParentId(card.id);
-  };
-
-  const goBackOneLevel = () => {
-    if (viewMode === 'nested' && currentParentCard) {
-      const parentOfCurrent = currentParentCard.parent_id || null;
-      if (rootParentId && currentParentId === rootParentId) {
-        if (onExit) onExit();
-        return;
-      }
-      setCurrentParentId(parentOfCurrent);
-      return;
-    }
-    if (onExit) onExit();
-  };
-
-  const availableParentOptions = useMemo(() => {
-    return allCards.filter(c => c.id !== editingId);
-  }, [allCards, editingId]);
 
   return (
-    <div className="space-y-4 text-xs">
-      <div className="bg-white p-4 rounded-2xl border shadow-2xs flex flex-wrap justify-between items-center gap-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          {(currentParentId || onExit) && (
-            <button
-              type="button"
-              onClick={goBackOneLevel}
-              className="px-3.5 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl font-black flex items-center gap-1 cursor-pointer"
-            >
-              <ArrowRight size={14} /> رجوع
+    <div dir="rtl" style={styles.container}>
+      {/* شريط العنوان والتنقل العلوي */}
+      <div style={styles.headerBar}>
+        <div style={styles.headerRight}>
+          {(breadcrumbs.length > 0 || currentParentId !== rootParentId || onExit) && (
+            <button type="button" onClick={goBackOneLevel} style={styles.backBtn}>
+              ← رجوع
             </button>
           )}
-          <h3 className="text-sm md:text-base font-black text-[#7a1c24] flex items-center gap-1.5">
-            <Layers size={17} /> {title}
-          </h3>
+          <div>
+            <h2 style={styles.title}>
+              {mode === 'viewer'
+                ? currentParentCard?.title || 'الدليل والكروت التفاعلية'
+                : 'منشئ الكروت المتداخلة وإدارة الكروت'}
+            </h2>
+            {currentParentCard?.subtitle && (
+              <p style={styles.subtitle}>{currentParentCard.subtitle}</p>
+            )}
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="bg-gray-100 p-1 rounded-xl flex items-center gap-1 font-bold">
-            <button
-              type="button"
-              onClick={() => setViewMode('live')}
-              className={`px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer ${
-                viewMode === 'live' ? 'bg-[#7a1c24] text-white shadow-2xs' : 'text-gray-700 hover:bg-white/60'
-              }`}
-            >
-              <LayoutGrid size={13} /> كروت الشاشات ({allScreenCards.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('nested')}
-              className={`px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer ${
-                viewMode === 'nested' ? 'bg-[#7a1c24] text-white shadow-2xs' : 'text-gray-700 hover:bg-white/60'
-              }`}
-            >
-              <Layers size={13} /> كروت داخل كروت ({allCards.length})
-            </button>
-          </div>
-
-          {isAdmin && viewMode === 'live' && (
-            <button
-              type="button"
-              onClick={openCreateLiveCard}
-              className="px-4 py-2 bg-[#7a1c24] hover:bg-[#5f141a] text-white rounded-xl font-black flex items-center gap-1.5 shadow cursor-pointer"
-            >
-              <FolderPlus size={15} /> إضافة كارت جديد
-            </button>
-          )}
-
-          {isAdmin && viewMode === 'nested' && (
-            <button
-              type="button"
-              onClick={() => openCreateModal(currentParentId)}
-              className="px-4 py-2 bg-[#7a1c24] hover:bg-[#5f141a] text-white rounded-xl font-black flex items-center gap-1.5 shadow cursor-pointer"
-            >
-              <FolderPlus size={15} />
-              {currentParentCard ? `إضافة كارت داخل "${currentParentCard.title}"` : 'إضافة كارت رئيسي جديد'}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {viewMode === 'live' ? (
-        <div className="space-y-4">
-          <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 flex-wrap font-bold">
-              {[
-                { key: 'all', label: 'كل الشاشات' },
-                { key: 'admin_hub', label: 'لوحة الإدارة' },
-                { key: 'setup_hub', label: 'الإعدادات SETUP' },
-                { key: 'services', label: 'الخدمات والفصول' },
-                { key: 'categories', label: 'كروت بحث الحالة' },
-                { key: 'custom_cards', label: 'كروت الكاهن' }
-              ].map(tab => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setScreenFilter(tab.key)}
-                  className={`px-3 py-1.5 rounded-xl cursor-pointer ${
-                    screenFilter === tab.key
-                      ? 'bg-[#7a1c24] text-white font-black'
-                      : 'bg-white border text-gray-700 hover:bg-gray-100'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="relative min-w-52">
-              <Search size={14} className="absolute right-3 top-2.5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="ابحث في الكروت..."
-                className="w-full pr-8 pl-3 py-1.5 bg-white border rounded-xl outline-none focus:border-[#7a1c24]"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-              />
-            </div>
-          </div>
-
-          {filteredScreenCards.length === 0 ? (
-            <div className="bg-white p-10 rounded-3xl border text-center space-y-2">
-              <FolderOpen size={34} className="mx-auto text-gray-400" />
-              <div className="font-black text-sm text-gray-800">لا توجد كروت مطابقة للبحث أو الفلتر الحالي</div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredScreenCards.map((item) => {
-                const theme = COLOR_THEMES[item.accent] || COLOR_THEMES.red;
-                return (
-                  <div
-                    key={item.uid}
-                    className={`${theme.card} border-2 p-5 rounded-3xl shadow-2xs flex flex-col justify-between gap-4`}
-                  >
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-start gap-2">
-                        <span className="text-3xl">{item.icon}</span>
-                        <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-gray-100 text-gray-800">
-                            {item.screenLabel}
-                          </span>
-                          {item.badge && (
-                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black ${theme.badge}`}>
-                              {item.badge}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div>
-                        <h4 className="text-base font-black text-gray-900">{item.title}</h4>
-                        {item.subtitle && (
-                          <div className="text-[11px] font-bold text-[#7a1c24] mt-0.5">{item.subtitle}</div>
-                        )}
-                        {item.description && (
-                          <p className="text-xs text-gray-600 mt-1 line-clamp-2">{item.description}</p>
-                        )}
-                      </div>
-                    </div>
-
-                    {isAdmin && (
-                      <div className="pt-2.5 border-t flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => openEditLiveCard(item)}
-                          className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                        >
-                          <Edit3 size={12} /> تعديل البيانات
-                        </button>
-                        {item.deletable && (
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteLiveCard(item)}
-                            className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                          >
-                            <Trash2 size={12} /> حذف
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      ) : (
-        <>
-          <div className="bg-[#fbfaf7] px-4 py-2.5 rounded-2xl border flex items-center gap-1.5 flex-wrap font-bold text-gray-700">
-            <button
-              type="button"
-              onClick={() => setCurrentParentId(rootParentId)}
-              className={`px-2.5 py-1 rounded-lg cursor-pointer ${!currentParentId ? 'bg-[#7a1c24] text-white' : 'hover:bg-gray-200'}`}
-            >
-              🏠 المستوى الرئيسي
-            </button>
-
-            {breadcrumbs.map((crumb) => (
-              <div key={crumb.id} className="flex items-center gap-1.5">
-                <ChevronLeft size={14} className="text-gray-400" />
-                <button
-                  type="button"
-                  onClick={() => setCurrentParentId(crumb.id)}
-                  className={`px-2.5 py-1 rounded-lg cursor-pointer ${currentParentId === crumb.id ? 'bg-[#7a1c24] text-white' : 'bg-white border hover:bg-gray-100'}`}
-                >
-                  {crumb.icon} {crumb.title}
-                </button>
-              </div>
-            ))}
-          </div>
-
-          {currentParentCard && (currentParentCard.subtitle || currentParentCard.description) && (
-            <div className="bg-white p-4 rounded-2xl border space-y-1 shadow-2xs">
-              <div className="font-black text-sm text-gray-900">
-                {currentParentCard.icon} {currentParentCard.title}
-              </div>
-              {currentParentCard.subtitle && (
-                <div className="text-xs font-bold text-[#7a1c24]">{currentParentCard.subtitle}</div>
-              )}
-              {currentParentCard.description && (
-                <p className="text-xs text-gray-600 whitespace-pre-line">{currentParentCard.description}</p>
-              )}
-            </div>
-          )}
-
-          {loading ? (
-            <div className="bg-white p-8 rounded-3xl border text-center text-gray-500 font-bold">
-              جاري تحميل الكروت...
-            </div>
-          ) : currentLevelCards.length === 0 ? (
-            <div className="bg-white p-10 rounded-3xl border text-center space-y-3">
-              <FolderOpen size={36} className="mx-auto text-gray-400" />
-              <div className="font-black text-sm text-gray-800">
-                {currentParentCard
-                  ? `لا توجد كروت داخل "${currentParentCard.title}" حتى الآن`
-                  : 'لا توجد كروت مضافة في هذا المستوى بعد'}
-              </div>
-              {isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => openCreateModal(currentParentId)}
-                  className="px-4 py-2 bg-[#7a1c24] text-white rounded-xl font-black cursor-pointer"
-                >
-                  + أضف أول كارت هنا
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {currentLevelCards.map((card) => {
-                const theme = COLOR_THEMES[card.accent_color] || COLOR_THEMES.red;
-                const childCount = (cardsByParent[card.id] || []).length;
-
-                return (
-                  <div
-                    key={card.id}
-                    onClick={() => handleCardClick(card)}
-                    className={`${theme.card} border-2 p-5 rounded-3xl shadow-2xs hover:shadow-md transition flex flex-col justify-between gap-4 cursor-pointer`}
-                  >
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-start gap-2">
-                        <span className="text-3xl">{card.icon || '🗂️'}</span>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {card.badge_text && (
-                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black ${theme.badge}`}>
-                              {card.badge_text}
-                            </span>
-                          )}
-                          {card.target_action === 'children' && (
-                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-gray-100 text-gray-800">
-                              {childCount} كارت بالداخل
-                            </span>
-                          )}
-                          {card.target_action === 'link' && (
-                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-sky-100 text-sky-900 flex items-center gap-0.5">
-                              <ExternalLink size={10} /> رابط
-                            </span>
-                          )}
-                          {card.target_action === 'info' && (
-                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-indigo-100 text-indigo-900 flex items-center gap-0.5">
-                              <FileText size={10} /> محتوى
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div>
-                        <h4 className="text-base font-black text-gray-900">{card.title}</h4>
-                        {card.subtitle && (
-                          <div className="text-[11px] font-bold text-[#7a1c24] mt-0.5">{card.subtitle}</div>
-                        )}
-                        {card.description && (
-                          <p className="text-xs text-gray-600 mt-1 line-clamp-2">{card.description}</p>
-                        )}
-                      </div>
-                    </div>
-
-                    {isAdmin && (
-                      <div
-                        onClick={(e) => e.stopPropagation()}
-                        className="pt-2.5 border-t flex items-center justify-between gap-1.5 flex-wrap"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => openCreateModal(card.id)}
-                          className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer ${theme.btn}`}
-                        >
-                          <FolderPlus size={12} /> + كارت جواه
-                        </button>
-
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={(e) => openEditModal(card, e)}
-                            className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                          >
-                            <Edit3 size={12} /> تعديل
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => handleDeleteCard(card, e)}
-                            className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                          >
-                            <Trash2 size={12} /> حذف
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </>
-      )}
-
-      {/* نافذة إضافة / تعديل كارت فعلي في الشاشات */}
-      {liveModalOpen && isAdmin && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b pb-2">
-              <h3 className="text-sm font-black text-[#7a1c24]">
-                {editingLiveCard ? '✏️ تعديل بيانات الكارت الفعلي' : '➕ إضافة كارت فعلي لشاشة'}
-              </h3>
+        {mode === 'builder' && (
+          <div style={styles.headerActions}>
+            <div style={styles.tabSwitch}>
               <button
                 type="button"
-                onClick={() => setLiveModalOpen(false)}
-                className="p-1 text-gray-500 hover:text-gray-800 cursor-pointer"
+                onClick={() => setActiveTab('nested')}
+                style={{
+                  ...styles.tabBtn,
+                  ...(activeTab === 'nested' ? styles.tabBtnActive : {})
+                }}
               >
-                <X size={16} />
+                🗂️ الكروت المتداخلة ({allCards.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('screen_cards')}
+                style={{
+                  ...styles.tabBtn,
+                  ...(activeTab === 'screen_cards' ? styles.tabBtnActive : {})
+                }}
+              >
+                🧩 كروت الشاشات ({allScreenCards.length})
               </button>
             </div>
 
-            <form onSubmit={handleSaveLiveCard} className="space-y-3">
-              {!editingLiveCard && (
-                <div>
-                  <label className="block mb-1">الشاشة / النوع:</label>
-                  <select
-                    className="w-full p-2.5 border rounded-xl bg-gray-50"
-                    value={liveForm.sourceType}
-                    onChange={e => setLiveForm({ ...liveForm, sourceType: e.target.value })}
-                  >
-                    <option value="case_category">كروت بحث الحالة</option>
-                    <option value="service_group">الخدمات والاجتماعات</option>
-                    <option value="service_class">فصل دراسي</option>
-                    <option value="custom_card">كارت إضافي للكاهن</option>
-                  </select>
-                </div>
-              )}
+            {activeTab === 'nested' ? (
+              <button type="button" onClick={openAddModal} style={styles.primaryBtn}>
+                + إضافة كارت هنا
+              </button>
+            ) : (
+              <button type="button" onClick={openAddLiveGroupModal} style={styles.primaryBtn}>
+                + إضافة مجموعة خدمة
+              </button>
+            )}
+          </div>
+        )}
+      </div>
 
-              <div className="grid grid-cols-4 gap-2">
-                <div>
-                  <label className="block mb-1">الأيقونة</label>
-                  <input
-                    className="w-full p-2.5 border rounded-xl text-center text-base"
-                    value={liveForm.icon}
-                    onChange={e => setLiveForm({ ...liveForm, icon: e.target.value })}
-                  />
+      {/* رسائل التنبيه */}
+      {errorMsg && <div style={styles.errorAlert}>⚠️ {errorMsg}</div>}
+      {successMsg && <div style={styles.successAlert}>✅ {successMsg}</div>}
+
+      {/* مسار التنقل Breadcrumbs */}
+      <div style={styles.breadcrumbBar}>
+        <button
+          type="button"
+          onClick={() => handleBreadcrumbClick(-1)}
+          style={{
+            ...styles.crumbBtn,
+            ...(breadcrumbs.length === 0 ? styles.crumbActive : {})
+          }}
+        >
+          🏠 المستوى الرئيسي
+        </button>
+        {breadcrumbs.map((crumb, idx) => (
+          <React.Fragment key={crumb.id || idx}>
+            <span style={styles.crumbSep}>/</span>
+            <button
+              type="button"
+              onClick={() => handleBreadcrumbClick(idx)}
+              style={{
+                ...styles.crumbBtn,
+                ...(idx === breadcrumbs.length - 1 ? styles.crumbActive : {})
+              }}
+            >
+              {crumb.title}
+            </button>
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* محتوى تبويب الكروت المتداخلة */}
+      {activeTab === 'nested' ? (
+        loading ? (
+          <div style={styles.centerBox}>جاري تحميل الكروت...</div>
+        ) : visibleCards.length === 0 ? (
+          <div style={styles.emptyBox}>
+            <p style={styles.emptyText}>لا توجد كروت في هذا المستوى حتى الآن.</p>
+            {mode === 'builder' && (
+              <button type="button" onClick={openAddModal} style={styles.primaryBtn}>
+                + أضف أول كارت في هذا المستوى
+              </button>
+            )}
+          </div>
+        ) : (
+          <div style={styles.cardsGrid}>
+            {visibleCards.map((card) => {
+              const childCount = getChildrenCount(card.id);
+              const accent = card.color || '#2563eb';
+              const isHidden = card.is_active === false;
+
+              return (
+                <div
+                  key={card.id}
+                  onClick={() => handleOpenCard(card)}
+                  style={{
+                    ...styles.card,
+                    borderTop: `4px solid ${accent}`,
+                    opacity: isHidden ? 0.6 : 1
+                  }}
+                >
+                  <div style={styles.cardTopRow}>
+                    <div style={{ ...styles.iconBadge, backgroundColor: `${accent}18`, color: accent }}>
+                      {card.icon || '⛪'}
+                    </div>
+                    <div style={styles.badgesGroup}>
+                      {card.badge_text && (
+                        <span style={{ ...styles.badge, backgroundColor: `${accent}20`, color: accent }}>
+                          {card.badge_text}
+                        </span>
+                      )}
+                      {childCount > 0 && (
+                        <span style={styles.childrenBadge}>{childCount} كارت بالداخل</span>
+                      )}
+                      {isHidden && <span style={styles.hiddenBadge}>مخفي</span>}
+                    </div>
+                  </div>
+
+                  <h3 style={styles.cardTitle}>{card.title}</h3>
+                  {card.subtitle && <p style={styles.cardSubtitle}>{card.subtitle}</p>}
+                  {card.description && <p style={styles.cardDesc}>{card.description}</p>}
+
+                  <div style={styles.cardFooter}>
+                    <span style={{ ...styles.openHint, color: accent }}>
+                      {childCount > 0 || card.action_type === 'drill_down'
+                        ? 'فتح المستوى الداخلي ←'
+                        : 'عرض التفاصيل ←'}
+                    </span>
+
+                    {mode === 'builder' && (
+                      <div style={styles.cardActions} onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          title={isHidden ? 'تفعيل الكارت' : 'إخفاء الكارت'}
+                          onClick={(e) => toggleCardActive(e, card)}
+                          style={styles.iconActionBtn}
+                        >
+                          {isHidden ? '👁️' : '🙈'}
+                        </button>
+                        <button
+                          type="button"
+                          title="تعديل الكارت"
+                          onClick={(e) => openEditModal(e, card)}
+                          style={styles.iconActionBtn}
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          type="button"
+                          title="حذف الكارت"
+                          onClick={(e) => handleDeleteCard(e, card)}
+                          style={{ ...styles.iconActionBtn, color: '#dc2626' }}
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="col-span-3">
-                  <label className="block mb-1">العنوان / الاسم *</label>
-                  <input
-                    required
-                    className="w-full p-2.5 border rounded-xl"
-                    value={liveForm.title}
-                    onChange={e => setLiveForm({ ...liveForm, title: e.target.value })}
-                  />
+              );
+            })}
+          </div>
+        )
+      ) : (
+        /* محتوى تبويب كروت الشاشات */
+        <div>
+          <div style={styles.filterToolbar}>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="ابحث في كروت الشاشات بالاسم أو الخدمة أو الوصف..."
+              style={styles.searchInput}
+            />
+            <select
+              value={screenFilter}
+              onChange={(e) => setScreenFilter(e.target.value)}
+              style={styles.selectInput}
+            >
+              <option value="all">كل الشاشات</option>
+              <option value="service_group">الخدمات والاجتماعات</option>
+              <option value="service_class">فصول الخدمة</option>
+              <option value="priest">الآباء الكهنة</option>
+              <option value="servant">الخدام والمخدومين</option>
+              <option value="announcement">الإعلانات</option>
+            </select>
+          </div>
+
+          {allScreenCards.length === 0 ? (
+            <div style={styles.emptyBox}>
+              <p style={styles.emptyText}>لا توجد كروت مطابقة للبحث أو الفلتر الحالي.</p>
+            </div>
+          ) : (
+            <div style={styles.cardsGrid}>
+              {allScreenCards.map((item) => (
+                <div key={item.uid} style={styles.card}>
+                  <div style={styles.cardTopRow}>
+                    <div style={styles.iconBadge}>{item.icon}</div>
+                    <div style={styles.badgesGroup}>
+                      <span style={styles.sourceBadge}>{item.sourceLabel}</span>
+                      {item.badge && <span style={styles.childrenBadge}>{item.badge}</span>}
+                    </div>
+                  </div>
+                  <h3 style={styles.cardTitle}>{item.title}</h3>
+                  {item.subtitle && <p style={styles.cardSubtitle}>{item.subtitle}</p>}
+                  {item.description && <p style={styles.cardDesc}>{item.description}</p>}
+
+                  <div style={styles.cardFooter}>
+                    <span style={styles.mutedMeta}>ترتيب: {item.sortOrder}</span>
+                    <div style={styles.cardActions}>
+                      <button
+                        type="button"
+                        onClick={() => openEditLiveCard(item)}
+                        style={styles.secondarySmallBtn}
+                      >
+                        ✏️ تعديل
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteLiveCard(item)}
+                        style={styles.dangerSmallBtn}
+                      >
+                        🗑️ حذف
+                      </button>
+                    </div>
+                  </div>
                 </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* مودال إضافة / تعديل كارت متداخل */}
+      {showModal && (
+        <div style={styles.modalBackdrop} onClick={() => setShowModal(false)}>
+          <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <h3 style={styles.modalTitle}>
+                {editingCard ? 'تعديل الكارت المتداخل' : 'إضافة كارت متداخل جديد'}
+              </h3>
+              <button type="button" onClick={() => setShowModal(false)} style={styles.closeBtn}>
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCard} style={styles.formGrid}>
+              <label style={styles.label}>
+                عنوان الكارت *
+                <input
+                  type="text"
+                  required
+                  value={formData.title}
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  style={styles.input}
+                  placeholder="مثال: مدارس الأحد / خدمة الشباب"
+                />
+              </label>
+
+              <label style={styles.label}>
+                عنوان فرعي
+                <input
+                  type="text"
+                  value={formData.subtitle}
+                  onChange={(e) => setFormData({ ...formData, subtitle: e.target.value })}
+                  style={styles.input}
+                  placeholder="مثال: يوم الجمعة الساعة 10 صباحاً"
+                />
+              </label>
+
+              <label style={{ ...styles.label, gridColumn: '1 / -1' }}>
+                الوصف أو التفاصيل
+                <textarea
+                  rows={3}
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  style={styles.textarea}
+                  placeholder="اكتب نبذة مختصرة أو ملاحظات تظهر داخل الكارت..."
+                />
+              </label>
+
+              <label style={styles.label}>
+                الأيقونة
+                <div style={styles.pickerRow}>
+                  <input
+                    type="text"
+                    value={formData.icon}
+                    onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
+                    style={{ ...styles.input, width: 70, textAlign: 'center' }}
+                  />
+                  <div style={styles.chipsWrap}>
+                    {DEFAULT_ICONS.slice(0, 10).map((ic) => (
+                      <button
+                        key={ic}
+                        type="button"
+                        onClick={() => setFormData({ ...formData, icon: ic })}
+                        style={styles.miniChip}
+                      >
+                        {ic}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </label>
+
+              <label style={styles.label}>
+                لون الكارت
+                <div style={styles.pickerRow}>
+                  <input
+                    type="color"
+                    value={formData.color}
+                    onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                    style={styles.colorInput}
+                  />
+                  <div style={styles.chipsWrap}>
+                    {DEFAULT_COLORS.map((col) => (
+                      <button
+                        key={col.value}
+                        type="button"
+                        title={col.name}
+                        onClick={() => setFormData({ ...formData, color: col.value })}
+                        style={{
+                          ...styles.colorDot,
+                          backgroundColor: col.value,
+                          outline:
+                            formData.color === col.value ? '2px solid #0f172a' : 'none'
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </label>
+
+              <label style={styles.label}>
+                نوع الإجراء عند الضغط
+                <select
+                  value={formData.action_type}
+                  onChange={(e) => setFormData({ ...formData, action_type: e.target.value })}
+                  style={styles.input}
+                >
+                  <option value="drill_down">الدخول إلى كروت فرعية</option>
+                  <option value="select">اختيار الكارت / إرسال الحدث</option>
+                  <option value="link">فتح رابط خارجي أو داخلي</option>
+                </select>
+              </label>
+
+              <label style={styles.label}>
+                الهدف / الرابط (اختياري)
+                <input
+                  type="text"
+                  value={formData.action_target}
+                  onChange={(e) => setFormData({ ...formData, action_target: e.target.value })}
+                  style={styles.input}
+                  placeholder="https://... أو اسم شاشة"
+                />
+              </label>
+
+              <label style={styles.label}>
+                شارة صغيرة (Badge)
+                <input
+                  type="text"
+                  value={formData.badge_text}
+                  onChange={(e) => setFormData({ ...formData, badge_text: e.target.value })}
+                  style={styles.input}
+                  placeholder="مثال: جديد / مهم"
+                />
+              </label>
+
+              <label style={styles.label}>
+                ترتيب العرض
+                <input
+                  type="number"
+                  min={1}
+                  value={formData.sort_order}
+                  onChange={(e) => setFormData({ ...formData, sort_order: e.target.value })}
+                  style={styles.input}
+                />
+              </label>
+
+              <label style={{ ...styles.checkboxLabel, gridColumn: '1 / -1' }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(formData.is_active)}
+                  onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                />
+                الكارت نشط وظاهر للمستخدمين
+              </label>
+
+              <div style={{ ...styles.modalFooter, gridColumn: '1 / -1' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  style={styles.cancelBtn}
+                >
+                  إلغاء
+                </button>
+                <button type="submit" disabled={saving} style={styles.primaryBtn}>
+                  {saving ? 'جاري الحفظ...' : 'حفظ الكارت'}
+                </button>
               </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* مودال تعديل / إضافة كارت تابع لشاشة أخرى */}
+      {showLiveModal && (
+        <div style={styles.modalBackdrop} onClick={() => setShowLiveModal(false)}>
+          <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalHeader}>
+              <h3 style={styles.modalTitle}>
+                {editingLiveCard ? 'تعديل بيانات الكارت' : 'إضافة مجموعة خدمة جديدة'}
+              </h3>
+              <button type="button" onClick={() => setShowLiveModal(false)} style={styles.closeBtn}>
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveLiveCard} style={styles.formGrid}>
+              <label style={styles.label}>
+                الاسم / العنوان *
+                <input
+                  type="text"
+                  required
+                  value={liveForm.title}
+                  onChange={(e) => setLiveForm({ ...liveForm, title: e.target.value })}
+                  style={styles.input}
+                />
+              </label>
+
+              <label style={styles.label}>
+                {liveForm.sourceType === 'service_group'
+                  ? 'أمين الخدمة'
+                  : liveForm.sourceType === 'service_class'
+                  ? 'المرحلة الدراسية / العمرية'
+                  : 'التفاصيل الفرعية / المرحلة'}
+                <input
+                  type="text"
+                  value={liveForm.subtitle}
+                  onChange={(e) => setLiveForm({ ...liveForm, subtitle: e.target.value })}
+                  style={styles.input}
+                />
+              </label>
+
+              <label style={{ ...styles.label, gridColumn: '1 / -1' }}>
+                {liveForm.sourceType === 'service_group'
+                  ? 'أسماء الخدام'
+                  : liveForm.sourceType === 'service_class'
+                  ? 'خادم الفصل'
+                  : 'الوصف / المحتوى'}
+                <textarea
+                  rows={3}
+                  value={liveForm.description}
+                  onChange={(e) => setLiveForm({ ...liveForm, description: e.target.value })}
+                  style={styles.textarea}
+                />
+              </label>
 
               {liveForm.sourceType === 'service_group' && (
                 <>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block mb-1">أمين الخدمة</label>
-                      <input
-                        className="w-full p-2.5 border rounded-xl"
-                        value={liveForm.subtitle}
-                        onChange={e => setLiveForm({ ...liveForm, subtitle: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <label className="block mb-1">يوم الخدمة</label>
-                      <input
-                        className="w-full p-2.5 border rounded-xl"
-                        value={liveForm.extra2}
-                        onChange={e => setLiveForm({ ...liveForm, extra2: e.target.value })}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block mb-1">الخدام (مفصولين بفاصلة)</label>
+                  <label style={styles.label}>
+                    الأيقونة
                     <input
-                      className="w-full p-2.5 border rounded-xl"
-                      value={liveForm.description}
-                      onChange={e => setLiveForm({ ...liveForm, description: e.target.value })}
+                      type="text"
+                      value={liveForm.icon}
+                      onChange={(e) => setLiveForm({ ...liveForm, icon: e.target.value })}
+                      style={styles.input}
                     />
-                  </div>
-                  <div>
-                    <label className="block mb-1">السنوات الدراسية (مفصولة بفاصلة)</label>
+                  </label>
+                  <label style={styles.label}>
+                    نظام الفصول
+                    <select
+                      value={liveForm.badge}
+                      onChange={(e) => setLiveForm({ ...liveForm, badge: e.target.value })}
+                      style={styles.input}
+                    >
+                      <option value="yes">له فصول</option>
+                      <option value="no">بدون فصول</option>
+                    </select>
+                  </label>
+                  <label style={styles.label}>
+                    الفئة المستهدفة
                     <input
-                      className="w-full p-2.5 border rounded-xl"
+                      type="text"
+                      value={liveForm.extra1}
+                      onChange={(e) => setLiveForm({ ...liveForm, extra1: e.target.value })}
+                      style={styles.input}
+                    />
+                  </label>
+                  <label style={styles.label}>
+                    يوم الخدمة
+                    <input
+                      type="text"
+                      value={liveForm.extra2}
+                      onChange={(e) => setLiveForm({ ...liveForm, extra2: e.target.value })}
+                      style={styles.input}
+                    />
+                  </label>
+                  <label style={{ ...styles.label, gridColumn: '1 / -1' }}>
+                    المراحل (مفصولة بفاصلة ،)
+                    <input
+                      type="text"
                       value={liveForm.extra3}
-                      onChange={e => setLiveForm({ ...liveForm, extra3: e.target.value })}
+                      onChange={(e) => setLiveForm({ ...liveForm, extra3: e.target.value })}
+                      style={styles.input}
                     />
-                  </div>
+                  </label>
                 </>
               )}
 
               {liveForm.sourceType === 'service_class' && (
                 <>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block mb-1">المرحلة / الخدمة</label>
-                      <input
-                        className="w-full p-2.5 border rounded-xl"
-                        value={liveForm.subtitle}
-                        onChange={e => setLiveForm({ ...liveForm, subtitle: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <label className="block mb-1">أمين الفصل</label>
-                      <input
-                        className="w-full p-2.5 border rounded-xl"
-                        value={liveForm.extra1}
-                        onChange={e => setLiveForm({ ...liveForm, extra1: e.target.value })}
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block mb-1">الميعاد</label>
-                      <input
-                        className="w-full p-2.5 border rounded-xl"
-                        value={liveForm.extra2}
-                        onChange={e => setLiveForm({ ...liveForm, extra2: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <label className="block mb-1">القاعة</label>
-                      <input
-                        className="w-full p-2.5 border rounded-xl"
-                        value={liveForm.badge}
-                        onChange={e => setLiveForm({ ...liveForm, badge: e.target.value })}
-                      />
-                    </div>
-                  </div>
+                  <label style={styles.label}>
+                    اسم الخدمة / المجموعة
+                    <input
+                      type="text"
+                      value={liveForm.extra1}
+                      onChange={(e) => setLiveForm({ ...liveForm, extra1: e.target.value })}
+                      style={styles.input}
+                    />
+                  </label>
+                  <label style={styles.label}>
+                    يوم الاجتماع
+                    <input
+                      type="text"
+                      value={liveForm.badge}
+                      onChange={(e) => setLiveForm({ ...liveForm, badge: e.target.value })}
+                      style={styles.input}
+                    />
+                  </label>
                 </>
               )}
 
-              {liveForm.sourceType === 'custom_card' && (
-                <div>
-                  <label className="block mb-1">الوصف</label>
-                  <textarea
-                    rows={3}
-                    className="w-full p-2.5 border rounded-xl"
-                    value={liveForm.description}
-                    onChange={e => setLiveForm({ ...liveForm, description: e.target.value })}
-                  />
-                </div>
+              {liveForm.sourceType === 'announcement' && (
+                <label style={styles.label}>
+                  حالة الإعلان
+                  <select
+                    value={liveForm.badge}
+                    onChange={(e) => setLiveForm({ ...liveForm, badge: e.target.value })}
+                    style={styles.input}
+                  >
+                    <option value="normal">عادي</option>
+                    <option value="pinned">مثبت</option>
+                  </select>
+                </label>
               )}
 
-              <div className="flex justify-end gap-2 pt-2">
+              <div style={{ ...styles.modalFooter, gridColumn: '1 / -1' }}>
                 <button
                   type="button"
-                  onClick={() => setLiveModalOpen(false)}
-                  className="px-4 py-2 border rounded-xl cursor-pointer"
+                  onClick={() => setShowLiveModal(false)}
+                  style={styles.cancelBtn}
                 >
                   إلغاء
                 </button>
-                <button
-                  type="submit"
-                  disabled={savingLive}
-                  className="px-5 py-2 bg-[#7a1c24] text-white rounded-xl flex items-center gap-1.5 shadow cursor-pointer"
-                >
-                  <Save size={14} /> {savingLive ? 'جاري الحفظ...' : 'حفظ التغييرات'}
+                <button type="submit" disabled={saving} style={styles.primaryBtn}>
+                  {saving ? 'جاري الحفظ...' : 'حفظ التغييرات'}
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* نافذة إضافة / تعديل كارت متداخل */}
-      {modalOpen && isAdmin && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b pb-2">
-              <h3 className="text-sm font-black text-[#7a1c24]">
-                {editingId ? '✏️ تعديل الكارت' : '➕ إنشاء كارت جديد'}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setModalOpen(false)}
-                className="p-1 text-gray-500 hover:text-gray-800 cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveCard} className="space-y-3">
-              <div>
-                <label className="block mb-1 text-gray-700">الكارت الأب (مكان ظهور الكارت):</label>
-                <select
-                  className="w-full p-2.5 border rounded-xl bg-gray-50"
-                  value={cardForm.parent_id || ''}
-                  onChange={(e) => setCardForm({ ...cardForm, parent_id: e.target.value })}
-                >
-                  <option value="">🏠 المستوى الرئيسي (بدون كارت أب)</option>
-                  {availableParentOptions.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.icon} {p.title}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-4 gap-2">
-                <div>
-                  <label className="block mb-1">الأيقونة</label>
-                  <input
-                    className="w-full p-2.5 border rounded-xl text-center text-base"
-                    value={cardForm.icon}
-                    onChange={(e) => setCardForm({ ...cardForm, icon: e.target.value })}
-                  />
-                </div>
-                <div className="col-span-3">
-                  <label className="block mb-1">عنوان الكارت *</label>
-                  <input
-                    required
-                    placeholder="مثال: خدمة إعدادي / ملفات الاجتماع..."
-                    className="w-full p-2.5 border rounded-xl"
-                    value={cardForm.title}
-                    onChange={(e) => setCardForm({ ...cardForm, title: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block mb-1">عنوان فرعي / مسؤول</label>
-                  <input
-                    placeholder="مثال: بنين وبنات • الجمعة"
-                    className="w-full p-2.5 border rounded-xl"
-                    value={cardForm.subtitle}
-                    onChange={(e) => setCardForm({ ...cardForm, subtitle: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1">شارة صغيرة (Badge)</label>
-                  <input
-                    placeholder="مثال: جديد / هام / 12"
-                    className="w-full p-2.5 border rounded-xl"
-                    value={cardForm.badge_text}
-                    onChange={(e) => setCardForm({ ...cardForm, badge_text: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="block mb-1">لون الكارت</label>
-                  <select
-                    className="w-full p-2.5 border rounded-xl bg-white"
-                    value={cardForm.accent_color}
-                    onChange={(e) => setCardForm({ ...cardForm, accent_color: e.target.value })}
-                  >
-                    <option value="red">عنابي</option>
-                    <option value="amber">ذهبي</option>
-                    <option value="blue">أزرق</option>
-                    <option value="emerald">أخضر</option>
-                    <option value="purple">بنفسجي</option>
-                    <option value="slate">رمادي</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block mb-1">عند الضغط يفتح</label>
-                  <select
-                    className="w-full p-2.5 border rounded-xl bg-white"
-                    value={cardForm.target_action}
-                    onChange={(e) => setCardForm({ ...cardForm, target_action: e.target.value })}
-                  >
-                    <option value="children">🗂️ كروت فرعية بداخله</option>
-                    <option value="info">📄 شاشة محتوى / ملاحظات</option>
-                    <option value="link">🔗 رابط خارجي</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block mb-1">الترتيب</label>
-                  <input
-                    type="number"
-                    min="1"
-                    className="w-full p-2.5 border rounded-xl text-center"
-                    value={cardForm.sort_order}
-                    onChange={(e) => setCardForm({ ...cardForm, sort_order: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              {cardForm.target_action === 'link' && (
-                <div>
-                  <label className="block mb-1">الرابط (URL)</label>
-                  <input
-                    type="url"
-                    placeholder="https://..."
-                    className="w-full p-2.5 border rounded-xl"
-                    value={cardForm.target_url}
-                    onChange={(e) => setCardForm({ ...cardForm, target_url: e.target.value })}
-                  />
-                </div>
-              )}
-
-              <div>
-                <label className="block mb-1">وصف أو محتوى تفصيلي</label>
-                <textarea
-                  rows={3}
-                  placeholder="اكتب أي تفاصيل أو تعليمات خاصة بهذا الكارت..."
-                  className="w-full p-2.5 border rounded-xl"
-                  value={cardForm.description}
-                  onChange={(e) => setCardForm({ ...cardForm, description: e.target.value })}
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="px-4 py-2 border rounded-xl cursor-pointer"
-                >
-                  إلغاء
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="px-5 py-2 bg-[#7a1c24] text-white rounded-xl flex items-center gap-1.5 shadow cursor-pointer"
-                >
-                  <Save size={14} /> {saving ? 'جاري الحفظ...' : 'حفظ الكارت'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {selectedInfoCard && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl w-full max-w-md p-6 space-y-3 text-xs">
-            <div className="flex items-center justify-between border-b pb-2">
-              <h3 className="text-base font-black text-gray-900">
-                {selectedInfoCard.icon} {selectedInfoCard.title}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setSelectedInfoCard(null)}
-                className="p-1 text-gray-500 hover:text-gray-800 cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            {selectedInfoCard.subtitle && (
-              <div className="font-bold text-[#7a1c24]">{selectedInfoCard.subtitle}</div>
-            )}
-            <p className="text-gray-700 whitespace-pre-line leading-relaxed">
-              {selectedInfoCard.description || 'لا يوجد وصف إضافي.'}
-            </p>
-            <div className="flex justify-end pt-2">
-              <button
-                type="button"
-                onClick={() => setSelectedInfoCard(null)}
-                className="px-4 py-2 bg-[#7a1c24] text-white rounded-xl font-bold cursor-pointer"
-              >
-                إغلاق
-              </button>
-            </div>
           </div>
         </div>
       )}
     </div>
   );
 }
+
+const styles = {
+  container: {
+    padding: 16,
+    fontFamily: 'inherit',
+    color: '#0f172a'
+  },
+  headerBar: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 14
+  },
+  headerRight: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10
+  },
+  headerActions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 10
+  },
+  title: {
+    margin: 0,
+    fontSize: 20,
+    fontWeight: 700
+  },
+  subtitle: {
+    margin: '4px 0 0',
+    fontSize: 13,
+    color: '#475569'
+  },
+  backBtn: {
+    padding: '8px 12px',
+    borderRadius: 8,
+    border: '1px solid #cbd5e1',
+    background: '#f8fafc',
+    cursor: 'pointer',
+    fontWeight: 600
+  },
+  tabSwitch: {
+    display: 'flex',
+    background: '#f1f5f9',
+    padding: 4,
+    borderRadius: 10,
+    gap: 4
+  },
+  tabBtn: {
+    padding: '7px 12px',
+    borderRadius: 8,
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer',
+    fontWeight: 600,
+    color: '#475569'
+  },
+  tabBtnActive: {
+    background: '#ffffff',
+    color: '#0f172a',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.08)'
+  },
+  primaryBtn: {
+    padding: '9px 16px',
+    borderRadius: 9,
+    border: 'none',
+    background: '#2563eb',
+    color: '#fff',
+    fontWeight: 700,
+    cursor: 'pointer'
+  },
+  cancelBtn: {
+    padding: '9px 16px',
+    borderRadius: 9,
+    border: '1px solid #cbd5e1',
+    background: '#fff',
+    color: '#334155',
+    fontWeight: 600,
+    cursor: 'pointer'
+  },
+  secondarySmallBtn: {
+    padding: '5px 10px',
+    borderRadius: 7,
+    border: '1px solid #cbd5e1',
+    background: '#f8fafc',
+    cursor: 'pointer',
+    fontSize: 12,
+    fontWeight: 600
+  },
+  dangerSmallBtn: {
+    padding: '5px 10px',
+    borderRadius: 7,
+    border: '1px solid #fecaca',
+    background: '#fef2f2',
+    color: '#dc2626',
+    cursor: 'pointer',
+    fontSize: 12,
+    fontWeight: 600
+  },
+  errorAlert: {
+    padding: '10px 14px',
+    borderRadius: 8,
+    background: '#fef2f2',
+    border: '1px solid #fecaca',
+    color: '#b91c1c',
+    marginBottom: 12,
+    fontWeight: 600
+  },
+  successAlert: {
+    padding: '10px 14px',
+    borderRadius: 8,
+    background: '#f0fdf4',
+    border: '1px solid #bbf7d0',
+    color: '#15803d',
+    marginBottom: 12,
+    fontWeight: 600
+  },
+  breadcrumbBar: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+    padding: '8px 12px',
+    background: '#f8fafc',
+    borderRadius: 10,
+    border: '1px solid #e2e8f0',
+    marginBottom: 16
+  },
+  crumbBtn: {
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer',
+    fontSize: 13,
+    color: '#475569',
+    padding: '4px 6px',
+    borderRadius: 6
+  },
+  crumbActive: {
+    fontWeight: 700,
+    color: '#2563eb',
+    background: '#eff6ff'
+  },
+  crumbSep: {
+    color: '#94a3b8'
+  },
+  cardsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+    gap: 14
+  },
+  card: {
+    background: '#ffffff',
+    border: '1px solid #e2e8f0',
+    borderRadius: 14,
+    padding: 16,
+    cursor: 'pointer',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+    boxShadow: '0 2px 8px rgba(15, 23, 42, 0.04)'
+  },
+  cardTopRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 10
+  },
+  iconBadge: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    background: '#f1f5f9',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 22
+  },
+  badgesGroup: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 4,
+    justifyContent: 'flex-end'
+  },
+  badge: {
+    fontSize: 11,
+    fontWeight: 700,
+    padding: '3px 8px',
+    borderRadius: 999
+  },
+  sourceBadge: {
+    fontSize: 11,
+    fontWeight: 700,
+    padding: '3px 8px',
+    borderRadius: 999,
+    background: '#eff6ff',
+    color: '#1d4ed8'
+  },
+  childrenBadge: {
+    fontSize: 11,
+    fontWeight: 700,
+    padding: '3px 8px',
+    borderRadius: 999,
+    background: '#f1f5f9',
+    color: '#334155'
+  },
+  hiddenBadge: {
+    fontSize: 11,
+    fontWeight: 700,
+    padding: '3px 8px',
+    borderRadius: 999,
+    background: '#fef3c7',
+    color: '#92400e'
+  },
+  cardTitle: {
+    margin: '0 0 4px',
+    fontSize: 16,
+    fontWeight: 700
+  },
+  cardSubtitle: {
+    margin: '0 0 6px',
+    fontSize: 13,
+    color: '#475569',
+    fontWeight: 500
+  },
+  cardDesc: {
+    margin: '0 0 12px',
+    fontSize: 12,
+    color: '#64748b',
+    lineHeight: 1.5
+  },
+  cardFooter: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 10,
+    borderTop: '1px solid #f1f5f9',
+    marginTop: 'auto'
+  },
+  openHint: {
+    fontSize: 12,
+    fontWeight: 700
+  },
+  mutedMeta: {
+    fontSize: 12,
+    color: '#64748b'
+  },
+  cardActions: {
+    display: 'flex',
+    gap: 4
+  },
+  iconActionBtn: {
+    border: '1px solid #e2e8f0',
+    background: '#f8fafc',
+    borderRadius: 7,
+    padding: '4px 7px',
+    cursor: 'pointer',
+    fontSize: 13
+  },
+  filterToolbar: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 14
+  },
+  searchInput: {
+    flex: 1,
+    minWidth: 220,
+    padding: '9px 12px',
+    borderRadius: 9,
+    border: '1px solid #cbd5e1',
+    fontSize: 14
+  },
+  selectInput: {
+    padding: '9px 12px',
+    borderRadius: 9,
+    border: '1px solid #cbd5e1',
+    background: '#fff',
+    fontSize: 14
+  },
+  centerBox: {
+    padding: 40,
+    textAlign: 'center',
+    color: '#64748b'
+  },
+  emptyBox: {
+    padding: 36,
+    textAlign: 'center',
+    background: '#f8fafc',
+    border: '1px dashed #cbd5e1',
+    borderRadius: 14
+  },
+  emptyText: {
+    margin: '0 0 12px',
+    color: '#475569'
+  },
+  modalBackdrop: {
+    position: 'fixed',
+    inset: 0,
+    background: 'rgba(15, 23, 42, 0.5)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    zIndex: 1000
+  },
+  modalBox: {
+    width: '100%',
+    maxWidth: 620,
+    maxHeight: '90vh',
+    overflowY: 'auto',
+    background: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    boxShadow: '0 20px 40px rgba(0,0,0,0.2)'
+  },
+  modalHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+    paddingBottom: 10,
+    borderBottom: '1px solid #e2e8f0'
+  },
+  modalTitle: {
+    margin: 0,
+    fontSize: 18,
+    fontWeight: 700
+  },
+  closeBtn: {
+    border: 'none',
+    background: '#f1f5f9',
+    borderRadius: 8,
+    width: 32,
+    height: 32,
+    cursor: 'pointer',
+    fontWeight: 700
+  },
+  formGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+    gap: 12
+  },
+  label: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    fontSize: 13,
+    fontWeight: 600,
+    color: '#334155'
+  },
+  input: {
+    padding: '8px 11px',
+    borderRadius: 8,
+    border: '1px solid #cbd5e1',
+    fontSize: 14
+  },
+  textarea: {
+    padding: '8px 11px',
+    borderRadius: 8,
+    border: '1px solid #cbd5e1',
+    fontSize: 14,
+    resize: 'vertical'
+  },
+  pickerRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap'
+  },
+  chipsWrap: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 4
+  },
+  miniChip: {
+    border: '1px solid #e2e8f0',
+    background: '#f8fafc',
+    borderRadius: 6,
+    padding: '3px 6px',
+    cursor: 'pointer',
+    fontSize: 14
+  },
+  colorInput: {
+    width: 42,
+    height: 36,
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer'
+  },
+  colorDot: {
+    width: 22,
+    height: 22,
+    borderRadius: '50%',
+    border: '1px solid rgba(0,0,0,0.15)',
+    cursor: 'pointer'
+  },
+  checkboxLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer'
+  },
+  modalFooter: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 8,
+    paddingTop: 12,
+    borderTop: '1px solid #e2e8f0'
+  }
+};

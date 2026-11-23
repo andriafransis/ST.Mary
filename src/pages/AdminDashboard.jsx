@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { uploadChurchMedia } from '../lib/mediaUpload';
 import AdminLogsAndWaWidget from '../components/AdminLogsAndWaWidget';
@@ -9,7 +10,7 @@ import JosephArimatheaManager from '../components/JosephArimatheaManager';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
 import ServiceGroupFeed, { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/ServiceGroupFeed';
 import ServiceDrillDownCards from '../components/ServiceDrillDownCards';
-import NestedCardsBuilder from '../components/NestedCardsBuilder';
+import NestedCardsBuilder, { loadAdminCardsConfig } from '../components/NestedCardsBuilder';
 import PermissionsPage from './PermissionsPage';
 import {
   UserPlus, Edit3, Trash2, CalendarPlus, BookOpen,
@@ -164,6 +165,12 @@ export default function AdminDashboard({
   const todayISO = new Date().toISOString().split('T')[0];
 
   const [activeCard, setActiveCard] = useState('hub');
+  const [servicesSubTab, setServicesSubTab] = useState('browse');
+  const [nestedRootId, setNestedRootId] = useState(null);
+  const [activeCustomInfoCard, setActiveCustomInfoCard] = useState(null);
+  const [adminCardsConfig, setAdminCardsConfig] = useState({ rowId: null, overrides: {}, customScreenCards: [] });
+  const [rootNestedCards, setRootNestedCards] = useState([]);
+
   const [userSubTab, setUserSubTab] = useState(null);
   const [searchQ, setSearchQ] = useState('');
   const [permTargetUserId, setPermTargetUserId] = useState(null);
@@ -260,10 +267,30 @@ export default function AdminDashboard({
     else setDbServiceGroups(DEFAULT_SERVICE_GROUPS);
   };
 
+  const loadCardsState = async () => {
+    const [cfg, nestedRes] = await Promise.all([
+      loadAdminCardsConfig(),
+      supabase
+        .from('nested_cards')
+        .select('*')
+        .is('parent_id', null)
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true })
+    ]);
+    setAdminCardsConfig(cfg);
+    if (!nestedRes.error) setRootNestedCards(nestedRes.data || []);
+  };
+
   useEffect(() => {
     loadRoleTemplates();
     loadServiceGroups();
+    loadCardsState();
   }, []);
+
+  const handleFullRefresh = async () => {
+    await Promise.all([loadRoleTemplates(), loadServiceGroups(), loadCardsState()]);
+    if (onRefresh) await onRefresh();
+  };
 
   const effectiveGroups = dbServiceGroups.length > 0 ? dbServiceGroups : DEFAULT_SERVICE_GROUPS;
 
@@ -1068,41 +1095,7 @@ export default function AdminDashboard({
 
   const isSetupChildCard = SETUP_SUB_CARDS.includes(activeCard);
 
-  const renderTopBack = (title) => (
-    <div className="bg-white p-4 rounded-2xl border shadow-2xs flex flex-wrap justify-between items-center gap-2 print:hidden">
-      <div className="flex items-center gap-2 flex-wrap">
-        <button
-          type="button"
-          onClick={() => setActiveCard(isSetupChildCard ? 'setup_hub' : 'hub')}
-          className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer"
-        >
-          <ArrowRight size={15} /> {isSetupChildCard ? 'رجوع لكروت الإعدادات SETUP' : 'رجوع لكروت الإدارة'}
-        </button>
-        {isSetupChildCard && (
-          <button
-            type="button"
-            onClick={() => setActiveCard('hub')}
-            className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-200 rounded-xl text-xs font-black cursor-pointer"
-          >
-            🏠 الرئيسية للإدارة
-          </button>
-        )}
-        <h2 className="text-base md:text-lg font-black text-[#7a1c24]">{title}</h2>
-        {!isAdmin && !canExtractSheet && (
-          <span className="px-2.5 py-1 bg-red-100 text-red-800 rounded-full text-[10px] font-black flex items-center gap-1">
-            <Lock size={11} /> قراءة فقط
-          </span>
-        )}
-      </div>
-      {onRefresh && (
-        <button type="button" onClick={onRefresh} className="px-3 py-2 bg-white border hover:bg-gray-50 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
-          <RefreshCw size={13} /> تحديث
-        </button>
-      )}
-    </div>
-  );
-
-  const setupCards = [
+  const rawSetupCards = useMemo(() => [
     {
       id: 'users',
       icon: '👥',
@@ -1139,7 +1132,7 @@ export default function AdminDashboard({
       id: 'nested_cards',
       icon: '🧩',
       title: 'إضافة وتعديل كروت',
-      desc: 'عرض كروت كل الشاشات وإضافة وتعديل وحذف الكروت وتعديل بياناتها، أو إنشاء كروت متداخلة',
+      desc: 'عرض كروت كل الشاشات وإضافة وتعديل وتشغيل وحذف الكروت أو إنشاء كروت متداخلة',
       count: 'كروت الشاشات',
       color: 'border-rose-300 bg-rose-50/30'
     },
@@ -1151,15 +1144,15 @@ export default function AdminDashboard({
       count: 'للأدمن فقط',
       color: 'border-indigo-300 bg-indigo-50/40'
     }] : [])
-  ];
+  ], [users.length, roleTemplatesCount, isAdmin]);
 
-  const adminCards = [
+  const rawAdminCards = useMemo(() => [
     {
       id: 'setup_hub',
       icon: '🛠️',
       title: 'الإعدادات SETUP',
       desc: 'حسابات الكنيسة، الصلاحيات، التصميم، الإعدادات، إضافة وتعديل كروت، وسجل النشاط',
-      count: `${setupCards.length} كروت`,
+      count: `${rawSetupCards.length} كروت`,
       color: 'border-rose-300 bg-rose-50/40'
     },
     ...(canExtractSheet ? [{
@@ -1177,95 +1170,296 @@ export default function AdminDashboard({
     { id: 'burial_and_caskets', icon: '⚰️', title: 'أماكن الدفن والصناديق وألحان يوسف الرامي', desc: 'جدول أماكن الدفن بالترقيم المتسلسل ورسوم الانتقال + مخزون الصناديق + ألحان يوسف الرامي وسلايدر الصوت', count: 'جداول وألحان', color: 'border-cyan-200 bg-white' },
     { id: 'categories', icon: '📂', title: 'كروت بحث الحالة', desc: 'تعديل وإضافة تصنيفات الأسر في مكتب الكاهن', count: `${caseCategories.length} تصنيف`, color: 'border-emerald-200 bg-white' },
     { id: 'custom_cards', icon: '📌', title: 'كروت إضافية للكاهن', desc: 'إنشاء كروت مخصصة تظهر داخل شاشة الأب الكاهن', count: `${customCards.length} كارت`, color: 'border-purple-200 bg-white' }
+  ], [rawSetupCards.length, canExtractSheet, users.length, events.length, dbServiceGroups.length, services.length, caseCategories.length, customCards.length]);
+
+  const applyOverridesAndCustoms = (baseCards, screenKey) => {
+    const overrides = adminCardsConfig.overrides || {};
+    const mappedBase = baseCards.map(c => {
+      const ov = overrides[c.id];
+      if (!ov) return c;
+      return {
+        ...c,
+        title: ov.title || c.title,
+        desc: ov.desc !== undefined ? ov.desc : c.desc,
+        icon: ov.icon || c.icon,
+        is_active: ov.is_active !== false
+      };
+    });
+
+    const customForScreen = (adminCardsConfig.customScreenCards || [])
+      .filter(cc => (cc.screenKey || 'admin_hub') === screenKey)
+      .map(cc => ({
+        id: cc.id,
+        icon: cc.icon || '📌',
+        title: cc.title,
+        desc: cc.desc || '',
+        count: cc.target_action === 'link' ? 'رابط' : cc.target_action === 'screen' ? 'شاشة' : 'مخصص',
+        color: screenKey === 'setup_hub' ? 'border-amber-300 bg-amber-50/40' : 'border-rose-200 bg-rose-50/30',
+        isCustom: true,
+        is_active: cc.is_active !== false,
+        customConfig: cc
+      }));
+
+    return [...mappedBase, ...customForScreen];
+  };
+
+  const allSetupCardsWithOverrides = useMemo(() => applyOverridesAndCustoms(rawSetupCards, 'setup_hub'), [rawSetupCards, adminCardsConfig]);
+  const allAdminCardsWithOverrides = useMemo(() => applyOverridesAndCustoms(rawAdminCards, 'admin_hub'), [rawAdminCards, adminCardsConfig]);
+
+  const visibleSetupCards = useMemo(() => allSetupCardsWithOverrides.filter(c => c.is_active !== false), [allSetupCardsWithOverrides]);
+  const visibleAdminCards = useMemo(() => {
+    const baseVisible = allAdminCardsWithOverrides.filter(c => c.is_active !== false);
+    const nestedRoots = rootNestedCards.map(nc => ({
+      id: `nested-root-${nc.id}`,
+      icon: nc.icon || '🗂️',
+      title: nc.title,
+      desc: nc.description || nc.subtitle || 'كارت متداخل مخصص',
+      count: nc.badge_text || 'متداخل',
+      color: 'border-indigo-200 bg-indigo-50/30',
+      isNestedRoot: true,
+      nestedData: nc
+    }));
+    return [...baseVisible, ...nestedRoots];
+  }, [allAdminCardsWithOverrides, rootNestedCards]);
+
+  const handleLaunchAdminOrSetupCard = (card) => {
+    if (card.isNestedRoot && card.nestedData) {
+      const nc = card.nestedData;
+      if (nc.target_action === 'link' && nc.target_url) {
+        window.open(nc.target_url, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      if (nc.target_action === 'info') {
+        setActiveCustomInfoCard({ icon: nc.icon, title: nc.title, desc: nc.description || nc.subtitle });
+        return;
+      }
+      setNestedRootId(nc.id);
+      setActiveCard('nested_cards');
+      return;
+    }
+
+    if (card.isCustom && card.customConfig) {
+      const cc = card.customConfig;
+      if (cc.target_action === 'link' && cc.target_url) {
+        window.open(cc.target_url, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      if (cc.target_action === 'screen' && cc.target_screen) {
+        setActiveCard(cc.target_screen);
+        return;
+      }
+      setActiveCustomInfoCard({ icon: cc.icon, title: cc.title, desc: cc.desc });
+      return;
+    }
+
+    if (card.id === 'users') {
+      setUserSubTab(null);
+      setSearchQ('');
+    }
+    if (card.id === 'roles_permissions') {
+      setPermTargetUserId(null);
+    }
+    if (card.id === 'nested_cards') {
+      setNestedRootId(null);
+    }
+    setActiveCard(card.id);
+  };
+
+  const quickNavTabs = [
+    { id: 'hub', label: '🏠 الإدارة' },
+    { id: 'setup_hub', label: '🛠️ SETUP' },
+    { id: 'users', label: '👥 الحسابات' },
+    { id: 'services', label: '🏫 الخدمات' },
+    { id: 'events', label: '⛪ القداسات' },
+    { id: 'nested_cards', label: '🧩 الكروت' },
+    { id: 'roles_permissions', label: '🔐 الصلاحيات' },
+    { id: 'page_designer', label: '🎨 التصميم' },
+    { id: 'settings', label: '⚙️ الهوية' }
   ];
+
+  const renderQuickNavBar = () => (
+    <div className="bg-white px-3 py-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto print:hidden">
+      {quickNavTabs.map(tab => {
+        const isCurrent = activeCard === tab.id || (tab.id === 'setup_hub' && isSetupChildCard && activeCard !== 'users' && activeCard !== 'nested_cards' && activeCard !== 'roles_permissions' && activeCard !== 'page_designer' && activeCard !== 'settings');
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => {
+              if (tab.id === 'users') { setUserSubTab(null); setSearchQ(''); }
+              if (tab.id === 'roles_permissions') setPermTargetUserId(null);
+              if (tab.id === 'nested_cards') setNestedRootId(null);
+              setActiveCard(tab.id);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-[11px] font-black shrink-0 transition cursor-pointer ${
+              activeCard === tab.id
+                ? 'bg-[#7a1c24] text-white shadow-2xs'
+                : isCurrent
+                  ? 'bg-amber-100 text-amber-950'
+                  : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+            }`}
+          >
+            {tab.label}
+          </button>
+        );
+      })}
+      {onRefresh && (
+        <button
+          type="button"
+          onClick={handleFullRefresh}
+          className="mr-auto px-3 py-1.5 bg-white border hover:bg-gray-50 rounded-xl text-[11px] font-bold flex items-center gap-1 shrink-0 cursor-pointer"
+        >
+          <RefreshCw size={12} /> تحديث
+        </button>
+      )}
+    </div>
+  );
+
+  const renderTopBack = (title) => (
+    <div className="bg-white p-3.5 rounded-2xl border shadow-2xs flex flex-wrap justify-between items-center gap-2 print:hidden">
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => {
+            setNestedRootId(null);
+            setActiveCard(isSetupChildCard ? 'setup_hub' : 'hub');
+          }}
+          className="px-3.5 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer"
+        >
+          <ArrowRight size={14} /> {isSetupChildCard ? 'رجوع لكروت الإعدادات SETUP' : 'رجوع لكروت الإدارة'}
+        </button>
+        {isSetupChildCard && (
+          <button
+            type="button"
+            onClick={() => { setNestedRootId(null); setActiveCard('hub'); }}
+            className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-200 rounded-xl text-xs font-black cursor-pointer"
+          >
+            🏠 الرئيسية للإدارة
+          </button>
+        )}
+        <h2 className="text-sm md:text-base font-black text-[#7a1c24]">{title}</h2>
+        {!isAdmin && !canExtractSheet && (
+          <span className="px-2.5 py-1 bg-red-100 text-red-800 rounded-full text-[10px] font-black flex items-center gap-1">
+            <Lock size={11} /> قراءة فقط
+          </span>
+        )}
+      </div>
+    </div>
+  );
 
   if (activeCard === 'hub') {
     return (
-      <div className="space-y-4">
-        <div className="bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-6 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
+      <div className="space-y-3">
+        {renderQuickNavBar()}
+        <div className="bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-4 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
           <div>
-            <h2 className="text-xl font-black text-amber-200">🛡️ لوحة الإدارة — {churchName}</h2>
-            <p className="text-xs md:text-sm text-white/85 mt-1">اختر الكارت المطلوب للإدارة والتحكم الكامل</p>
+            <h2 className="text-lg font-black text-amber-200">🛡️ لوحة الإدارة — {churchName}</h2>
+            <p className="text-xs text-white/85 mt-0.5">اختر الكارت المطلوب للإدارة والتحكم الكامل</p>
           </div>
-          {onRefresh && (
-            <button type="button" onClick={onRefresh} className="px-4 py-2 bg-white/15 hover:bg-white/25 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
-              <RefreshCw size={14} /> تحديث البيانات
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => { setNestedRootId(null); setActiveCard('nested_cards'); }}
+              className="px-3.5 py-2 bg-white/15 hover:bg-white/25 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer"
+            >
+              🧩 إدارة وتعديل الكروت
             </button>
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {adminCards.map(c => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => setActiveCard(c.id)}
-              className={`${c.color} border-2 p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer`}
-            >
-              <div className="flex justify-between items-start w-full">
-                <span className="text-4xl">{c.icon}</span>
-                <span className="px-3 py-1 bg-[#f9ecee] text-[#7a1c24] rounded-full text-xs font-black">{c.count}</span>
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-gray-900">{c.title}</h3>
-                <p className="text-xs md:text-sm text-gray-600 mt-1">{c.desc}</p>
-              </div>
-            </button>
-          ))}
+        <div className="max-h-[calc(100vh-250px)] overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {visibleAdminCards.map(c => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => handleLaunchAdminOrSetupCard(c)}
+                className={`${c.color} border-2 p-4 rounded-2xl text-right shadow-2xs hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-2.5 cursor-pointer`}
+              >
+                <div className="flex justify-between items-start w-full">
+                  <span className="text-3xl">{c.icon}</span>
+                  <span className="px-2.5 py-0.5 bg-[#f9ecee] text-[#7a1c24] rounded-full text-[11px] font-black">{c.count}</span>
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-gray-900">{c.title}</h3>
+                  <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{c.desc}</p>
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
+
+        {activeCustomInfoCard && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-3xl w-full max-w-md p-6 space-y-3 text-xs">
+              <div className="flex items-center justify-between border-b pb-2">
+                <h3 className="text-base font-black text-gray-900">{activeCustomInfoCard.icon} {activeCustomInfoCard.title}</h3>
+                <button type="button" onClick={() => setActiveCustomInfoCard(null)} className="p-1 text-gray-500 cursor-pointer"><X size={16} /></button>
+              </div>
+              <p className="text-gray-700 whitespace-pre-line">{activeCustomInfoCard.desc || 'لا توجد تفاصيل إضافية.'}</p>
+              <div className="flex justify-end">
+                <button type="button" onClick={() => setActiveCustomInfoCard(null)} className="px-4 py-2 bg-[#7a1c24] text-white rounded-xl font-bold cursor-pointer">إغلاق</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
   if (activeCard === 'setup_hub') {
     return (
-      <div className="space-y-4">
-        <div className="bg-white p-4 rounded-2xl border shadow-2xs flex flex-wrap justify-between items-center gap-2">
+      <div className="space-y-3">
+        {renderQuickNavBar()}
+        <div className="bg-white p-3.5 rounded-2xl border shadow-2xs flex flex-wrap justify-between items-center gap-2">
           <div className="flex items-center gap-3 flex-wrap">
             <button
               type="button"
               onClick={() => setActiveCard('hub')}
-              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer"
+              className="px-3.5 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer"
             >
-              <ArrowRight size={15} /> رجوع لكروت الإدارة
+              <ArrowRight size={14} /> رجوع لكروت الإدارة
             </button>
-            <h2 className="text-base md:text-lg font-black text-[#7a1c24]">🛠️ الإعدادات SETUP</h2>
+            <h2 className="text-base font-black text-[#7a1c24]">🛠️ الإعدادات SETUP</h2>
           </div>
-          {onRefresh && (
-            <button type="button" onClick={onRefresh} className="px-3 py-2 bg-white border hover:bg-gray-50 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
-              <RefreshCw size={13} /> تحديث
-            </button>
-          )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {setupCards.map(c => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => {
-                if (c.id === 'users') {
-                  setUserSubTab(null);
-                  setSearchQ('');
-                }
-                if (c.id === 'roles_permissions') {
-                  setPermTargetUserId(null);
-                }
-                setActiveCard(c.id);
-              }}
-              className={`${c.color} border-2 p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer`}
-            >
-              <div className="flex justify-between items-start w-full">
-                <span className="text-4xl">{c.icon}</span>
-                <span className="px-3 py-1 bg-[#f9ecee] text-[#7a1c24] rounded-full text-xs font-black">{c.count}</span>
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-gray-900">{c.title}</h3>
-                <p className="text-xs md:text-sm text-gray-600 mt-1">{c.desc}</p>
-              </div>
-            </button>
-          ))}
+        <div className="max-h-[calc(100vh-230px)] overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {visibleSetupCards.map(c => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => handleLaunchAdminOrSetupCard(c)}
+                className={`${c.color} border-2 p-4 rounded-2xl text-right shadow-2xs hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-2.5 cursor-pointer`}
+              >
+                <div className="flex justify-between items-start w-full">
+                  <span className="text-3xl">{c.icon}</span>
+                  <span className="px-2.5 py-0.5 bg-[#f9ecee] text-[#7a1c24] rounded-full text-[11px] font-black">{c.count}</span>
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-gray-900">{c.title}</h3>
+                  <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{c.desc}</p>
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
+
+        {activeCustomInfoCard && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-3xl w-full max-w-md p-6 space-y-3 text-xs">
+              <div className="flex items-center justify-between border-b pb-2">
+                <h3 className="text-base font-black text-gray-900">{activeCustomInfoCard.icon} {activeCustomInfoCard.title}</h3>
+                <button type="button" onClick={() => setActiveCustomInfoCard(null)} className="p-1 text-gray-500 cursor-pointer"><X size={16} /></button>
+              </div>
+              <p className="text-gray-700 whitespace-pre-line">{activeCustomInfoCard.desc || 'لا توجد تفاصيل إضافية.'}</p>
+              <div className="flex justify-end">
+                <button type="button" onClick={() => setActiveCustomInfoCard(null)} className="px-4 py-2 bg-[#7a1c24] text-white rounded-xl font-bold cursor-pointer">إغلاق</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1302,1405 +1496,1125 @@ export default function AdminDashboard({
   const priestTransferHierarchy = getServiceHierarchy(priestTransferForm.serviceName);
 
   return (
-    <div className="space-y-4">
-      {activeCard === 'nested_cards' && (
-        <div className="space-y-4">
-          {renderTopBack('🧩 إضافة وتعديل كروت')}
-          <NestedCardsBuilder
-            currentUser={effectiveUser}
-            isAdmin={isAdmin}
-            title="إضافة وتعديل كروت الشاشات والكروت المتداخلة"
-            hubCards={adminCards}
-            setupCards={setupCards}
-            serviceGroups={effectiveGroups}
-            services={services}
-            caseCategories={caseCategories}
-            customCards={customCards}
-            onRefresh={onRefresh}
-          />
-        </div>
-      )}
+    <div className="space-y-3">
+      {renderQuickNavBar()}
 
-      {activeCard === 'master_sheet' && canExtractSheet && (
-        <div className="space-y-4">
-          {renderTopBack('📋 شيت التسلسل والافتقاد والترحيم')}
-          <MasterCongregationSheet
-            users={users}
-            currentUser={effectiveUser}
-            churchName={churchName}
-            onUpdateUser={onUpdateUser}
-            onRefresh={onRefresh}
-          />
-        </div>
-      )}
-
-      {activeCard === 'roles_permissions' && (
-        <div className="space-y-4 text-xs md:text-sm">
-          {renderTopBack('🔐 الصلاحيات والأدوار')}
-          <PermissionsPage
-            users={users}
-            roleScreens={roleScreens}
-            currentUser={effectiveUser}
-            initialUserId={permTargetUserId}
-            onRefresh={() => {
-              loadRoleTemplates();
-              if (onRefresh) onRefresh();
-            }}
-          />
-        </div>
-      )}
-
-      {activeCard === 'page_designer' && (
-        <div className="space-y-4">
-          {renderTopBack('🎨 التصميم وتعديل الصفحات')}
-          <AdminPageDesigner currentUser={effectiveUser} onSaved={onRefresh} />
-        </div>
-      )}
-
-      {activeCard === 'users' && (
-        <div className="space-y-3">
-          {renderTopBack('👥 حسابات الكنيسة')}
-
-          <div className="bg-white p-3 rounded-2xl border flex flex-wrap gap-2 text-xs font-bold shadow-2xs">
-            <button onClick={() => setUserSubTab('priests')} className={`px-3.5 py-2 rounded-xl cursor-pointer ${userSubTab === 'priests' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'}`}>✝ الكهنة ({priestsList.length})</button>
-            <button onClick={() => setUserSubTab('servants')} className={`px-3.5 py-2 rounded-xl cursor-pointer ${userSubTab === 'servants' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'}`}>📖 الخدام وأمناء الخدمة ({servantsList.length})</button>
-            <button onClick={() => setUserSubTab('deacons')} className={`px-3.5 py-2 rounded-xl cursor-pointer ${userSubTab === 'deacons' ? 'bg-purple-800 text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'}`}>🕯️ الشمامسة ({deaconsList.length})</button>
-            <button onClick={() => setUserSubTab('members')} className={`px-3.5 py-2 rounded-xl cursor-pointer ${userSubTab === 'members' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'}`}>🎓 المخدومون ({membersList.length})</button>
-            <button onClick={() => setUserSubTab('parents')} className={`px-3.5 py-2 rounded-xl cursor-pointer ${userSubTab === 'parents' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'}`}>👨‍👩‍👦 أولياء الأمور والشعب ({parentsWorkersList.length})</button>
-            <button onClick={() => setUserSubTab('all')} className={`px-3.5 py-2 rounded-xl cursor-pointer ${userSubTab === 'all' ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'}`}>📋 عرض الكل ({users.length})</button>
+      <div className="max-h-[calc(100vh-195px)] overflow-y-auto pr-1 space-y-3">
+        {activeCard === 'nested_cards' && (
+          <div className="space-y-3">
+            {renderTopBack('🧩 إضافة وتعديل وتشغيل الكروت')}
+            <NestedCardsBuilder
+              currentUser={effectiveUser}
+              isAdmin={isAdmin}
+              rootParentId={nestedRootId}
+              title="إضافة وتعديل وتشغيل كروت الشاشات والكروت المتداخلة"
+              hubCards={allAdminCardsWithOverrides}
+              setupCards={allSetupCardsWithOverrides}
+              serviceGroups={effectiveGroups}
+              services={services}
+              caseCategories={caseCategories}
+              customCards={customCards}
+              priests={priestsList}
+              onNavigateScreen={(screenId) => setActiveCard(screenId)}
+              onExit={nestedRootId ? () => { setNestedRootId(null); setActiveCard('hub'); } : undefined}
+              onRefresh={handleFullRefresh}
+            />
           </div>
+        )}
 
-          <div className="flex flex-wrap justify-between items-center gap-2">
-            <div className="relative flex-1 min-w-55 text-xs">
-              <Search size={15} className="absolute right-3 top-2.5 text-gray-400" />
-              <input type="text" placeholder="بحث بالاسم، اليوزر، التليفون، الفصل، أو القطاع..." className="w-full pr-9 pl-3 py-2.5 bg-white border rounded-xl outline-none focus:border-[#7a1c24]" value={searchQ} onChange={e => setSearchQ(e.target.value)} />
+        {activeCard === 'master_sheet' && canExtractSheet && (
+          <div className="space-y-3">
+            {renderTopBack('📋 شيت التسلسل والافتقاد والترحيم')}
+            <MasterCongregationSheet
+              users={users}
+              currentUser={effectiveUser}
+              churchName={churchName}
+              onUpdateUser={onUpdateUser}
+              onRefresh={onRefresh}
+            />
+          </div>
+        )}
+
+        {activeCard === 'roles_permissions' && (
+          <div className="space-y-3 text-xs md:text-sm">
+            {renderTopBack('🔐 الصلاحيات والأدوار')}
+            <PermissionsPage
+              users={users}
+              roleScreens={roleScreens}
+              currentUser={effectiveUser}
+              initialUserId={permTargetUserId}
+              onRefresh={() => {
+                loadRoleTemplates();
+                if (onRefresh) onRefresh();
+              }}
+            />
+          </div>
+        )}
+
+        {activeCard === 'page_designer' && (
+          <div className="space-y-3">
+            {renderTopBack('🎨 التصميم وتعديل الصفحات')}
+            <AdminPageDesigner currentUser={effectiveUser} onSaved={onRefresh} />
+          </div>
+        )}
+
+        {activeCard === 'users' && (
+          <div className="space-y-3">
+            {renderTopBack('👥 حسابات الكنيسة')}
+
+            <div className="bg-white p-2.5 rounded-2xl border flex items-center gap-1.5 overflow-x-auto text-xs font-bold shadow-2xs">
+              <button onClick={() => setUserSubTab('priests')} className={`px-3 py-1.5 rounded-xl shrink-0 cursor-pointer ${userSubTab === 'priests' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'}`}>✝ الكهنة ({priestsList.length})</button>
+              <button onClick={() => setUserSubTab('servants')} className={`px-3 py-1.5 rounded-xl shrink-0 cursor-pointer ${userSubTab === 'servants' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'}`}>📖 الخدام وأمناء الخدمة ({servantsList.length})</button>
+              <button onClick={() => setUserSubTab('deacons')} className={`px-3 py-1.5 rounded-xl shrink-0 cursor-pointer ${userSubTab === 'deacons' ? 'bg-purple-800 text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'}`}>🕯️ الشمامسة ({deaconsList.length})</button>
+              <button onClick={() => setUserSubTab('members')} className={`px-3 py-1.5 rounded-xl shrink-0 cursor-pointer ${userSubTab === 'members' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'}`}>🎓 المخدومون ({membersList.length})</button>
+              <button onClick={() => setUserSubTab('parents')} className={`px-3 py-1.5 rounded-xl shrink-0 cursor-pointer ${userSubTab === 'parents' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'}`}>👨‍👩‍👦 أولياء الأمور والشعب ({parentsWorkersList.length})</button>
+              <button onClick={() => setUserSubTab('all')} className={`px-3 py-1.5 rounded-xl shrink-0 cursor-pointer ${userSubTab === 'all' ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-700 hover:bg-gray-100'}`}>📋 عرض الكل ({users.length})</button>
             </div>
-            {isAdmin && (
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => openBulkTransferModal('servant')}
-                  className="px-3.5 py-2.5 bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 text-xs font-black rounded-xl flex items-center gap-1 shadow-2xs cursor-pointer"
-                >
-                  <ArrowLeftRight size={15} /> نقل جماعي للخدام
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openBulkTransferModal('member')}
-                  className="px-3.5 py-2.5 bg-blue-100 hover:bg-blue-200 text-blue-950 border border-blue-300 text-xs font-black rounded-xl flex items-center gap-1 shadow-2xs cursor-pointer"
-                >
-                  <ArrowLeftRight size={15} /> نقل جماعي للمخدومين
-                </button>
-                <button onClick={openAdd} className="px-4 py-2.5 bg-[#7a1c24] text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow cursor-pointer">
-                  <UserPlus size={16} /> {addButtonLabel}
-                </button>
+
+            <div className="flex flex-wrap justify-between items-center gap-2">
+              <div className="relative flex-1 min-w-55 text-xs">
+                <Search size={15} className="absolute right-3 top-2.5 text-gray-400" />
+                <input type="text" placeholder="بحث بالاسم، اليوزر، التليفون، الفصل، أو القطاع..." className="w-full pr-9 pl-3 py-2 bg-white border rounded-xl outline-none focus:border-[#7a1c24]" value={searchQ} onChange={e => setSearchQ(e.target.value)} />
+              </div>
+              {isAdmin && (
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => openBulkTransferModal('servant')}
+                    className="px-3 py-2 bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 text-xs font-black rounded-xl flex items-center gap-1 shadow-2xs cursor-pointer"
+                  >
+                    <ArrowLeftRight size={14} /> نقل جماعي للخدام
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openBulkTransferModal('member')}
+                    className="px-3 py-2 bg-blue-100 hover:bg-blue-200 text-blue-950 border border-blue-300 text-xs font-black rounded-xl flex items-center gap-1 shadow-2xs cursor-pointer"
+                  >
+                    <ArrowLeftRight size={14} /> نقل جماعي للمخدومين
+                  </button>
+                  <button onClick={openAdd} className="px-3.5 py-2 bg-[#7a1c24] text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow cursor-pointer">
+                    <UserPlus size={15} /> {addButtonLabel}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {!shouldShowUsersList ? (
+              <div className="bg-white p-10 rounded-3xl border text-center space-y-2">
+                <Users size={34} className="mx-auto text-[#7a1c24]/70" />
+                <strong className="block text-sm text-gray-800">اختر الفئة المطلوبة من الأزرار بالأعلى أو اكتب في شريط البحث</strong>
+                <p className="text-xs text-gray-500">لا يتم عرض كل الحسابات دفعة واحدة للحفاظ على سرعة وخصوصية لوحة الإدارة.</p>
+              </div>
+            ) : (
+              <div className="max-h-[54vh] overflow-y-auto pr-1 grid gap-2.5">
+                {filteredUsers.length === 0 ? (
+                  <div className="bg-white p-8 rounded-2xl border text-center text-xs text-gray-400">لا توجد نتائج مطابقة</div>
+                ) : (
+                  filteredUsers.map(u => {
+                    const famTree = u.family_tree_id ? familiesTree.find(f => f.id === u.family_tree_id) : null;
+                    const isParentOfChild = parentIdsFromMembers.includes(u.id);
+                    const guardianKind = detectGuardianType(u);
+                    const canTransferUser = SERVANT_ROLES.includes(u.role) || u.role === 'member';
+                    const priestCoverage = u.role === 'priest' ? getPriestCoverage(u.id) : null;
+                    return (
+                      <div key={u.id} className="bg-white p-3.5 rounded-2xl border text-xs flex flex-wrap justify-between items-center gap-2.5 shadow-2xs">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <strong className="text-sm text-gray-950">{u.full_name}</strong>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-50 text-[#7a1c24]">{u.permissions?.custom_role_label || ROLE_LABELS[u.role] || u.role}</span>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-pink-50 text-pink-900">
+                              {u.gender === 'أنثى' ? '♀️ أنثى' : '♂️ ذكر'}
+                            </span>
+                            {u.role === 'parent' && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-950">
+                                {guardianKind === 'mother' ? '👩 الأم' : '👨 الأب'}
+                              </span>
+                            )}
+                            {isParentOfChild && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-950">👨‍👦 ولي أمر مسجل</span>}
+                            {u.role === 'priest' && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900">{u.priest_degree} {u.ordination_date ? `(سيامة: ${u.ordination_date})` : ''}</span>}
+
+                            {u.is_deacon && (
+                              <span className="px-2.5 py-0.5 rounded text-[10px] font-extrabold bg-purple-100 text-purple-900 border border-purple-200">
+                                🕯️ شماس: {getDeaconRankLabel(u.deacon_rank)}
+                              </span>
+                            )}
+
+                            {u.detailed_stage && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-900">{SERVANT_ROLES.includes(u.role) ? 'خادم' : 'مرحلة'}: {u.detailed_stage}</span>}
+                            {u.permissions?.service_gender_scope && SERVANT_ROLES.includes(u.role) && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-50 text-cyan-900">نطاق: {u.permissions.service_gender_scope}</span>}
+                            {u.assigned_class && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800">فصل: {u.assigned_class}</span>}
+                            {u.permissions?.manage_edu_center && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-900">🎓 مدير مركز تعليمي</span>}
+                            {u.permissions?.manage_trips && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-900">🚌 صلاحية رحلات</span>}
+                            {u.permissions?.manage_joseph && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-900">🕊️ لجنة يوسف الرامي</span>}
+                            {u.permissions?.can_edit_members && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900">✏️ يقدر يعدل</span>}
+                          </div>
+
+                          {priestCoverage && (
+                            <div className="text-[11px] bg-amber-50/70 border border-amber-200 px-2.5 py-1.5 rounded-xl text-amber-950 space-y-0.5">
+                              <div>
+                                <strong>✝ خدمات ماسكها ({priestCoverage.assignedServices.length}):</strong>{' '}
+                                {priestCoverage.assignedServices.length > 0 ? priestCoverage.assignedServices.join('، ') : 'غير محدد بعد'}
+                              </div>
+                              <div>
+                                <strong>⏳ خدمات غير ماسكها ({priestCoverage.unassignedServices.length}):</strong>{' '}
+                                {priestCoverage.unassignedServices.length > 0 ? priestCoverage.unassignedServices.join('، ') : 'ماسك كل الخدمات'}
+                              </div>
+                            </div>
+                          )}
+
+                          <p className="text-gray-500">
+                            يوزر: <code className="text-red-700 font-bold bg-red-50 px-1 rounded">{u.username}</code>
+                            {u.phone && ` • 📞 ${u.phone}`}
+                            {u.sector && ` • 📍 ${u.sector}`}
+                            {famTree && ` • 🌳 ${famTree.family_surname}`}
+                            {u.church_job && ` • 🛠️ ${u.church_job}`}
+                          </p>
+                        </div>
+                        {isAdmin && (
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {u.role === 'priest' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPriestTransferForm(prev => ({ ...prev, fromPriestId: u.id, mode: 'replace_priest' }));
+                                  setServicesSubTab('priest_transfer');
+                                  setActiveCard('services');
+                                }}
+                                className="px-2.5 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 rounded-xl font-bold flex items-center gap-1 cursor-pointer"
+                              >
+                                <ArrowLeftRight size={12} /> نقل / تعديل الكاهن
+                              </button>
+                            )}
+                            {canTransferUser && (
+                              <button
+                                type="button"
+                                onClick={() => openSingleTransferModal(u)}
+                                className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-200 rounded-xl font-bold flex items-center gap-1 cursor-pointer"
+                              >
+                                <ArrowLeftRight size={12} /> نقل
+                              </button>
+                            )}
+                            <button
+                              onClick={() => { setPermTargetUserId(u.id); setActiveCard('roles_permissions'); }}
+                              className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 rounded-xl font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <ShieldCheck size={12} /> الصلاحيات
+                            </button>
+                            <button onClick={() => openEdit(u)} className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl font-bold flex items-center gap-1 cursor-pointer"><Edit3 size={12} /> تعديل</button>
+                            {u.id !== currentUserId && (
+                              <button onClick={() => onDeleteUser(u.id)} className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold flex items-center gap-1 cursor-pointer"><Trash2 size={12} /> حذف</button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
               </div>
             )}
           </div>
+        )}
 
-          {!shouldShowUsersList ? (
-            <div className="bg-white p-10 rounded-3xl border text-center space-y-2">
-              <Users size={36} className="mx-auto text-[#7a1c24]/70" />
-              <strong className="block text-sm text-gray-800">اختر الفئة المطلوبة من الأزرار بالأعلى أو اكتب في شريط البحث</strong>
-              <p className="text-xs text-gray-500">لا يتم عرض كل الحسابات دفعة واحدة للحفاظ على سرعة وخصوصية لوحة الإدارة.</p>
-            </div>
-          ) : (
-            <div className="grid gap-3">
-              {filteredUsers.length === 0 ? (
-                <div className="bg-white p-8 rounded-2xl border text-center text-xs text-gray-400">لا توجد نتائج مطابقة</div>
-              ) : (
-                filteredUsers.map(u => {
-                  const famTree = u.family_tree_id ? familiesTree.find(f => f.id === u.family_tree_id) : null;
-                  const isParentOfChild = parentIdsFromMembers.includes(u.id);
-                  const guardianKind = detectGuardianType(u);
-                  const canTransferUser = SERVANT_ROLES.includes(u.role) || u.role === 'member';
-                  const priestCoverage = u.role === 'priest' ? getPriestCoverage(u.id) : null;
-                  return (
-                    <div key={u.id} className="bg-white p-4 rounded-3xl border text-xs flex flex-wrap justify-between items-center gap-3 shadow-sm">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <strong className="text-sm text-gray-950">{u.full_name}</strong>
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-50 text-[#7a1c24]">{u.permissions?.custom_role_label || ROLE_LABELS[u.role] || u.role}</span>
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-pink-50 text-pink-900">
-                            {u.gender === 'أنثى' ? '♀️ أنثى' : '♂️ ذكر'}
-                          </span>
-                          {u.role === 'parent' && (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-950">
-                              {guardianKind === 'mother' ? '👩 الأم' : '👨 الأب'}
-                            </span>
-                          )}
-                          {isParentOfChild && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-950">👨‍👦 ولي أمر مسجل</span>}
-                          {u.role === 'priest' && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900">{u.priest_degree} {u.ordination_date ? `(سيامة: ${u.ordination_date})` : ''}</span>}
-
-                          {u.is_deacon && (
-                            <span className="px-2.5 py-0.5 rounded text-[10px] font-extrabold bg-purple-100 text-purple-900 border border-purple-200">
-                              🕯️ شماس: {getDeaconRankLabel(u.deacon_rank)}
-                            </span>
-                          )}
-
-                          {u.detailed_stage && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-900">{SERVANT_ROLES.includes(u.role) ? 'خادم' : 'مرحلة'}: {u.detailed_stage}</span>}
-                          {u.permissions?.service_gender_scope && SERVANT_ROLES.includes(u.role) && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-50 text-cyan-900">نطاق: {u.permissions.service_gender_scope}</span>}
-                          {u.assigned_class && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800">فصل: {u.assigned_class}</span>}
-                          {u.permissions?.manage_edu_center && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-900">🎓 مدير مركز تعليمي</span>}
-                          {u.permissions?.manage_trips && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-900">🚌 صلاحية رحلات</span>}
-                          {u.permissions?.manage_joseph && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-900">🕊️ لجنة يوسف الرامي</span>}
-                          {u.permissions?.can_edit_members && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900">✏️ يقدر يعدل</span>}
-                        </div>
-
-                        {priestCoverage && (
-                          <div className="text-[11px] bg-amber-50/70 border border-amber-200 px-2.5 py-1.5 rounded-xl text-amber-950 space-y-0.5">
-                            <div>
-                              <strong>✝ خدمات ماسكها ({priestCoverage.assignedServices.length}):</strong>{' '}
-                              {priestCoverage.assignedServices.length > 0 ? priestCoverage.assignedServices.join('، ') : 'غير محدد بعد'}
-                            </div>
-                            <div>
-                              <strong>⏳ خدمات غير ماسكها ({priestCoverage.unassignedServices.length}):</strong>{' '}
-                              {priestCoverage.unassignedServices.length > 0 ? priestCoverage.unassignedServices.join('، ') : 'ماسك كل الخدمات'}
-                            </div>
-                          </div>
-                        )}
-
-                        <p className="text-gray-500">
-                          يوزر: <code className="text-red-700 font-bold bg-red-50 px-1 rounded">{u.username}</code>
-                          {u.phone && ` • 📞 ${u.phone}`}
-                          {u.sector && ` • 📍 ${u.sector}`}
-                          {famTree && ` • 🌳 ${famTree.family_surname}`}
-                          {u.church_job && ` • 🛠️ ${u.church_job}`}
-                        </p>
-                      </div>
-                      {isAdmin && (
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {u.role === 'priest' && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPriestTransferForm(prev => ({
-                                  ...prev,
-                                  fromPriestId: u.id,
-                                  mode: 'replace_priest'
-                                }));
-                                setActiveCard('services');
-                              }}
-                              className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 rounded-xl font-bold flex items-center gap-1 cursor-pointer"
-                            >
-                              <ArrowLeftRight size={13} /> نقل / تعديل الكاهن
-                            </button>
-                          )}
-                          {canTransferUser && (
-                            <button
-                              type="button"
-                              onClick={() => openSingleTransferModal(u)}
-                              className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-200 rounded-xl font-bold flex items-center gap-1 cursor-pointer"
-                            >
-                              <ArrowLeftRight size={13} /> نقل
-                            </button>
-                          )}
-                          <button
-                            onClick={() => {
-                              setPermTargetUserId(u.id);
-                              setActiveCard('roles_permissions');
-                            }}
-                            className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 rounded-xl font-bold flex items-center gap-1 cursor-pointer"
-                          >
-                            <ShieldCheck size={13} /> الصلاحيات
-                          </button>
-                          <button onClick={() => openEdit(u)} className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl font-bold flex items-center gap-1 cursor-pointer"><Edit3 size={13} /> تعديل</button>
-                          {u.id !== currentUserId && (
-                            <button onClick={() => onDeleteUser(u.id)} className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold flex items-center gap-1 cursor-pointer"><Trash2 size={13} /> حذف</button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeCard === 'events' && (
-        <div className="space-y-4 text-xs">
-          {renderTopBack('⛪ مواعيد القداسات والاجتماعات')}
-          {isAdmin && (
-            <form onSubmit={e => { e.preventDefault(); if (!requireAdminGuard()) return; if (editingEvId) { onUpdateEvent({ ...evForm, id: editingEvId }); setEditingEvId(null); } else { onAddEvent(evForm); } setEvForm(emptyEvent); }} className="bg-white p-4 rounded-3xl border space-y-3 font-bold shadow-sm">
-              <h3 className="text-sm font-extrabold flex items-center gap-1 text-[#7a1c24]"><CalendarPlus size={16} /> {editingEvId ? 'تعديل الموعد' : 'إضافة ميعاد قداس أو عشية أو اجتماع عام'}</h3>
-              <div className="grid md:grid-cols-3 gap-2">
-                <select className="p-2.5 border rounded-xl" value={evForm.event_type} onChange={e => setEvForm({ ...evForm, event_type: e.target.value })}>
-                  <option value="قداس إلهي">قداس إلهي</option><option value="عشية وتسبحة">عشية وتسبحة</option><option value="اجتماع عام">اجتماع عام</option><option value="نهضة / مناسبة">نهضة / مناسبة</option>
-                </select>
-                <input required placeholder="الاسم *" className="p-2.5 border rounded-xl" value={evForm.title} onChange={e => setEvForm({ ...evForm, title: e.target.value })} />
-                <input required placeholder="الموعد *" className="p-2.5 border rounded-xl" value={evForm.event_time} onChange={e => setEvForm({ ...evForm, event_time: e.target.value })} />
-              </div>
-              <div className="grid md:grid-cols-3 gap-2">
-                <input required placeholder="المكان *" className="p-2.5 border rounded-xl" value={evForm.place} onChange={e => setEvForm({ ...evForm, place: e.target.value })} />
-                <input placeholder="الأب الكاهن المصلي" className="p-2.5 border rounded-xl" value={evForm.priest_name} onChange={e => setEvForm({ ...evForm, priest_name: e.target.value })} />
-                <div className="flex gap-2">
-                  <button type="submit" className="flex-1 bg-[#7a1c24] text-white rounded-xl p-2.5 shadow cursor-pointer">{editingEvId ? 'حفظ التعديل' : 'حفظ الموعد'}</button>
-                  {editingEvId && <button type="button" onClick={() => { setEditingEvId(null); setEvForm(emptyEvent); }} className="px-3 border rounded-xl">إلغاء</button>}
+        {activeCard === 'events' && (
+          <div className="space-y-3 text-xs">
+            {renderTopBack('⛪ مواعيد القداسات والاجتماعات')}
+            {isAdmin && (
+              <form onSubmit={e => { e.preventDefault(); if (!requireAdminGuard()) return; if (editingEvId) { onUpdateEvent({ ...evForm, id: editingEvId }); setEditingEvId(null); } else { onAddEvent(evForm); } setEvForm(emptyEvent); }} className="bg-white p-4 rounded-2xl border space-y-2.5 font-bold shadow-2xs">
+                <h3 className="text-sm font-extrabold flex items-center gap-1 text-[#7a1c24]"><CalendarPlus size={15} /> {editingEvId ? 'تعديل الموعد' : 'إضافة ميعاد قداس أو عشية أو اجتماع عام'}</h3>
+                <div className="grid md:grid-cols-3 gap-2">
+                  <select className="p-2 border rounded-xl" value={evForm.event_type} onChange={e => setEvForm({ ...evForm, event_type: e.target.value })}>
+                    <option value="قداس إلهي">قداس إلهي</option><option value="عشية وتسبحة">عشية وتسبحة</option><option value="اجتماع عام">اجتماع عام</option><option value="نهضة / مناسبة">نهضة / مناسبة</option>
+                  </select>
+                  <input required placeholder="الاسم *" className="p-2 border rounded-xl" value={evForm.title} onChange={e => setEvForm({ ...evForm, title: e.target.value })} />
+                  <input required placeholder="الموعد *" className="p-2 border rounded-xl" value={evForm.event_time} onChange={e => setEvForm({ ...evForm, event_time: e.target.value })} />
                 </div>
-              </div>
-            </form>
-          )}
-          <div className="grid gap-2">
-            {events.map(ev => (
-              <div key={ev.id} className="bg-white p-3.5 rounded-2xl border flex justify-between items-center shadow-2xs gap-2">
-                <div><span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-bold text-[10px] ml-2">{ev.event_type}</span><strong className="text-sm text-gray-900">{ev.title}</strong><span className="text-gray-500 block mt-1">⏰ {ev.event_time} • 📍 {ev.place}</span></div>
-                {isAdmin && (
-                  <div className="flex gap-1.5">
-                    <button onClick={() => { setEditingEvId(ev.id); setEvForm({ ...emptyEvent, ...ev }); }} className="px-2.5 py-1.5 bg-gray-100 rounded-xl font-bold flex items-center gap-1 cursor-pointer"><Edit3 size={13} /> تعديل</button>
-                    <button onClick={() => onDeleteEvent(ev.id)} className="px-2.5 py-1.5 bg-red-50 text-red-700 rounded-xl font-bold flex items-center gap-1 cursor-pointer"><Trash2 size={13} /> حذف</button>
+                <div className="grid md:grid-cols-3 gap-2">
+                  <input required placeholder="المكان *" className="p-2 border rounded-xl" value={evForm.place} onChange={e => setEvForm({ ...evForm, place: e.target.value })} />
+                  <input placeholder="الأب الكاهن المصلي" className="p-2 border rounded-xl" value={evForm.priest_name} onChange={e => setEvForm({ ...evForm, priest_name: e.target.value })} />
+                  <div className="flex gap-2">
+                    <button type="submit" className="flex-1 bg-[#7a1c24] text-white rounded-xl p-2 shadow cursor-pointer">{editingEvId ? 'حفظ التعديل' : 'حفظ الموعد'}</button>
+                    {editingEvId && <button type="button" onClick={() => { setEditingEvId(null); setEvForm(emptyEvent); }} className="px-3 border rounded-xl">إلغاء</button>}
                   </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {activeCard === 'services' && (
-        <div className="space-y-4 text-xs">
-          {renderTopBack('🏫 الخدمات والاجتماعات والسنوات الدراسية وفصولها')}
-
-          <ServiceDrillDownCards
-            groups={effectiveGroups}
-            services={services}
-            users={users}
-            isAdmin={isAdmin}
-            onSelectService={(grp) => {
-              if (!isAdmin) return;
-              setSrvForm(prev => ({
-                ...prev,
-                stage_name: grp.group_name,
-                academic_year: ''
-              }));
-            }}
-            onSelectYear={(grp, yr) => {
-              if (!isAdmin) return;
-              setSrvForm(prev => ({
-                ...prev,
-                stage_name: grp.group_name,
-                academic_year: yr.yearName || ''
-              }));
-            }}
-            onQuickAddYear={handleQuickAddYearFromCard}
-            onQuickAddClassForYear={(grp, yr) => {
-              setEditingSrvId(null);
-              setSrvForm({
-                ...emptyService,
-                stage_name: grp.group_name,
-                academic_year: yr.yearName || '',
-                head_servant_name: grp.head_servant_name || ''
-              });
-              document.getElementById('add-class-form')?.scrollIntoView({ behavior: 'smooth' });
-            }}
-            onEditGroup={(grp, idx) => {
-              if (!grp.id) return alert('قم بتشغيل SQL جدول service_groups أولاً.');
-              setEditingGrpId(grp.id);
-              setGrpForm({
-                group_name: grp.group_name,
-                icon: grp.icon || '🏫',
-                gender_target: grp.gender_target || 'عام (الكل: ذكور وإناث)',
-                has_classes: grp.has_classes !== false,
-                head_servant_name: grp.head_servant_name || '',
-                servants_names: grp.servants_names || '',
-                service_day: grp.service_day || '',
-                start_time: grp.start_time || '',
-                end_time: grp.end_time || '',
-                stagesText: normalizeGroupStages(grp.stages).join(', '),
-                sort_order: grp.sort_order || idx + 1
-              });
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            onDeleteGroup={handleDeleteServiceGroup}
-            onTransferGroupPriest={(grp) => {
-              setPriestTransferForm(prev => ({
-                ...prev,
-                mode: 'by_service',
-                serviceName: grp.group_name,
-                yearFilter: ''
-              }));
-            }}
-            onEditClass={(cls, grp, yr) => {
-              setEditingSrvId(cls.id);
-              setSrvForm({
-                ...emptyService,
-                ...cls,
-                stage_name: grp?.group_name || cls.stage_name || '',
-                academic_year: yr?.yearName || '',
-                class_gender: 'عام'
-              });
-              document.getElementById('add-class-form')?.scrollIntoView({ behavior: 'smooth' });
-            }}
-            onDeleteClass={onDeleteService}
-            onTransferClassPriest={(cls) => {
-              setPriestTransferForm(prev => ({
-                ...prev,
-                mode: 'by_class',
-                classId: cls.id,
-                fromPriestId: cls.priest_id || ''
-              }));
-            }}
-          />
-
-          {isAdmin && (
-            <div className="bg-purple-50/50 p-4 rounded-3xl border-2 border-purple-200 space-y-3 font-bold shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-black flex items-center gap-1.5 text-purple-950">
-                  <ArrowLeftRight size={16} /> ✝ نقل وتعديل الكاهن المسؤول عن خدمة أو سنة دراسية أو فصل
-                </h3>
-                <div className="flex gap-1 text-[11px]">
-                  <button
-                    type="button"
-                    onClick={() => setPriestTransferForm(prev => ({ ...prev, mode: 'by_service' }))}
-                    className={`px-2.5 py-1 rounded-lg cursor-pointer ${priestTransferForm.mode === 'by_service' ? 'bg-purple-800 text-white' : 'bg-white border text-gray-700'}`}
-                  >
-                    حسب الخدمة / السنة
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPriestTransferForm(prev => ({ ...prev, mode: 'by_class' }))}
-                    className={`px-2.5 py-1 rounded-lg cursor-pointer ${priestTransferForm.mode === 'by_class' ? 'bg-purple-800 text-white' : 'bg-white border text-gray-700'}`}
-                  >
-                    حسب فصل محدد
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPriestTransferForm(prev => ({ ...prev, mode: 'replace_priest' }))}
-                    className={`px-2.5 py-1 rounded-lg cursor-pointer ${priestTransferForm.mode === 'replace_priest' ? 'bg-purple-800 text-white' : 'bg-white border text-gray-700'}`}
-                  >
-                    نقل كل فصول كاهن لكاهن
-                  </button>
                 </div>
-              </div>
-
-              <form onSubmit={handlePriestServiceTransfer} className="space-y-2.5">
-                <div className="grid md:grid-cols-4 gap-2">
-                  {priestTransferForm.mode === 'by_service' && (
-                    <>
-                      <div>
-                        <label className="block text-[10px] text-gray-600 mb-0.5">① الخدمة المستهدفة *</label>
-                        <select
-                          className="w-full p-2.5 border rounded-xl bg-white"
-                          value={priestTransferForm.serviceName}
-                          onChange={e => setPriestTransferForm(prev => ({ ...prev, serviceName: e.target.value, yearFilter: '' }))}
-                        >
-                          <option value="">-- اختر الخدمة --</option>
-                          {availableServantServices.map((s, idx) => <option key={idx} value={s}>{s}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] text-gray-600 mb-0.5">السنة الدراسية (اختياري)</label>
-                        <select
-                          className="w-full p-2.5 border rounded-xl bg-white"
-                          value={priestTransferForm.yearFilter}
-                          onChange={e => setPriestTransferForm(prev => ({ ...prev, yearFilter: e.target.value }))}
-                        >
-                          <option value="">-- كل سنوات الخدمة --</option>
-                          {priestTransferHierarchy.years.map((yr, idx) => (
-                            <option key={idx} value={yr.yearName}>{yr.yearName}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </>
+              </form>
+            )}
+            <div className="max-h-[45vh] overflow-y-auto pr-1 grid gap-2">
+              {events.map(ev => (
+                <div key={ev.id} className="bg-white p-3 rounded-2xl border flex justify-between items-center shadow-2xs gap-2">
+                  <div><span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-bold text-[10px] ml-2">{ev.event_type}</span><strong className="text-sm text-gray-900">{ev.title}</strong><span className="text-gray-500 block mt-0.5">⏰ {ev.event_time} • 📍 {ev.place}</span></div>
+                  {isAdmin && (
+                    <div className="flex gap-1.5">
+                      <button onClick={() => { setEditingEvId(ev.id); setEvForm({ ...emptyEvent, ...ev }); }} className="px-2.5 py-1.5 bg-gray-100 rounded-xl font-bold flex items-center gap-1 cursor-pointer"><Edit3 size={12} /> تعديل</button>
+                      <button onClick={() => onDeleteEvent(ev.id)} className="px-2.5 py-1.5 bg-red-50 text-red-700 rounded-xl font-bold flex items-center gap-1 cursor-pointer"><Trash2 size={12} /> حذف</button>
+                    </div>
                   )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-                  {priestTransferForm.mode === 'by_class' && (
-                    <div className="md:col-span-2">
-                      <label className="block text-[10px] text-gray-600 mb-0.5">① الفصل المحدد *</label>
-                      <select
-                        className="w-full p-2.5 border rounded-xl bg-white"
-                        value={priestTransferForm.classId}
-                        onChange={e => setPriestTransferForm(prev => ({ ...prev, classId: e.target.value }))}
-                      >
-                        <option value="">-- اختر الفصل --</option>
-                        {services.map(s => <option key={s.id} value={s.id}>{s.class_name} ({s.stage_name})</option>)}
+        {activeCard === 'services' && (
+          <div className="space-y-3 text-xs">
+            {renderTopBack('🏫 الخدمات والاجتماعات والسنوات الدراسية وفصولها')}
+
+            <div className="bg-white p-2 rounded-2xl border flex items-center gap-1.5 overflow-x-auto font-black shadow-2xs">
+              {[
+                { id: 'browse', label: '🗂️ تصفح الكروت (الخدمة ← السنة ← الفصل)' },
+                ...(isAdmin ? [
+                  { id: 'add', label: '➕ إضافة خدمة أو فصل' },
+                  { id: 'priest_transfer', label: '✝ نقل وتعديل الكاهن' }
+                ] : []),
+                { id: 'assign_groups', label: '👥 ربط الخدام والمجموعات' }
+              ].map(st => (
+                <button
+                  key={st.id}
+                  type="button"
+                  onClick={() => setServicesSubTab(st.id)}
+                  className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer ${
+                    servicesSubTab === st.id
+                      ? 'bg-[#7a1c24] text-white shadow-2xs'
+                      : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  {st.label}
+                </button>
+              ))}
+            </div>
+
+            {servicesSubTab === 'browse' && (
+              <ServiceDrillDownCards
+                groups={effectiveGroups}
+                services={services}
+                users={users}
+                isAdmin={isAdmin}
+                onSelectService={(grp) => {
+                  if (!isAdmin) return;
+                  setSrvForm(prev => ({ ...prev, stage_name: grp.group_name, academic_year: '' }));
+                }}
+                onSelectYear={(grp, yr) => {
+                  if (!isAdmin) return;
+                  setSrvForm(prev => ({ ...prev, stage_name: grp.group_name, academic_year: yr.yearName || '' }));
+                }}
+                onQuickAddYear={handleQuickAddYearFromCard}
+                onQuickAddClassForYear={(grp, yr) => {
+                  setEditingSrvId(null);
+                  setSrvForm({
+                    ...emptyService,
+                    stage_name: grp.group_name,
+                    academic_year: yr.yearName || '',
+                    head_servant_name: grp.head_servant_name || ''
+                  });
+                  setServicesSubTab('add');
+                }}
+                onEditGroup={(grp, idx) => {
+                  if (!grp.id) return alert('قم بتشغيل SQL جدول service_groups أولاً.');
+                  setEditingGrpId(grp.id);
+                  setGrpForm({
+                    group_name: grp.group_name,
+                    icon: grp.icon || '🏫',
+                    gender_target: grp.gender_target || 'عام (الكل: ذكور وإناث)',
+                    has_classes: grp.has_classes !== false,
+                    head_servant_name: grp.head_servant_name || '',
+                    servants_names: grp.servants_names || '',
+                    service_day: grp.service_day || '',
+                    start_time: grp.start_time || '',
+                    end_time: grp.end_time || '',
+                    stagesText: normalizeGroupStages(grp.stages).join(', '),
+                    sort_order: grp.sort_order || idx + 1
+                  });
+                  setServicesSubTab('add');
+                }}
+                onDeleteGroup={handleDeleteServiceGroup}
+                onTransferGroupPriest={(grp) => {
+                  setPriestTransferForm(prev => ({
+                    ...prev,
+                    mode: 'by_service',
+                    serviceName: grp.group_name,
+                    yearFilter: ''
+                  }));
+                  setServicesSubTab('priest_transfer');
+                }}
+                onEditClass={(cls, grp, yr) => {
+                  setEditingSrvId(cls.id);
+                  setSrvForm({
+                    ...emptyService,
+                    ...cls,
+                    stage_name: grp?.group_name || cls.stage_name || '',
+                    academic_year: yr?.yearName || '',
+                    class_gender: 'عام'
+                  });
+                  setServicesSubTab('add');
+                }}
+                onDeleteClass={onDeleteService}
+                onTransferClassPriest={(cls) => {
+                  setPriestTransferForm(prev => ({
+                    ...prev,
+                    mode: 'by_class',
+                    classId: cls.id,
+                    fromPriestId: cls.priest_id || ''
+                  }));
+                  setServicesSubTab('priest_transfer');
+                }}
+              />
+            )}
+
+            {servicesSubTab === 'priest_transfer' && isAdmin && (
+              <div className="bg-purple-50/50 p-4 rounded-3xl border-2 border-purple-200 space-y-3 font-bold shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-black flex items-center gap-1.5 text-purple-950">
+                    <ArrowLeftRight size={16} /> ✝ نقل وتعديل الكاهن المسؤول عن خدمة أو سنة دراسية أو فصل
+                  </h3>
+                  <div className="flex gap-1 text-[11px]">
+                    <button type="button" onClick={() => setPriestTransferForm(prev => ({ ...prev, mode: 'by_service' }))} className={`px-2.5 py-1 rounded-lg cursor-pointer ${priestTransferForm.mode === 'by_service' ? 'bg-purple-800 text-white' : 'bg-white border text-gray-700'}`}>حسب الخدمة / السنة</button>
+                    <button type="button" onClick={() => setPriestTransferForm(prev => ({ ...prev, mode: 'by_class' }))} className={`px-2.5 py-1 rounded-lg cursor-pointer ${priestTransferForm.mode === 'by_class' ? 'bg-purple-800 text-white' : 'bg-white border text-gray-700'}`}>حسب فصل محدد</button>
+                    <button type="button" onClick={() => setPriestTransferForm(prev => ({ ...prev, mode: 'replace_priest' }))} className={`px-2.5 py-1 rounded-lg cursor-pointer ${priestTransferForm.mode === 'replace_priest' ? 'bg-purple-800 text-white' : 'bg-white border text-gray-700'}`}>نقل كل فصول كاهن لكاهن</button>
+                  </div>
+                </div>
+
+                <form onSubmit={handlePriestServiceTransfer} className="space-y-2.5">
+                  <div className="grid md:grid-cols-4 gap-2">
+                    {priestTransferForm.mode === 'by_service' && (
+                      <>
+                        <div>
+                          <label className="block text-[10px] text-gray-600 mb-0.5">① الخدمة المستهدفة *</label>
+                          <select className="w-full p-2.5 border rounded-xl bg-white" value={priestTransferForm.serviceName} onChange={e => setPriestTransferForm(prev => ({ ...prev, serviceName: e.target.value, yearFilter: '' }))}>
+                            <option value="">-- اختر الخدمة --</option>
+                            {availableServantServices.map((s, idx) => <option key={idx} value={s}>{s}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-gray-600 mb-0.5">السنة الدراسية (اختياري)</label>
+                          <select className="w-full p-2.5 border rounded-xl bg-white" value={priestTransferForm.yearFilter} onChange={e => setPriestTransferForm(prev => ({ ...prev, yearFilter: e.target.value }))}>
+                            <option value="">-- كل سنوات الخدمة --</option>
+                            {priestTransferHierarchy.years.map((yr, idx) => <option key={idx} value={yr.yearName}>{yr.yearName}</option>)}
+                          </select>
+                        </div>
+                      </>
+                    )}
+
+                    {priestTransferForm.mode === 'by_class' && (
+                      <div className="md:col-span-2">
+                        <label className="block text-[10px] text-gray-600 mb-0.5">① الفصل المحدد *</label>
+                        <select className="w-full p-2.5 border rounded-xl bg-white" value={priestTransferForm.classId} onChange={e => setPriestTransferForm(prev => ({ ...prev, classId: e.target.value }))}>
+                          <option value="">-- اختر الفصل --</option>
+                          {services.map(s => <option key={s.id} value={s.id}>{s.class_name} ({s.stage_name})</option>)}
+                        </select>
+                      </div>
+                    )}
+
+                    {priestTransferForm.mode === 'replace_priest' && (
+                      <div>
+                        <label className="block text-[10px] text-gray-600 mb-0.5">① الكاهن الحالي المراد نقله *</label>
+                        <select className="w-full p-2.5 border rounded-xl bg-white" value={priestTransferForm.fromPriestId} onChange={e => setPriestTransferForm(prev => ({ ...prev, fromPriestId: e.target.value }))}>
+                          <option value="">-- اختر الكاهن الحالي --</option>
+                          {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+                        </select>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-[10px] text-gray-600 mb-0.5">② الأب الكاهن الجديد المسؤول *</label>
+                      <select required className="w-full p-2.5 border rounded-xl bg-white" value={priestTransferForm.toPriestId} onChange={e => setPriestTransferForm(prev => ({ ...prev, toPriestId: e.target.value }))}>
+                        <option value="">-- اختر الأب الكاهن --</option>
+                        {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
                       </select>
                     </div>
-                  )}
 
-                  {priestTransferForm.mode === 'replace_priest' && (
-                    <div>
-                      <label className="block text-[10px] text-gray-600 mb-0.5">① الكاهن الحالي المراد نقله *</label>
+                    <div className="flex items-end">
+                      <button type="submit" disabled={savingPriestTransfer} className="w-full p-2.5 bg-purple-800 hover:bg-purple-900 text-white rounded-xl cursor-pointer shadow">
+                        {savingPriestTransfer ? 'جاري التحديث...' : 'تطبيق نقل / تعديل الكاهن'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {priestTransferForm.mode !== 'replace_priest' && (
+                    <div className="max-w-xs">
+                      <label className="block text-[10px] text-gray-600 mb-0.5">تصفية بكاهن سابق محدد (اختياري)</label>
                       <select
-                        className="w-full p-2.5 border rounded-xl bg-white"
+                        className="w-full p-2 border rounded-xl bg-white text-[11px]"
                         value={priestTransferForm.fromPriestId}
                         onChange={e => setPriestTransferForm(prev => ({ ...prev, fromPriestId: e.target.value }))}
                       >
-                        <option value="">-- اختر الكاهن الحالي --</option>
+                        <option value="">-- الكل --</option>
                         {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
                       </select>
                     </div>
                   )}
 
-                  <div>
-                    <label className="block text-[10px] text-gray-600 mb-0.5">② الأب الكاهن الجديد المسؤول *</label>
-                    <select
-                      required
-                      className="w-full p-2.5 border rounded-xl bg-white"
-                      value={priestTransferForm.toPriestId}
-                      onChange={e => setPriestTransferForm(prev => ({ ...prev, toPriestId: e.target.value }))}
-                    >
-                      <option value="">-- اختر الأب الكاهن --</option>
-                      {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-                    </select>
-                  </div>
+                  <label className="flex items-center gap-2 text-[11px] text-purple-950 cursor-pointer">
+                    <input type="checkbox" checked={priestTransferForm.syncPriestSupervisedServices} onChange={e => setPriestTransferForm(prev => ({ ...prev, syncPriestSupervisedServices: e.target.checked }))} />
+                    تحديث قائمة الخدمات المسندة للكاهن تلقائياً (اللي ماسكها واللي مش ماسكها)
+                  </label>
 
-                  <div className="flex items-end">
-                    <button
-                      type="submit"
-                      disabled={savingPriestTransfer}
-                      className="w-full p-2.5 bg-purple-800 hover:bg-purple-900 text-white rounded-xl cursor-pointer shadow"
-                    >
-                      {savingPriestTransfer ? 'جاري التحديث...' : 'تطبيق نقل / تعديل الكاهن'}
-                    </button>
-                  </div>
-                </div>
-
-                {priestTransferForm.mode !== 'replace_priest' && (
-                  <div className="max-w-xs">
-                    <label className="block text-[10px] text-gray-600 mb-0.5">تصفية بكاهن سابق محدد (اختياري)</label>
-                    <select
-                      className="w-full p-2 border rounded-xl bg-white text-[11px]"
-                      value={priestTransferForm.fromPriestId}
-                      onChange={e => setPriestTransferForm(prev => ({ ...prev, fromPriestId: e.target.value }))}
-                    >
-                      <option value="">-- الكل --</option>
-                      {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-                    </select>
-                  </div>
-                )}
-
-                <label className="flex items-center gap-2 text-[11px] text-purple-950 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={priestTransferForm.syncPriestSupervisedServices}
-                    onChange={e => setPriestTransferForm(prev => ({ ...prev, syncPriestSupervisedServices: e.target.checked }))}
-                  />
-                  تحديث قائمة الخدمات المسندة للكاهن تلقائياً (اللي ماسكها واللي مش ماسكها)
-                </label>
-
-                {priestsList.length > 0 && (
-                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
-                    {priestsList.map(pr => {
-                      const cov = getPriestCoverage(pr.id);
-                      return (
-                        <div key={pr.id} className="bg-white p-2.5 rounded-2xl border space-y-1 text-[11px]">
-                          <div className="font-black text-gray-900">✝ {pr.full_name}</div>
-                          <div className="text-emerald-900">
-                            <strong>ماسك:</strong> {cov.assignedServices.length > 0 ? cov.assignedServices.join('، ') : 'لا يوجد'}
+                  {priestsList.length > 0 && (
+                    <div className="max-h-48 overflow-y-auto grid sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
+                      {priestsList.map(pr => {
+                        const cov = getPriestCoverage(pr.id);
+                        return (
+                          <div key={pr.id} className="bg-white p-2.5 rounded-2xl border space-y-1 text-[11px]">
+                            <div className="font-black text-gray-900">✝ {pr.full_name}</div>
+                            <div className="text-emerald-900"><strong>ماسك:</strong> {cov.assignedServices.length > 0 ? cov.assignedServices.join('، ') : 'لا يوجد'}</div>
+                            <div className="text-gray-500"><strong>مش ماسك:</strong> {cov.unassignedServices.length > 0 ? cov.unassignedServices.join('، ') : 'ماسك الكل'}</div>
                           </div>
-                          <div className="text-gray-500">
-                            <strong>مش ماسك:</strong> {cov.unassignedServices.length > 0 ? cov.unassignedServices.join('، ') : 'ماسك الكل'}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </form>
-            </div>
-          )}
-
-          {isAdmin && (
-            <div className="bg-amber-50/50 p-4 rounded-3xl border-2 border-amber-300 space-y-3 font-bold shadow-sm">
-              <h3 className="text-sm font-extrabold flex items-center gap-1.5 text-[#7a1c24]">
-                <Layers size={16} /> {editingGrpId ? '✏️ تعديل الخدمة / الاجتماع' : '① أولاً: إضافة خدمة أو اجتماع والسنوات الدراسية التابعة لها'}
-              </h3>
-              <form onSubmit={handleSaveServiceGroup} className="space-y-3">
-                <div className="grid md:grid-cols-4 gap-2">
-                  <input
-                    required
-                    placeholder="اسم الخدمة (مثال: خدمة ابتدائي / حضانة / شعب عام) *"
-                    className="md:col-span-2 p-2.5 border rounded-xl bg-white"
-                    value={grpForm.group_name}
-                    onChange={e => setGrpForm({ ...grpForm, group_name: e.target.value })}
-                  />
-                  <select
-                    className="p-2.5 border rounded-xl bg-white"
-                    value={grpForm.has_classes ? 'yes' : 'no'}
-                    onChange={e => {
-                      const hasCls = e.target.value === 'yes';
-                      setGrpForm({
-                        ...grpForm,
-                        has_classes: hasCls,
-                        icon: hasCls ? '🏫' : '🕊️',
-                        gender_target: !hasCls ? 'عام (الكل: ذكور وإناث)' : grpForm.gender_target
-                      });
-                    }}
-                  >
-                    <option value="yes">📚 خدمة لها سنوات / فصول بداخلها</option>
-                    <option value="no">🕊️ اجتماع عام / خدمة بدون فصول</option>
-                  </select>
-                  <select
-                    className="p-2.5 border rounded-xl bg-white"
-                    value={grpForm.gender_target || 'عام (الكل: ذكور وإناث)'}
-                    onChange={e => setGrpForm({ ...grpForm, gender_target: e.target.value })}
-                  >
-                    <option value="عام (الكل: ذكور وإناث)">👥 عام (الكل: ذكور وإناث)</option>
-                    <option value="ذكور / بنين فقط">♂️ ذكور / بنين فقط</option>
-                    <option value="إناث / بنات فقط">♀️ إناث / بنات فقط</option>
-                    <option value="أطفال (بنين وبنات)">🧸 أطفال (بنين وبنات)</option>
-                    <option value="مقسمة (بنين / بنات)">⚖️ مقسمة (بنين / بنات)</option>
-                  </select>
-                </div>
-
-                <div className="grid md:grid-cols-2 gap-2 bg-white p-3 rounded-2xl border">
-                  <div>
-                    <label className="block text-[10px] text-gray-600 mb-1">⭐ أمين الخدمة / المسؤول (اختيار أو كتابة):</label>
-                    <div className="flex gap-1.5">
-                      <select
-                        className="p-2 border rounded-xl bg-gray-50 text-[11px] max-w-40"
-                        value=""
-                        onChange={e => { if (e.target.value) setGrpForm({ ...grpForm, head_servant_name: e.target.value }); }}
-                      >
-                        <option value="">-- اختر أمين --</option>
-                        {servantsList.map(sv => <option key={sv.id} value={sv.full_name}>{sv.full_name}</option>)}
-                      </select>
-                      <input
-                        placeholder="اسم أمين الخدمة..."
-                        className="flex-1 p-2 border rounded-xl bg-white"
-                        value={grpForm.head_servant_name || ''}
-                        onChange={e => setGrpForm({ ...grpForm, head_servant_name: e.target.value })}
-                      />
+                        );
+                      })}
                     </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="block text-[10px] text-gray-600">👥 الخدام بالخدمة (اختيار متعدد أو كتابة):</label>
-                    <div className="flex gap-1.5">
+                  )}
+                </form>
+              </div>
+            )}
+
+            {servicesSubTab === 'add' && isAdmin && (
+              <div className="grid lg:grid-cols-2 gap-3">
+                <div className="bg-amber-50/50 p-4 rounded-3xl border-2 border-amber-300 space-y-3 font-bold shadow-2xs">
+                  <h3 className="text-sm font-extrabold flex items-center gap-1.5 text-[#7a1c24]">
+                    <Layers size={15} /> {editingGrpId ? '✏️ تعديل الخدمة / الاجتماع' : '① أولاً: إضافة خدمة أو اجتماع والسنوات الدراسية التابعة لها'}
+                  </h3>
+                  <form onSubmit={handleSaveServiceGroup} className="space-y-2.5">
+                    <input required placeholder="اسم الخدمة (مثال: خدمة ابتدائي / حضانة / شعب عام) *" className="w-full p-2.5 border rounded-xl bg-white" value={grpForm.group_name} onChange={e => setGrpForm({ ...grpForm, group_name: e.target.value })} />
+                    <div className="grid grid-cols-2 gap-2">
                       <select
-                        className="p-2 border rounded-xl bg-gray-50 text-[11px] max-w-40"
-                        value=""
+                        className="p-2.5 border rounded-xl bg-white"
+                        value={grpForm.has_classes ? 'yes' : 'no'}
                         onChange={e => {
-                          const v = e.target.value;
-                          if (!v) return;
-                          const cur = splitList(grpForm.servants_names);
-                          if (!cur.includes(v)) setGrpForm({ ...grpForm, servants_names: [...cur, v].join(', ') });
+                          const hasCls = e.target.value === 'yes';
+                          setGrpForm({
+                            ...grpForm,
+                            has_classes: hasCls,
+                            icon: hasCls ? '🏫' : '🕊️',
+                            gender_target: !hasCls ? 'عام (الكل: ذكور وإناث)' : grpForm.gender_target
+                          });
                         }}
                       >
-                        <option value="">+ إضافة خادم --</option>
-                        {servantsList.map(sv => <option key={sv.id} value={sv.full_name}>{sv.full_name}</option>)}
+                        <option value="yes">📚 خدمة لها سنوات / فصول بداخلها</option>
+                        <option value="no">🕊️ اجتماع عام / خدمة بدون فصول</option>
                       </select>
-                      <input
-                        placeholder="أسماء الخدام (مفصولة بفاصلة)..."
-                        className="flex-1 p-2 border rounded-xl bg-white"
-                        value={grpForm.servants_names || ''}
-                        onChange={e => setGrpForm({ ...grpForm, servants_names: e.target.value })}
-                      />
-                    </div>
-                    {selectedServantTagsInForm.length > 0 && (
-                      <div className="flex flex-wrap gap-1 pt-0.5">
-                        {selectedServantTagsInForm.map((name, i) => (
-                          <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-950 rounded-lg text-[10px]">
-                            {name}
-                            <button
-                              type="button"
-                              onClick={() => setGrpForm({ ...grpForm, servants_names: selectedServantTagsInForm.filter((_, idx) => idx !== i).join(', ') })}
-                              className="text-red-700 hover:text-red-900 cursor-pointer"
-                            >
-                              <X size={11} />
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                  <div>
-                    <label className="block text-[10px] text-gray-600 mb-0.5">يوم الخدمة / الاجتماع</label>
-                    <input
-                      placeholder="مثال: الجمعة"
-                      className="w-full p-2 border rounded-xl bg-white"
-                      value={grpForm.service_day || ''}
-                      onChange={e => setGrpForm({ ...grpForm, service_day: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-gray-600 mb-0.5">من الساعة</label>
-                    <input
-                      type="time"
-                      className="w-full p-2 border rounded-xl bg-white"
-                      value={grpForm.start_time || ''}
-                      onChange={e => setGrpForm({ ...grpForm, start_time: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-gray-600 mb-0.5">إلى الساعة</label>
-                    <input
-                      type="time"
-                      className="w-full p-2 border rounded-xl bg-white"
-                      value={grpForm.end_time || ''}
-                      onChange={e => setGrpForm({ ...grpForm, end_time: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-gray-600 mb-0.5">الأيقونة</label>
-                    <input
-                      placeholder="🏫"
-                      className="w-full p-2 border rounded-xl bg-white text-center"
-                      value={grpForm.icon}
-                      onChange={e => setGrpForm({ ...grpForm, icon: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-gray-600 mb-0.5">الترتيب</label>
-                    <input
-                      type="number"
-                      min="1"
-                      className="w-full p-2 border rounded-xl bg-white text-center"
-                      value={grpForm.sort_order}
-                      onChange={e => setGrpForm({ ...grpForm, sort_order: e.target.value })}
-                    />
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <input
-                    placeholder="السنوات الدراسية أو المراحل الفرعية جوه الخدمة (مثال: أولى ابتدائي, ثانية ابتدائي أو KG 1, KG 2)"
-                    className="flex-1 min-w-55 p-2.5 border rounded-xl bg-white font-normal"
-                    value={grpForm.stagesText}
-                    onChange={e => setGrpForm({ ...grpForm, stagesText: e.target.value })}
-                  />
-                  <button type="submit" className="px-5 py-2.5 bg-[#7a1c24] text-white rounded-xl cursor-pointer shadow">
-                    {editingGrpId ? 'حفظ التعديل' : '+ حفظ الخدمة / الاجتماع'}
-                  </button>
-                  {editingGrpId && (
-                    <button
-                      type="button"
-                      onClick={() => { setEditingGrpId(null); setGrpForm({ ...emptyGroup, sort_order: effectiveGroups.length + 1 }); }}
-                      className="px-4 py-2 border rounded-xl bg-white"
-                    >
-                      إلغاء
-                    </button>
-                  )}
-                </div>
-              </form>
-            </div>
-          )}
-
-          {isAdmin && (
-            <form
-              id="add-class-form"
-              onSubmit={e => {
-                e.preventDefault();
-                if (!requireAdminGuard()) return;
-                const chosenServiceName = srvForm.stage_name || groupsWithClasses[0]?.group_name || '';
-                if (!chosenServiceName) return alert('أضف أولاً خدمة لها فصول ثم اخترها هنا');
-
-                const yearTag = String(srvForm.academic_year || '').trim();
-                const baseClassName = String(srvForm.class_name || '').trim();
-                const fullClassTitle = yearTag && !baseClassName.includes(yearTag)
-                  ? `${yearTag} - ${baseClassName}`
-                  : baseClassName;
-
-                const finalClassName =
-                  srvForm.class_gender && srvForm.class_gender !== 'عام' && !fullClassTitle.includes(srvForm.class_gender)
-                    ? `${fullClassTitle} (${srvForm.class_gender})`
-                    : fullClassTitle;
-
-                const { class_gender, academic_year, ...cleanSrv } = srvForm;
-                const payload = {
-                  ...cleanSrv,
-                  class_name: finalClassName,
-                  stage_name: yearTag || chosenServiceName,
-                  priest_id: srvForm.priest_id || null
-                };
-                if (editingSrvId) { onUpdateService({ ...payload, id: editingSrvId }); setEditingSrvId(null); }
-                else { onAddService(payload); }
-                setSrvForm({ ...emptyService, stage_name: chosenServiceName, academic_year: yearTag });
-              }}
-              className="bg-white p-4 rounded-3xl border space-y-3 font-bold shadow-sm"
-            >
-              <h3 className="text-sm font-extrabold flex items-center gap-1 text-[#7a1c24]">
-                <BookOpen size={16} /> {editingSrvId ? '✏️ تعديل الفصل' : '② ثانياً: إضافة فصل (باسم قديس مثلاً) وربطه بالخدمة والسنة الدراسية'}
-              </h3>
-              <div className="grid md:grid-cols-4 gap-2">
-                <div>
-                  <label className="block text-[10px] text-gray-600 mb-0.5">① الخدمة *</label>
-                  <select
-                    required
-                    className="w-full p-2.5 border rounded-xl bg-amber-50/50"
-                    value={chosenClassServiceName}
-                    onChange={e => setSrvForm({ ...srvForm, stage_name: e.target.value, academic_year: '' })}
-                  >
-                    <option value="">-- اختر الخدمة * --</option>
-                    {groupsWithClasses.map((g, i) => (
-                      <option key={g.id || i} value={g.group_name}>
-                        {g.icon || '🏫'} {g.group_name} ({g.gender_target || 'عام'})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] text-gray-600 mb-0.5">② العام الدراسي / المرحلة الفرعية</label>
-                  <select
-                    className="w-full p-2.5 border rounded-xl bg-white"
-                    value={srvForm.academic_year || ''}
-                    onChange={e => setSrvForm({ ...srvForm, academic_year: e.target.value })}
-                  >
-                    <option value="">-- عام / بدون سنة محددة --</option>
-                    {selectedServiceHierarchy.years.map((yr, yIdx) => (
-                      <option key={yIdx} value={yr.yearName}>{yr.yearName}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] text-gray-600 mb-0.5">③ اسم الفصل (قديس أو فصل) *</label>
-                  <input
-                    required
-                    placeholder="مثال: فصل مارمينا / مارجرجس *"
-                    className="w-full p-2.5 border rounded-xl"
-                    value={srvForm.class_name}
-                    onChange={e => setSrvForm({ ...srvForm, class_name: e.target.value })}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] text-gray-600 mb-0.5">نوع الفصل والأب الكاهن</label>
-                  <div className="flex gap-1.5">
-                    <select
-                      className="p-2.5 border rounded-xl bg-white"
-                      value={srvForm.class_gender || 'عام'}
-                      onChange={e => setSrvForm({ ...srvForm, class_gender: e.target.value })}
-                    >
-                      <option value="عام">👥 عام</option>
-                      <option value="بنين">♂️ بنين</option>
-                      <option value="بنات">♀️ بنات</option>
-                    </select>
-                    <select className="flex-1 p-2.5 border rounded-xl bg-amber-50/40" value={srvForm.priest_id || ''} onChange={e => setSrvForm({ ...srvForm, priest_id: e.target.value })}>
-                      <option value="">-- الكاهن --</option>
-                      {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {selectedClassServiceObj?.gender_target?.includes('متقسمة') && (
-                <p className="text-[11px] text-amber-900 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-200">
-                  💡 الخدمة المختارة ({selectedClassServiceObj.group_name}) مقسّمة — حدد من القائمة هل الفصل ده **بنين** أم **بنات**.
-                </p>
-              )}
-
-              <div className="grid md:grid-cols-4 gap-2">
-                <input placeholder="أمين الفصل / الخدمة" className="p-2.5 border rounded-xl" value={srvForm.head_servant_name} onChange={e => setSrvForm({ ...srvForm, head_servant_name: e.target.value })} />
-                <input placeholder="مساعد / خدام الفصل" className="p-2.5 border rounded-xl" value={srvForm.vice_head_name} onChange={e => setSrvForm({ ...srvForm, vice_head_name: e.target.value })} />
-                <input placeholder="ميعاد وقاعة الفصل" className="p-2.5 border rounded-xl" value={srvForm.meeting_time} onChange={e => setSrvForm({ ...srvForm, meeting_time: e.target.value })} />
-                <div className="flex gap-2">
-                  <button type="submit" className="flex-1 bg-[#7a1c24] text-white rounded-xl p-2.5 shadow cursor-pointer">{editingSrvId ? 'حفظ التعديل' : 'حفظ الفصل للخدمة'}</button>
-                  {editingSrvId && <button type="button" onClick={() => { setEditingSrvId(null); setSrvForm(emptyService); }} className="px-3 border rounded-xl">إلغاء</button>}
-                </div>
-              </div>
-            </form>
-          )}
-
-          <div className="grid md:grid-cols-2 gap-3">
-            {effectiveGroups.map((grp, idx) => {
-              const groupKey = String(grp.id || grp.group_name || idx);
-              const hierarchy = getServiceHierarchy(grp.group_name);
-              const stagesArr = hierarchy.years.map(y => y.yearName);
-              const subScopeOptions = [...new Set([grp.group_name, ...stagesArr, ...hierarchy.allClasses.map(c => c.value)].filter(Boolean))];
-              const selectedQuickScope = quickAssignByGroup[groupKey]?.scope || grp.group_name;
-              const selectedQuickUserId = quickAssignByGroup[groupKey]?.userId || '';
-
-              const linkedUsersForGroup = assignableUsersList.filter(u => {
-                const uStages = splitList(`${u.detailed_stage || ''} ${u.service_stage || ''}`);
-                const uExtra = Array.isArray(u.permissions?.extra_services) ? u.permissions.extra_services : [];
-                const combined = [...uStages, ...uExtra];
-                return subScopeOptions.some(opt => combined.includes(opt) || combined.some(item => item.includes(opt)));
-              });
-
-              const classesInThisService = hierarchy.allClasses.filter(c => !c.isVirtual && c.rawClass).map(c => c.rawClass);
-
-              const priestsInThisService = [...new Set(
-                classesInThisService.map(c => c.priest_id).filter(Boolean)
-              )].map(pid => priestsList.find(p => p.id === pid)).filter(Boolean);
-
-              return (
-                <div key={groupKey} className="bg-white p-4 rounded-3xl border-2 border-gray-200 space-y-3 shadow-2xs">
-                  <div className="flex flex-wrap justify-between items-start gap-2 border-b pb-2.5">
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-xl">{grp.icon || (grp.has_classes !== false ? '🏫' : '🕊️')}</span>
-                        <strong className="text-sm text-[#7a1c24]">{grp.group_name}</strong>
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-900">
-                          {grp.gender_target || 'عام (الكل: ذكور وإناث)'}
-                        </span>
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${grp.has_classes !== false ? 'bg-emerald-50 text-emerald-900' : 'bg-purple-50 text-purple-900'}`}>
-                          {grp.has_classes !== false ? '📚 لها سنوات / فصول' : '🕊️ اجتماع عام بدون فصول'}
-                        </span>
-                      </div>
-                      {(grp.service_day || grp.start_time) && (
-                        <p className="text-[11px] text-amber-900 font-bold">
-                          ⏰ {grp.service_day} {grp.start_time && `من ${grp.start_time}`} {grp.end_time && `إلى ${grp.end_time}`}
-                        </p>
-                      )}
-                      {priestsInThisService.length > 0 && (
-                        <p className="text-[11px] text-purple-900">
-                          ✝ <strong>الكاهن المسؤول:</strong> {priestsInThisService.map(p => p.full_name).join('، ')}
-                        </p>
-                      )}
-                      {grp.head_servant_name && (
-                        <p className="text-[11px] text-gray-800">⭐ <strong>الأمين:</strong> {grp.head_servant_name}</p>
-                      )}
-                      {grp.servants_names && (
-                        <p className="text-[11px] text-gray-600">👥 <strong>الخدام:</strong> {grp.servants_names}</p>
-                      )}
-                      {stagesArr.length > 0 && (
-                        <p className="text-[11px] text-gray-500">السنوات / المراحل: {stagesArr.join(' • ')}</p>
-                      )}
+                      <select className="p-2.5 border rounded-xl bg-white" value={grpForm.gender_target || 'عام (الكل: ذكور وإناث)'} onChange={e => setGrpForm({ ...grpForm, gender_target: e.target.value })}>
+                        <option value="عام (الكل: ذكور وإناث)">👥 عام (الكل: ذكور وإناث)</option>
+                        <option value="ذكور / بنين فقط">♂️ ذكور / بنين فقط</option>
+                        <option value="إناث / بنات فقط">♀️ إناث / بنات فقط</option>
+                        <option value="أطفال (بنين وبنات)">🧸 أطفال (بنين وبنات)</option>
+                        <option value="مقسمة (بنين / بنات)">⚖️ مقسمة (بنين / بنات)</option>
+                      </select>
                     </div>
 
-                    {isAdmin && (
-                      <div className="flex flex-wrap gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setPriestTransferForm(prev => ({
-                            ...prev,
-                            mode: 'by_service',
-                            serviceName: grp.group_name,
-                            yearFilter: ''
-                          }))}
-                          className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-950 rounded-lg font-bold cursor-pointer"
-                        >
-                          ✝ نقل كاهن الخدمة
-                        </button>
-                        {grp.has_classes !== false && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingSrvId(null);
-                              setSrvForm({
-                                ...emptyService,
-                                stage_name: grp.group_name,
-                                academic_year: stagesArr[0] || '',
-                                head_servant_name: grp.head_servant_name || ''
-                              });
-                              document.getElementById('add-class-form')?.scrollIntoView({ behavior: 'smooth' });
-                            }}
-                            className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 rounded-lg font-bold cursor-pointer"
-                          >
-                            + إضافة فصل
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!grp.id) return alert('قم بتشغيل SQL جدول service_groups أولاً.');
-                            setEditingGrpId(grp.id);
-                            setGrpForm({
-                              group_name: grp.group_name,
-                              icon: grp.icon || '🏫',
-                              gender_target: grp.gender_target || 'عام (الكل: ذكور وإناث)',
-                              has_classes: grp.has_classes !== false,
-                              head_servant_name: grp.head_servant_name || '',
-                              servants_names: grp.servants_names || '',
-                              service_day: grp.service_day || '',
-                              start_time: grp.start_time || '',
-                              end_time: grp.end_time || '',
-                              stagesText: normalizeGroupStages(grp.stages).join(', '),
-                              sort_order: grp.sort_order || idx + 1
-                            });
-                            window.scrollTo({ top: 0, behavior: 'smooth' });
-                          }}
-                          className="p-1.5 bg-gray-100 hover:bg-amber-100 rounded-lg cursor-pointer"
-                          title="تعديل"
-                        >
-                          <Edit3 size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteServiceGroup(grp)}
-                          className="p-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg cursor-pointer"
-                          title="حذف"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {isAdmin && (
-                    <div className="bg-emerald-50/50 p-2.5 rounded-2xl border border-emerald-200 space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-black text-emerald-950 flex items-center gap-1">
-                          <UserCheck size={13} /> ربط خدام أو مخدومين بـ ({grp.group_name}):
-                        </span>
-                        <span className="text-[10px] font-bold text-emerald-800">
-                          {linkedUsersForGroup.length} مرتبط
-                        </span>
-                      </div>
-
-                      <div className="flex flex-wrap gap-1.5">
-                        {subScopeOptions.length > 1 && (
+                    <div className="bg-white p-2.5 rounded-2xl border space-y-2">
+                      <div>
+                        <label className="block text-[10px] text-gray-600 mb-1">⭐ أمين الخدمة / المسؤول (اختيار أو كتابة):</label>
+                        <div className="flex gap-1.5">
                           <select
-                            className="p-1.5 border rounded-xl bg-white text-[11px] font-bold"
-                            value={selectedQuickScope}
-                            onChange={e => setQuickAssignByGroup(prev => ({
-                              ...prev,
-                              [groupKey]: { ...(prev[groupKey] || {}), scope: e.target.value }
-                            }))}
+                            className="p-2 border rounded-xl bg-gray-50 text-[11px] max-w-36"
+                            value=""
+                            onChange={e => { if (e.target.value) setGrpForm({ ...grpForm, head_servant_name: e.target.value }); }}
                           >
-                            {subScopeOptions.map((opt, oIdx) => (
-                              <option key={oIdx} value={opt}>{opt}</option>
-                            ))}
+                            <option value="">-- اختر أمين --</option>
+                            {servantsList.map(sv => <option key={sv.id} value={sv.full_name}>{sv.full_name}</option>)}
                           </select>
-                        )}
-
-                        <select
-                          className="flex-1 min-w-40 p-1.5 border rounded-xl bg-white text-[11px] font-bold"
-                          value={selectedQuickUserId}
-                          onChange={e => setQuickAssignByGroup(prev => ({
-                            ...prev,
-                            [groupKey]: {
-                              scope: prev[groupKey]?.scope || grp.group_name,
-                              userId: e.target.value
-                            }
-                          }))}
-                        >
-                          <option value="">-- اختر خادم أو مخدوم لربطه --</option>
-                          {assignableUsersList.map(u => (
-                            <option key={u.id} value={u.id}>
-                              {u.full_name} ({ROLE_LABELS[u.role] || u.role})
-                            </option>
-                          ))}
-                        </select>
-
-                        <button
-                          type="button"
-                          disabled={!selectedQuickUserId || assigningGroupKey === groupKey}
-                          onClick={async () => {
-                            if (!selectedQuickUserId) return;
-                            await handleToggleUserServiceAssignment(selectedQuickUserId, selectedQuickScope, true, groupKey);
-                            setQuickAssignByGroup(prev => ({
-                              ...prev,
-                              [groupKey]: { ...(prev[groupKey] || {}), userId: '' }
-                            }));
-                          }}
-                          className="px-3 py-1.5 bg-[#7a1c24] disabled:bg-gray-300 text-white rounded-xl text-[11px] font-black cursor-pointer"
-                        >
-                          {assigningGroupKey === groupKey ? 'جاري الربط...' : '+ ربط بالخدمة'}
-                        </button>
+                          <input placeholder="اسم أمين الخدمة..." className="flex-1 p-2 border rounded-xl bg-white" value={grpForm.head_servant_name || ''} onChange={e => setGrpForm({ ...grpForm, head_servant_name: e.target.value })} />
+                        </div>
                       </div>
+                      <div className="space-y-1">
+                        <label className="block text-[10px] text-gray-600">👥 الخدام بالخدمة (اختيار متعدد أو كتابة):</label>
+                        <div className="flex gap-1.5">
+                          <select
+                            className="p-2 border rounded-xl bg-gray-50 text-[11px] max-w-36"
+                            value=""
+                            onChange={e => {
+                              const v = e.target.value;
+                              if (!v) return;
+                              const cur = splitList(grpForm.servants_names);
+                              if (!cur.includes(v)) setGrpForm({ ...grpForm, servants_names: [...cur, v].join(', ') });
+                            }}
+                          >
+                            <option value="">+ إضافة خادم --</option>
+                            {servantsList.map(sv => <option key={sv.id} value={sv.full_name}>{sv.full_name}</option>)}
+                          </select>
+                          <input placeholder="أسماء الخدام (مفصولة بفاصلة)..." className="flex-1 p-2 border rounded-xl bg-white" value={grpForm.servants_names || ''} onChange={e => setGrpForm({ ...grpForm, servants_names: e.target.value })} />
+                        </div>
+                        {selectedServantTagsInForm.length > 0 && (
+                          <div className="flex flex-wrap gap-1 pt-0.5">
+                            {selectedServantTagsInForm.map((name, i) => (
+                              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-950 rounded-lg text-[10px]">
+                                {name}
+                                <button type="button" onClick={() => setGrpForm({ ...grpForm, servants_names: selectedServantTagsInForm.filter((_, idx) => idx !== i).join(', ') })} className="text-red-700 hover:text-red-900 cursor-pointer"><X size={10} /></button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
 
-                      {linkedUsersForGroup.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 pt-1">
-                          {linkedUsersForGroup.map(u => {
-                            const matchingScopes = subScopeOptions.filter(opt => {
-                              const uStages = splitList(`${u.detailed_stage || ''} ${u.service_stage || ''}`);
-                              const uExtra = Array.isArray(u.permissions?.extra_services) ? u.permissions.extra_services : [];
-                              const combined = [...uStages, ...uExtra];
-                              return combined.includes(opt) || combined.some(item => item.includes(opt));
-                            });
-                            const scopeToRemove = matchingScopes[0] || grp.group_name;
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-gray-600 mb-0.5">يوم الخدمة</label>
+                        <input placeholder="الجمعة" className="w-full p-2 border rounded-xl bg-white" value={grpForm.service_day || ''} onChange={e => setGrpForm({ ...grpForm, service_day: e.target.value })} />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-gray-600 mb-0.5">من الساعة</label>
+                        <input type="time" className="w-full p-2 border rounded-xl bg-white" value={grpForm.start_time || ''} onChange={e => setGrpForm({ ...grpForm, start_time: e.target.value })} />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-gray-600 mb-0.5">إلى الساعة</label>
+                        <input type="time" className="w-full p-2 border rounded-xl bg-white" value={grpForm.end_time || ''} onChange={e => setGrpForm({ ...grpForm, end_time: e.target.value })} />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-gray-600 mb-0.5">الأيقونة</label>
+                        <input placeholder="🏫" className="w-full p-2 border rounded-xl bg-white text-center" value={grpForm.icon} onChange={e => setGrpForm({ ...grpForm, icon: e.target.value })} />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-gray-600 mb-0.5">الترتيب</label>
+                        <input type="number" min="1" className="w-full p-2 border rounded-xl bg-white text-center" value={grpForm.sort_order} onChange={e => setGrpForm({ ...grpForm, sort_order: e.target.value })} />
+                      </div>
+                    </div>
+                    <input placeholder="السنوات الدراسية أو المراحل الفرعية (مثال: أولى ابتدائي, ثانية ابتدائي أو KG 1, KG 2)" className="w-full p-2.5 border rounded-xl bg-white font-normal" value={grpForm.stagesText} onChange={e => setGrpForm({ ...grpForm, stagesText: e.target.value })} />
+                    <div className="flex gap-2">
+                      <button type="submit" className="flex-1 py-2.5 bg-[#7a1c24] text-white rounded-xl cursor-pointer shadow">{editingGrpId ? 'حفظ التعديل' : '+ حفظ الخدمة / الاجتماع'}</button>
+                      {editingGrpId && <button type="button" onClick={() => { setEditingGrpId(null); setGrpForm({ ...emptyGroup, sort_order: effectiveGroups.length + 1 }); }} className="px-4 py-2 border rounded-xl bg-white">إلغاء</button>}
+                    </div>
+                  </form>
+                </div>
 
-                            return (
-                              <span
-                                key={u.id}
-                                className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-emerald-300 text-emerald-950 rounded-xl text-[10px] font-bold shadow-2xs"
+                <form
+                  id="add-class-form"
+                  onSubmit={e => {
+                    e.preventDefault();
+                    if (!requireAdminGuard()) return;
+                    const chosenServiceName = srvForm.stage_name || groupsWithClasses[0]?.group_name || '';
+                    if (!chosenServiceName) return alert('أضف أولاً خدمة لها فصول ثم اخترها هنا');
+
+                    const yearTag = String(srvForm.academic_year || '').trim();
+                    const baseClassName = String(srvForm.class_name || '').trim();
+                    const fullClassTitle = yearTag && !baseClassName.includes(yearTag) ? `${yearTag} - ${baseClassName}` : baseClassName;
+                    const finalClassName = srvForm.class_gender && srvForm.class_gender !== 'عام' && !fullClassTitle.includes(srvForm.class_gender)
+                      ? `${fullClassTitle} (${srvForm.class_gender})` : fullClassTitle;
+
+                    const { class_gender, academic_year, ...cleanSrv } = srvForm;
+                    const payload = { ...cleanSrv, class_name: finalClassName, stage_name: yearTag || chosenServiceName, priest_id: srvForm.priest_id || null };
+                    if (editingSrvId) { onUpdateService({ ...payload, id: editingSrvId }); setEditingSrvId(null); }
+                    else { onAddService(payload); }
+                    setSrvForm({ ...emptyService, stage_name: chosenServiceName, academic_year: yearTag });
+                  }}
+                  className="bg-white p-4 rounded-3xl border space-y-2.5 font-bold shadow-2xs"
+                >
+                  <h3 className="text-sm font-extrabold flex items-center gap-1 text-[#7a1c24]">
+                    <BookOpen size={15} /> {editingSrvId ? '✏️ تعديل الفصل' : '② ثانياً: إضافة فصل (باسم قديس مثلاً) وربطه بالخدمة والسنة الدراسية'}
+                  </h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-gray-600 mb-0.5">① الخدمة *</label>
+                      <select required className="w-full p-2.5 border rounded-xl bg-amber-50/50" value={chosenClassServiceName} onChange={e => setSrvForm({ ...srvForm, stage_name: e.target.value, academic_year: '' })}>
+                        <option value="">-- اختر الخدمة * --</option>
+                        {groupsWithClasses.map((g, i) => <option key={g.id || i} value={g.group_name}>{g.icon || '🏫'} {g.group_name} ({g.gender_target || 'عام'})</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-600 mb-0.5">② العام الدراسي / المرحلة الفرعية</label>
+                      <select className="w-full p-2.5 border rounded-xl bg-white" value={srvForm.academic_year || ''} onChange={e => setSrvForm({ ...srvForm, academic_year: e.target.value })}>
+                        <option value="">-- عام / بدون سنة محددة --</option>
+                        {selectedServiceHierarchy.years.map((yr, yIdx) => <option key={yIdx} value={yr.yearName}>{yr.yearName}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-gray-600 mb-0.5">③ اسم الفصل *</label>
+                      <input required placeholder="مثال: فصل مارمينا / مارجرجس *" className="w-full p-2.5 border rounded-xl" value={srvForm.class_name} onChange={e => setSrvForm({ ...srvForm, class_name: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-600 mb-0.5">الأب الكاهن</label>
+                      <select className="w-full p-2.5 border rounded-xl bg-amber-50/40" value={srvForm.priest_id || ''} onChange={e => setSrvForm({ ...srvForm, priest_id: e.target.value })}>
+                        <option value="">-- الكاهن --</option>
+                        {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  {selectedClassServiceObj?.gender_target?.includes('متقسمة') && (
+                    <p className="text-[11px] text-amber-900 bg-amber-50 px-2.5 py-1 rounded-xl border border-amber-200">💡 الخدمة المختارة ({selectedClassServiceObj.group_name}) مقسّمة — حدد النوع (بنين / بنات)</p>
+                  )}
+                  <div className="grid grid-cols-3 gap-2">
+                    <select className="p-2.5 border rounded-xl bg-white" value={srvForm.class_gender || 'عام'} onChange={e => setSrvForm({ ...srvForm, class_gender: e.target.value })}>
+                      <option value="عام">👥 عام</option><option value="بنين">♂️ بنين</option><option value="بنات">♀️ بنات</option>
+                    </select>
+                    <input placeholder="أمين الفصل / الخدمة" className="p-2.5 border rounded-xl" value={srvForm.head_servant_name} onChange={e => setSrvForm({ ...srvForm, head_servant_name: e.target.value })} />
+                    <input placeholder="مساعد / خدام الفصل" className="p-2.5 border rounded-xl" value={srvForm.vice_head_name} onChange={e => setSrvForm({ ...srvForm, vice_head_name: e.target.value })} />
+                  </div>
+                  <div className="flex gap-2">
+                    <input placeholder="ميعاد وقاعة الفصل" className="flex-1 p-2.5 border rounded-xl" value={srvForm.meeting_time} onChange={e => setSrvForm({ ...srvForm, meeting_time: e.target.value })} />
+                    <button type="submit" className="px-4 py-2.5 bg-[#7a1c24] text-white rounded-xl shadow cursor-pointer">{editingSrvId ? 'حفظ التعديل' : 'حفظ الفصل للخدمة'}</button>
+                    {editingSrvId && <button type="button" onClick={() => { setEditingSrvId(null); setSrvForm(emptyService); }} className="px-3 border rounded-xl">إلغاء</button>}
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {servicesSubTab === 'assign_groups' && (
+              <div className="space-y-3">
+                <div className="max-h-[54vh] overflow-y-auto pr-1 grid md:grid-cols-2 gap-3">
+                  {effectiveGroups.map((grp, idx) => {
+                    const groupKey = String(grp.id || grp.group_name || idx);
+                    const hierarchy = getServiceHierarchy(grp.group_name);
+                    const stagesArr = hierarchy.years.map(y => y.yearName);
+                    const subScopeOptions = [...new Set([grp.group_name, ...stagesArr, ...hierarchy.allClasses.map(c => c.value)].filter(Boolean))];
+                    const selectedQuickScope = quickAssignByGroup[groupKey]?.scope || grp.group_name;
+                    const selectedQuickUserId = quickAssignByGroup[groupKey]?.userId || '';
+
+                    const linkedUsersForGroup = assignableUsersList.filter(u => {
+                      const uStages = splitList(`${u.detailed_stage || ''} ${u.service_stage || ''}`);
+                      const uExtra = Array.isArray(u.permissions?.extra_services) ? u.permissions.extra_services : [];
+                      const combined = [...uStages, ...uExtra];
+                      return subScopeOptions.some(opt => combined.includes(opt) || combined.some(item => item.includes(opt)));
+                    });
+
+                    const classesInThisService = hierarchy.allClasses.filter(c => !c.isVirtual && c.rawClass).map(c => c.rawClass);
+                    const priestsInThisService = [...new Set(
+                      classesInThisService.map(c => c.priest_id).filter(Boolean)
+                    )].map(pid => priestsList.find(p => p.id === pid)).filter(Boolean);
+
+                    return (
+                      <div key={groupKey} className="bg-white p-4 rounded-3xl border-2 border-gray-200 space-y-3 shadow-2xs">
+                        <div className="flex flex-wrap justify-between items-start gap-2 border-b pb-2.5">
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-xl">{grp.icon || (grp.has_classes !== false ? '🏫' : '🕊️')}</span>
+                              <strong className="text-sm text-[#7a1c24]">{grp.group_name}</strong>
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-900">
+                                {grp.gender_target || 'عام (الكل: ذكور وإناث)'}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${grp.has_classes !== false ? 'bg-emerald-50 text-emerald-900' : 'bg-purple-50 text-purple-900'}`}>
+                                {grp.has_classes !== false ? '📚 لها سنوات / فصول' : '🕊️ اجتماع عام بدون فصول'}
+                              </span>
+                            </div>
+                            {(grp.service_day || grp.start_time) && (
+                              <p className="text-[11px] text-amber-900 font-bold">
+                                ⏰ {grp.service_day} {grp.start_time && `من ${grp.start_time}`} {grp.end_time && `إلى ${grp.end_time}`}
+                              </p>
+                            )}
+                            {priestsInThisService.length > 0 && (
+                              <p className="text-[11px] text-purple-900">
+                                ✝ <strong>الكاهن المسؤول:</strong> {priestsInThisService.map(p => p.full_name).join('، ')}
+                              </p>
+                            )}
+                            {grp.head_servant_name && (
+                              <p className="text-[11px] text-gray-800">⭐ <strong>الأمين:</strong> {grp.head_servant_name}</p>
+                            )}
+                            {grp.servants_names && (
+                              <p className="text-[11px] text-gray-600">👥 <strong>الخدام:</strong> {grp.servants_names}</p>
+                            )}
+                            {stagesArr.length > 0 && (
+                              <p className="text-[11px] text-gray-500">السنوات / المراحل: {stagesArr.join(' • ')}</p>
+                            )}
+                          </div>
+
+                          {isAdmin && (
+                            <div className="flex flex-wrap gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPriestTransferForm(prev => ({
+                                    ...prev,
+                                    mode: 'by_service',
+                                    serviceName: grp.group_name,
+                                    yearFilter: ''
+                                  }));
+                                  setServicesSubTab('priest_transfer');
+                                }}
+                                className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-950 rounded-lg font-bold cursor-pointer"
                               >
-                                <span>{u.full_name}</span>
-                                <span className="text-gray-400">({matchingScopes.join('، ') || grp.group_name})</span>
-                                <button
-                                  type="button"
-                                  onClick={() => openSingleTransferModal(u)}
-                                  className="text-amber-800 hover:underline mr-0.5 cursor-pointer"
-                                  title="نقل هذا المستخدم لخدمة أو فصل آخر"
-                                >
-                                  نقل
-                                </button>
+                                ✝ نقل كاهن الخدمة
+                              </button>
+                              {grp.has_classes !== false && (
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    setPermTargetUserId(u.id);
-                                    setActiveCard('roles_permissions');
+                                    setEditingSrvId(null);
+                                    setSrvForm({
+                                      ...emptyService,
+                                      stage_name: grp.group_name,
+                                      academic_year: stagesArr[0] || '',
+                                      head_servant_name: grp.head_servant_name || ''
+                                    });
+                                    setServicesSubTab('add');
                                   }}
-                                  className="text-indigo-700 hover:underline mr-0.5 cursor-pointer"
-                                  title="تعديل صلاحيات هذا المستخدم"
+                                  className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 rounded-lg font-bold cursor-pointer"
                                 >
-                                  صلاحيات
+                                  + إضافة فصل
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleUserServiceAssignment(u.id, scopeToRemove, false, groupKey)}
-                                  className="text-red-700 hover:text-red-900 cursor-pointer"
-                                  title="إلغاء ربط هذه الخدمة"
-                                >
-                                  <X size={11} />
-                                </button>
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {grp.has_classes !== false ? (
-                    <div className="space-y-2">
-                      {hierarchy.years.map((yr, yIdx) => (
-                        <div key={yIdx} className="p-2.5 bg-[#fbfaf7] rounded-2xl border space-y-1.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <strong className="text-xs text-[#7a1c24]">📘 {yr.yearName}</strong>
-                            <span className="text-[10px] text-gray-500">
-                              {yr.dbClasses.length > 0 ? `${yr.dbClasses.length} فصل` : 'شعبة عامة (بدون فصول مضافة)'}
-                            </span>
-                          </div>
-                          {yr.dbClasses.length > 0 && (
-                            <div className="space-y-1">
-                              {yr.dbClasses.map(srv => {
-                                const pObj = priestsList.find(p => p.id === srv.priest_id);
-                                return (
-                                  <div key={srv.id} className="p-2 bg-white rounded-xl border flex justify-between items-center gap-2">
-                                    <div>
-                                      <strong className="text-xs text-gray-900 block">{srv.class_name}</strong>
-                                      <span className="text-[11px] text-gray-500">
-                                        {pObj && `✝ ${pObj.full_name} • `}
-                                        {srv.head_servant_name && `⭐ الأمين: ${srv.head_servant_name} `}
-                                        {srv.vice_head_name && `• الخدام: ${srv.vice_head_name} `}
-                                        {srv.meeting_time && `• ⏰ ${srv.meeting_time}`}
-                                      </span>
-                                    </div>
-                                    {isAdmin && (
-                                      <div className="flex gap-1 shrink-0">
-                                        <button
-                                          type="button"
-                                          onClick={() => setPriestTransferForm(prev => ({
-                                            ...prev,
-                                            mode: 'by_class',
-                                            classId: srv.id,
-                                            fromPriestId: srv.priest_id || ''
-                                          }))}
-                                          className="px-2 py-1 bg-purple-50 text-purple-900 rounded-lg text-[10px] font-bold cursor-pointer"
-                                          title="نقل / تعديل كاهن الفصل"
-                                        >
-                                          ✝ كاهن
-                                        </button>
-                                        <button onClick={() => { setEditingSrvId(srv.id); setSrvForm({ ...emptyService, ...srv, stage_name: grp.group_name, academic_year: yr.yearName, class_gender: 'عام' }); document.getElementById('add-class-form')?.scrollIntoView({ behavior: 'smooth' }); }} className="p-1.5 bg-white border rounded-lg cursor-pointer"><Edit3 size={12} /></button>
-                                        <button onClick={() => onDeleteService(srv.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer"><Trash2 size={12} /></button>
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!grp.id) return alert('قم بتشغيل SQL جدول service_groups أولاً.');
+                                  setEditingGrpId(grp.id);
+                                  setGrpForm({
+                                    group_name: grp.group_name,
+                                    icon: grp.icon || '🏫',
+                                    gender_target: grp.gender_target || 'عام (الكل: ذكور وإناث)',
+                                    has_classes: grp.has_classes !== false,
+                                    head_servant_name: grp.head_servant_name || '',
+                                    servants_names: grp.servants_names || '',
+                                    service_day: grp.service_day || '',
+                                    start_time: grp.start_time || '',
+                                    end_time: grp.end_time || '',
+                                    stagesText: normalizeGroupStages(grp.stages).join(', '),
+                                    sort_order: grp.sort_order || idx + 1
+                                  });
+                                  setServicesSubTab('add');
+                                }}
+                                className="p-1.5 bg-gray-100 hover:bg-amber-100 rounded-lg cursor-pointer"
+                                title="تعديل"
+                              >
+                                <Edit3 size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteServiceGroup(grp)}
+                                className="p-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg cursor-pointer"
+                                title="حذف"
+                              >
+                                <Trash2 size={13} />
+                              </button>
                             </div>
                           )}
                         </div>
-                      ))}
 
-                      {hierarchy.ungroupedClasses.length > 0 && (
-                        <div className="space-y-1.5">
-                          {hierarchy.ungroupedClasses.map(srv => {
-                            const pObj = priestsList.find(p => p.id === srv.priest_id);
-                            return (
-                              <div key={srv.id} className="p-2.5 bg-[#fbfaf7] rounded-2xl border flex justify-between items-center gap-2">
-                                <div>
-                                  <strong className="text-xs text-gray-900 block">{srv.class_name}</strong>
-                                  <span className="text-[11px] text-gray-500">
-                                    {pObj && `✝ ${pObj.full_name} • `}
-                                    {srv.head_servant_name && `⭐ الأمين: ${srv.head_servant_name} `}
-                                    {srv.vice_head_name && `• الخدام: ${srv.vice_head_name} `}
-                                    {srv.meeting_time && `• ⏰ ${srv.meeting_time}`}
-                                  </span>
-                                </div>
-                                {isAdmin && (
-                                  <div className="flex gap-1 shrink-0">
-                                    <button
-                                      type="button"
-                                      onClick={() => setPriestTransferForm(prev => ({
-                                        ...prev,
-                                        mode: 'by_class',
-                                        classId: srv.id,
-                                        fromPriestId: srv.priest_id || ''
-                                      }))}
-                                      className="px-2 py-1 bg-purple-50 text-purple-900 rounded-lg text-[10px] font-bold cursor-pointer"
-                                      title="نقل / تعديل كاهن الفصل"
+                        {isAdmin && (
+                          <div className="bg-emerald-50/50 p-2.5 rounded-2xl border border-emerald-200 space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[11px] font-black text-emerald-950 flex items-center gap-1">
+                                <UserCheck size={13} /> ربط خدام أو مخدومين بـ ({grp.group_name}):
+                              </span>
+                              <span className="text-[10px] font-bold text-emerald-800">
+                                {linkedUsersForGroup.length} مرتبط
+                              </span>
+                            </div>
+
+                            <div className="flex flex-wrap gap-1.5">
+                              {subScopeOptions.length > 1 && (
+                                <select
+                                  className="p-1.5 border rounded-xl bg-white text-[11px] font-bold"
+                                  value={selectedQuickScope}
+                                  onChange={e => setQuickAssignByGroup(prev => ({
+                                    ...prev,
+                                    [groupKey]: { ...(prev[groupKey] || {}), scope: e.target.value }
+                                  }))}
+                                >
+                                  {subScopeOptions.map((opt, oIdx) => (
+                                    <option key={oIdx} value={opt}>{opt}</option>
+                                  ))}
+                                </select>
+                              )}
+
+                              <select
+                                className="flex-1 min-w-36 p-1.5 border rounded-xl bg-white text-[11px] font-bold"
+                                value={selectedQuickUserId}
+                                onChange={e => setQuickAssignByGroup(prev => ({
+                                  ...prev,
+                                  [groupKey]: {
+                                    scope: prev[groupKey]?.scope || grp.group_name,
+                                    userId: e.target.value
+                                  }
+                                }))}
+                              >
+                                <option value="">-- اختر خادم أو مخدوم لربطه --</option>
+                                {assignableUsersList.map(u => (
+                                  <option key={u.id} value={u.id}>
+                                    {u.full_name} ({ROLE_LABELS[u.role] || u.role})
+                                  </option>
+                                ))}
+                              </select>
+
+                              <button
+                                type="button"
+                                disabled={!selectedQuickUserId || assigningGroupKey === groupKey}
+                                onClick={async () => {
+                                  if (!selectedQuickUserId) return;
+                                  await handleToggleUserServiceAssignment(selectedQuickUserId, selectedQuickScope, true, groupKey);
+                                  setQuickAssignByGroup(prev => ({
+                                    ...prev,
+                                    [groupKey]: { ...(prev[groupKey] || {}), userId: '' }
+                                  }));
+                                }}
+                                className="px-3 py-1.5 bg-[#7a1c24] disabled:bg-gray-300 text-white rounded-xl text-[11px] font-black cursor-pointer"
+                              >
+                                {assigningGroupKey === groupKey ? 'جاري الربط...' : '+ ربط بالخدمة'}
+                              </button>
+                            </div>
+
+                            {linkedUsersForGroup.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5 pt-1 max-h-28 overflow-y-auto">
+                                {linkedUsersForGroup.map(u => {
+                                  const matchingScopes = subScopeOptions.filter(opt => {
+                                    const uStages = splitList(`${u.detailed_stage || ''} ${u.service_stage || ''}`);
+                                    const uExtra = Array.isArray(u.permissions?.extra_services) ? u.permissions.extra_services : [];
+                                    const combined = [...uStages, ...uExtra];
+                                    return combined.includes(opt) || combined.some(item => item.includes(opt));
+                                  });
+                                  const scopeToRemove = matchingScopes[0] || grp.group_name;
+
+                                  return (
+                                    <span
+                                      key={u.id}
+                                      className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-emerald-300 text-emerald-950 rounded-xl text-[10px] font-bold shadow-2xs"
                                     >
-                                      ✝ كاهن
-                                    </button>
-                                    <button onClick={() => { setEditingSrvId(srv.id); setSrvForm({ ...emptyService, ...srv, stage_name: grp.group_name, academic_year: '', class_gender: 'عام' }); document.getElementById('add-class-form')?.scrollIntoView({ behavior: 'smooth' }); }} className="p-1.5 bg-white border rounded-lg cursor-pointer"><Edit3 size={12} /></button>
-                                    <button onClick={() => onDeleteService(srv.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer"><Trash2 size={12} /></button>
-                                  </div>
-                                )}
+                                      <span>{u.full_name}</span>
+                                      <span className="text-gray-400">({matchingScopes.join('، ') || grp.group_name})</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => openSingleTransferModal(u)}
+                                        className="text-amber-800 hover:underline mr-0.5 cursor-pointer"
+                                        title="نقل هذا المستخدم لخدمة أو فصل آخر"
+                                      >
+                                        نقل
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setPermTargetUserId(u.id);
+                                          setActiveCard('roles_permissions');
+                                        }}
+                                        className="text-indigo-700 hover:underline mr-0.5 cursor-pointer"
+                                        title="تعديل صلاحيات هذا المستخدم"
+                                      >
+                                        صلاحيات
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleUserServiceAssignment(u.id, scopeToRemove, false, groupKey)}
+                                        className="text-red-700 hover:text-red-900 cursor-pointer"
+                                        title="إلغاء ربط هذه الخدمة"
+                                      >
+                                        <X size={11} />
+                                      </button>
+                                    </span>
+                                  );
+                                })}
                               </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {hierarchy.years.length === 0 && hierarchy.ungroupedClasses.length === 0 && (
-                        <p className="text-[11px] text-gray-500 bg-[#fbfaf7] p-2.5 rounded-xl border">
-                          عامة / بدون فصول فرعية مسجلة حالياً (تظهر كاختيار مباشر باسم الخدمة).
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-purple-900 bg-purple-50/50 p-2 rounded-xl border border-purple-100">
-                      🕊️ اجتماع عام / خدمة مفتوحة بدون فصول فرعية (تظهر ككارت لأعضائها وخدامها).
-                    </p>
-                  )}
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
+                <ServiceGroupFeed currentUser={effectiveUser} services={services} groups={effectiveGroups} canPost={isAdmin} />
+              </div>
+            )}
           </div>
+        )}
 
-          <ServiceGroupFeed currentUser={effectiveUser} services={services} groups={effectiveGroups} canPost={isAdmin} />
-        </div>
-      )}
-
-      {activeCard === 'edu_center' && (
-        <div className="space-y-4">
-          {renderTopBack('🎓 المركز التعليمي الكنسي')}
-          <EducationalCenterManager currentUser={effectiveUser} todayISO={todayISO} />
-        </div>
-      )}
-
-      {activeCard === 'joseph_arimathea' && (
-        <div className="space-y-4">
-          {renderTopBack('🕊️ خدمة يوسف الرامي')}
-          <JosephArimatheaManager currentUser={effectiveUser} users={users} todayISO={todayISO} />
-        </div>
-      )}
-
-      {activeCard === 'burial_and_caskets' && (
-        <div className="space-y-4">
-          {renderTopBack('⚰️ أماكن الدفن وأسعار الانتقال والصناديق وألحان يوسف الرامي')}
-          <AdminChurchSettingsAndBurial currentUser={effectiveUser} />
-        </div>
-      )}
-
-      {activeCard === 'categories' && (
-        <div className="space-y-4 text-xs">
-          {renderTopBack('📂 كروت بحث الحالة')}
-          {isAdmin && (
-            <form
-              onSubmit={e => {
-                e.preventDefault();
-                if (!requireAdminGuard()) return;
-                if (editingCat) {
-                  onUpdateCategory(editingCat.id, editingCat.name, catForm.name, catForm.icon);
-                  setEditingCat(null);
-                } else {
-                  onAddCategory(catForm);
-                }
-                setCatForm({ name: '', icon: '📂' });
-              }}
-              className="bg-white p-4 rounded-3xl border space-y-3 font-bold shadow-sm"
-            >
-              <h3 className="text-sm font-extrabold flex items-center gap-1 text-[#7a1c24]">
-                <FolderEdit size={16} /> {editingCat ? `تعديل اسم كارت (${editingCat.name})` : 'تعديل وإضافة أسماء كروت تصنيفات الأسر'}
-              </h3>
-              <div className="grid md:grid-cols-3 gap-2">
-                <input required placeholder="اسم الكارت / التصنيف *" className="p-2.5 border rounded-xl" value={catForm.name} onChange={e => setCatForm({ ...catForm, name: e.target.value })} />
-                <input placeholder="الأيقونة (🕊️ أو ❤️)" className="p-2.5 border rounded-xl" value={catForm.icon} onChange={e => setCatForm({ ...catForm, icon: e.target.value })} />
-                <div className="flex gap-2">
-                  <button type="submit" className="flex-1 bg-[#7a1c24] text-white rounded-xl p-2.5 cursor-pointer">{editingCat ? 'حفظ التعديل' : 'إضافة التصنيف'}</button>
-                  {editingCat && <button type="button" onClick={() => { setEditingCat(null); setCatForm({ name: '', icon: '📂' }); }} className="px-3 border rounded-xl">إلغاء</button>}
-                </div>
-              </div>
-            </form>
-          )}
-
-          <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-3">
-            {caseCategories.map(cat => (
-              <div key={cat.id} className="bg-white p-4 rounded-2xl border flex justify-between items-center shadow-2xs">
-                <div><span className="text-xl ml-2">{cat.icon}</span><strong className="text-sm">{cat.name}</strong></div>
-                {isAdmin && (
-                  <div className="flex gap-1">
-                    <button onClick={() => { setEditingCat(cat); setCatForm({ name: cat.name, icon: cat.icon }); }} className="p-1.5 bg-gray-100 rounded-lg cursor-pointer"><Edit3 size={13} /></button>
-                    <button onClick={() => onDeleteCategory(cat.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer"><Trash2 size={13} /></button>
-                  </div>
-                )}
-              </div>
-            ))}
+        {activeCard === 'edu_center' && (
+          <div className="space-y-3">
+            {renderTopBack('🎓 المركز التعليمي الكنسي')}
+            <EducationalCenterManager currentUser={effectiveUser} todayISO={todayISO} />
           </div>
-        </div>
-      )}
+        )}
 
-      {activeCard === 'custom_cards' && (
-        <div className="space-y-4 text-xs">
-          {renderTopBack('📌 كروت إضافية للكاهن')}
-          {isAdmin && (
-            <form
-              onSubmit={e => {
-                e.preventDefault();
-                if (!requireAdminGuard()) return;
-                onAddCustomCard({ ...cardForm, priest_id: cardForm.priest_id || null });
-                setCardForm({ priest_id: '', card_title: '', card_icon: '📌', description: '' });
-              }}
-              className="bg-white p-4 rounded-3xl border space-y-3 font-bold shadow-sm"
-            >
-              <h3 className="text-sm font-extrabold flex items-center gap-1 text-[#7a1c24]">
-                <Sparkles size={16} /> إنشاء كارت جديد في صفحة الأب الكاهن
-              </h3>
-              <div className="grid md:grid-cols-4 gap-2">
-                <select className="p-2.5 border rounded-xl" value={cardForm.priest_id} onChange={e => setCardForm({ ...cardForm, priest_id: e.target.value })}>
-                  <option value="">لكل الآباء الكهنة</option>
-                  {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-                </select>
-                <input required placeholder="عنوان الكارت (مثال: الرحلات / المعموديات) *" className="p-2.5 border rounded-xl" value={cardForm.card_title} onChange={e => setCardForm({ ...cardForm, card_title: e.target.value })} />
-                <input placeholder="الأيقونة (📌)" className="p-2.5 border rounded-xl" value={cardForm.card_icon} onChange={e => setCardForm({ ...cardForm, card_icon: e.target.value })} />
-                <button type="submit" className="bg-[#7a1c24] text-white rounded-xl p-2.5 cursor-pointer">إنشاء الكارت</button>
-              </div>
-              <input placeholder="وصف مختصر للكارت..." className="w-full p-2.5 border rounded-xl" value={cardForm.description} onChange={e => setCardForm({ ...cardForm, description: e.target.value })} />
-            </form>
-          )}
-
-          <div className="grid md:grid-cols-2 gap-3">
-            {customCards.map(cc => {
-              const targetPriest = priestsList.find(p => p.id === cc.priest_id);
-              return (
-                <div key={cc.id} className="bg-white p-4 rounded-2xl border flex justify-between items-center shadow-2xs">
-                  <div>
-                    <span className="text-xl ml-2">{cc.card_icon}</span>
-                    <strong className="text-sm">{cc.card_title}</strong>
-                    <span className="mr-2 px-2 py-0.5 bg-amber-50 text-amber-900 rounded text-[10px] font-bold">{targetPriest ? targetPriest.full_name : 'لكل الكهنة'}</span>
-                    <p className="text-gray-500 mt-0.5">{cc.description}</p>
-                  </div>
-                  {isAdmin && (
-                    <button onClick={() => onDeleteCustomCard(cc.id)} className="p-2 bg-red-50 text-red-700 rounded-xl cursor-pointer"><Trash2 size={14} /></button>
-                  )}
-                </div>
-              );
-            })}
+        {activeCard === 'joseph_arimathea' && (
+          <div className="space-y-3">
+            {renderTopBack('🕊️ خدمة يوسف الرامي')}
+            <JosephArimatheaManager currentUser={effectiveUser} users={users} todayISO={todayISO} />
           </div>
-        </div>
-      )}
+        )}
 
-      {activeCard === 'logs' && isAdmin && (
-        <div className="space-y-4 text-xs">
-          {renderTopBack('📊 سجل النشاط واللوجات والواتساب')}
-          <AdminLogsAndWaWidget
-            currentUser={effectiveUser}
-            priests={priestsList}
-            allUsers={users}
-            onRefreshUsers={onRefresh}
-          />
-        </div>
-      )}
+        {activeCard === 'burial_and_caskets' && (
+          <div className="space-y-3">
+            {renderTopBack('⚰️ أماكن الدفن وأسعار الانتقال والصناديق وألحان يوسف الرامي')}
+            <AdminChurchSettingsAndBurial currentUser={effectiveUser} />
+          </div>
+        )}
 
-      {activeCard === 'settings' && (
-        <div className="space-y-4 text-xs">
-          {renderTopBack('⚙️ الإعدادات وهوية الكنيسة')}
-          <form onSubmit={handleSaveChurchIdentity} className="bg-white p-6 rounded-3xl border shadow-sm space-y-4 max-w-2xl font-bold">
-            <div className="flex items-center gap-2 text-[#7a1c24] text-sm font-black border-b pb-2">
-              <Settings size={18} /> تخصيص اسم الكنيسة، لوجو الكنيسة، صورة السيدة العذراء، وأرقام التواصل
-            </div>
-
-            <div className="grid sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block mb-1">اسم الكنيسة الرسمي *</label>
-                <input
-                  required
-                  placeholder="كنيسة السيدة العذراء مريم..."
-                  className="w-full p-2.5 border rounded-xl text-sm bg-white"
-                  value={churchSettingsForm.title}
-                  onChange={e => setChurchSettingsForm({ ...churchSettingsForm, title: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="block mb-1">📞 تليفون الكنيسة / الخط الساخن للطوارئ</label>
-                <input
-                  placeholder="01xxxxxxxxx / 02xxxxxxx"
-                  className="w-full p-2.5 border rounded-xl bg-white"
-                  value={churchSettingsForm.church_phone || ''}
-                  onChange={e => setChurchSettingsForm({ ...churchSettingsForm, church_phone: e.target.value })}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block mb-1">الشعار / الوصف المختصر أسفل الاسم</label>
-              <input
-                className="w-full p-2.5 border rounded-xl bg-white"
-                value={churchSettingsForm.body}
-                onChange={e => setChurchSettingsForm({ ...churchSettingsForm, body: e.target.value })}
-              />
-            </div>
-
-            <div>
-              <label className="block mb-1 text-red-700 font-black">🚨 شريط تنبيه / خبر عاجل (يظهر للجميع في الصفحة الرئيسية):</label>
-              <input
-                placeholder="اكتب أي إشعار أو تنبيه طارئ يظهر للكل في الصفحة الرئيسية..."
-                className="w-full p-2.5 border border-red-300 rounded-xl bg-red-50/50"
-                value={churchSettingsForm.emergency_notice || ''}
-                onChange={e => setChurchSettingsForm({ ...churchSettingsForm, emergency_notice: e.target.value })}
-              />
-            </div>
-
-            <div className="bg-indigo-50/60 p-3.5 rounded-2xl border border-indigo-200 space-y-2">
-              <label className="block text-indigo-950 font-black">لوجو الكنيسة (رفع ملف مباشر من جهازك JPG / PNG / WEBP):</label>
-              <div className="flex flex-wrap gap-2 items-center">
-                <label className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shrink-0 ${uploadingLogo ? 'bg-gray-300 text-gray-600' : 'bg-indigo-700 hover:bg-indigo-800 text-white shadow'}`}>
-                  <Upload size={14} /> {uploadingLogo ? 'جاري الرفع...' : 'اختر لوجو الكنيسة من جهازك'}
-                  <input type="file" accept="image/*" className="hidden" disabled={uploadingLogo} onChange={handleUploadLogo} />
-                </label>
-                {churchSettingsForm.url && (
-                  <button
-                    type="button"
-                    onClick={() => setChurchSettingsForm(prev => ({ ...prev, url: '' }))}
-                    className="px-3 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl font-bold cursor-pointer"
-                  >
-                    حذف اللوجو الحالي
-                  </button>
-                )}
-              </div>
-              {churchSettingsForm.url && (
-                <div className="pt-1">
-                  <img src={churchSettingsForm.url} alt="لوجو الكنيسة" className="h-20 rounded-xl border-2 object-cover bg-white p-1" />
-                </div>
-              )}
-            </div>
-
-            <div className="bg-amber-50/60 p-3.5 rounded-2xl border border-amber-200 space-y-2">
-              <label className="block text-amber-950 font-black">صورة السيدة العذراء مريم (رفع ملف مباشر من جهازك JPG / PNG / WEBP):</label>
-              <div className="flex flex-wrap gap-2 items-center">
-                <label className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shrink-0 ${uploadingMary ? 'bg-gray-300 text-gray-600' : 'bg-amber-700 hover:bg-amber-800 text-white shadow'}`}>
-                  <Upload size={14} /> {uploadingMary ? 'جاري الرفع...' : 'اختر صورة السيدة العذراء من جهازك'}
-                  <input type="file" accept="image/*" className="hidden" disabled={uploadingMary} onChange={handleUploadMaryImage} />
-                </label>
-                {churchSettingsForm.virgin_mary_image_url && (
-                  <button
-                    type="button"
-                    onClick={() => setChurchSettingsForm(prev => ({ ...prev, virgin_mary_image_url: '' }))}
-                    className="px-3 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl font-bold cursor-pointer"
-                  >
-                    حذف صورة العذراء
-                  </button>
-                )}
-              </div>
-              {churchSettingsForm.virgin_mary_image_url && (
-                <div className="pt-1">
-                  <img src={churchSettingsForm.virgin_mary_image_url} alt="السيدة العذراء" className="h-24 rounded-xl border-2 object-cover bg-white p-1" />
-                </div>
-              )}
-            </div>
-
-            <div className="flex flex-wrap gap-2 pt-2">
-              <button type="submit" disabled={savingSettings || uploadingLogo || uploadingMary} className="px-6 py-3 bg-[#7a1c24] text-white rounded-xl font-black text-sm flex items-center gap-2 cursor-pointer shadow">
-                <Save size={16} /> {savingSettings ? 'جاري الحفظ...' : 'حفظ هوية الكنيسة والتليفون والصور ✅'}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!confirm('مسح الحقول وتفريغ الصور؟')) return;
-                  setChurchSettingsForm({ title: '', body: '', url: '', virgin_mary_image_url: '', church_phone: '', emergency_notice: '' });
+        {activeCard === 'categories' && (
+          <div className="space-y-3 text-xs">
+            {renderTopBack('📂 كروت بحث الحالة')}
+            {isAdmin && (
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  if (!requireAdminGuard()) return;
+                  if (editingCat) {
+                    onUpdateCategory(editingCat.id, editingCat.name, catForm.name, catForm.icon);
+                    setEditingCat(null);
+                  } else {
+                    onAddCategory(catForm);
+                  }
+                  setCatForm({ name: '', icon: '📂' });
                 }}
-                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold cursor-pointer"
+                className="bg-white p-4 rounded-2xl border space-y-2.5 font-bold shadow-2xs"
               >
-                مسح الحقول
-              </button>
+                <h3 className="text-sm font-extrabold flex items-center gap-1 text-[#7a1c24]">
+                  <FolderEdit size={15} /> {editingCat ? `تعديل اسم كارت (${editingCat.name})` : 'تعديل وإضافة أسماء كروت تصنيفات الأسر'}
+                </h3>
+                <div className="grid md:grid-cols-3 gap-2">
+                  <input required placeholder="اسم الكارت / التصنيف *" className="p-2 border rounded-xl" value={catForm.name} onChange={e => setCatForm({ ...catForm, name: e.target.value })} />
+                  <input placeholder="الأيقونة (🕊️ أو ❤️)" className="p-2 border rounded-xl" value={catForm.icon} onChange={e => setCatForm({ ...catForm, icon: e.target.value })} />
+                  <div className="flex gap-2">
+                    <button type="submit" className="flex-1 bg-[#7a1c24] text-white rounded-xl p-2 cursor-pointer">{editingCat ? 'حفظ التعديل' : 'إضافة التصنيف'}</button>
+                    {editingCat && <button type="button" onClick={() => { setEditingCat(null); setCatForm({ name: '', icon: '📂' }); }} className="px-3 border rounded-xl">إلغاء</button>}
+                  </div>
+                </div>
+              </form>
+            )}
+
+            <div className="max-h-[45vh] overflow-y-auto pr-1 grid sm:grid-cols-2 md:grid-cols-4 gap-2.5">
+              {caseCategories.map(cat => (
+                <div key={cat.id} className="bg-white p-3.5 rounded-2xl border flex justify-between items-center shadow-2xs">
+                  <div><span className="text-xl ml-2">{cat.icon}</span><strong className="text-sm">{cat.name}</strong></div>
+                  {isAdmin && (
+                    <div className="flex gap-1">
+                      <button onClick={() => { setEditingCat(cat); setCatForm({ name: cat.name, icon: cat.icon }); }} className="p-1.5 bg-gray-100 rounded-lg cursor-pointer"><Edit3 size={12} /></button>
+                      <button onClick={() => onDeleteCategory(cat.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer"><Trash2 size={12} /></button>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
-          </form>
-        </div>
-      )}
+          </div>
+        )}
+
+        {activeCard === 'custom_cards' && (
+          <div className="space-y-3 text-xs">
+            {renderTopBack('📌 كروت إضافية للكاهن')}
+            {isAdmin && (
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  if (!requireAdminGuard()) return;
+                  onAddCustomCard({ ...cardForm, priest_id: cardForm.priest_id || null });
+                  setCardForm({ priest_id: '', card_title: '', card_icon: '📌', description: '' });
+                }}
+                className="bg-white p-4 rounded-2xl border space-y-2.5 font-bold shadow-2xs"
+              >
+                <h3 className="text-sm font-extrabold flex items-center gap-1 text-[#7a1c24]">
+                  <Sparkles size={15} /> إنشاء كارت جديد في صفحة الأب الكاهن
+                </h3>
+                <div className="grid md:grid-cols-4 gap-2">
+                  <select className="p-2 border rounded-xl" value={cardForm.priest_id} onChange={e => setCardForm({ ...cardForm, priest_id: e.target.value })}>
+                    <option value="">لكل الآباء الكهنة</option>
+                    {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+                  </select>
+                  <input required placeholder="عنوان الكارت (مثال: الرحلات / المعموديات) *" className="p-2 border rounded-xl" value={cardForm.card_title} onChange={e => setCardForm({ ...cardForm, card_title: e.target.value })} />
+                  <input placeholder="الأيقونة (📌)" className="p-2 border rounded-xl" value={cardForm.card_icon} onChange={e => setCardForm({ ...cardForm, card_icon: e.target.value })} />
+                  <button type="submit" className="bg-[#7a1c24] text-white rounded-xl p-2 cursor-pointer">إنشاء الكارت</button>
+                </div>
+                <input placeholder="وصف مختصر للكارت..." className="w-full p-2 border rounded-xl" value={cardForm.description} onChange={e => setCardForm({ ...cardForm, description: e.target.value })} />
+              </form>
+            )}
+
+            <div className="max-h-[45vh] overflow-y-auto pr-1 grid md:grid-cols-2 gap-2.5">
+              {customCards.map(cc => {
+                const targetPriest = priestsList.find(p => p.id === cc.priest_id);
+                return (
+                  <div key={cc.id} className="bg-white p-3.5 rounded-2xl border flex justify-between items-center shadow-2xs">
+                    <div>
+                      <span className="text-xl ml-2">{cc.card_icon}</span>
+                      <strong className="text-sm">{cc.card_title}</strong>
+                      <span className="mr-2 px-2 py-0.5 bg-amber-50 text-amber-900 rounded text-[10px] font-bold">{targetPriest ? targetPriest.full_name : 'لكل الكهنة'}</span>
+                      <p className="text-gray-500 mt-0.5">{cc.description}</p>
+                    </div>
+                    {isAdmin && (
+                      <button onClick={() => onDeleteCustomCard(cc.id)} className="p-2 bg-red-50 text-red-700 rounded-xl cursor-pointer"><Trash2 size={13} /></button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {activeCard === 'logs' && isAdmin && (
+          <div className="space-y-3 text-xs">
+            {renderTopBack('📊 سجل النشاط واللوجات والواتساب')}
+            <AdminLogsAndWaWidget
+              currentUser={effectiveUser}
+              priests={priestsList}
+              allUsers={users}
+              onRefreshUsers={onRefresh}
+            />
+          </div>
+        )}
+
+        {activeCard === 'settings' && (
+          <div className="space-y-3 text-xs">
+            {renderTopBack('⚙️ الإعدادات وهوية الكنيسة')}
+            <form onSubmit={handleSaveChurchIdentity} className="bg-white p-5 rounded-3xl border shadow-sm space-y-3 max-w-2xl font-bold">
+              <div className="flex items-center gap-2 text-[#7a1c24] text-sm font-black border-b pb-2">
+                <Settings size={17} /> تخصيص اسم الكنيسة، لوجو الكنيسة، صورة السيدة العذراء، وأرقام التواصل
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block mb-1">اسم الكنيسة الرسمي *</label>
+                  <input required placeholder="كنيسة السيدة العذراء مريم..." className="w-full p-2 border rounded-xl text-sm bg-white" value={churchSettingsForm.title} onChange={e => setChurchSettingsForm({ ...churchSettingsForm, title: e.target.value })} />
+                </div>
+                <div>
+                  <label className="block mb-1">📞 تليفون الكنيسة / الخط الساخن للطوارئ</label>
+                  <input placeholder="01xxxxxxxxx / 02xxxxxxx" className="w-full p-2 border rounded-xl bg-white" value={churchSettingsForm.church_phone || ''} onChange={e => setChurchSettingsForm({ ...churchSettingsForm, church_phone: e.target.value })} />
+                </div>
+              </div>
+
+              <div>
+                <label className="block mb-1">الشعار / الوصف المختصر أسفل الاسم</label>
+                <input className="w-full p-2 border rounded-xl bg-white" value={churchSettingsForm.body} onChange={e => setChurchSettingsForm({ ...churchSettingsForm, body: e.target.value })} />
+              </div>
+
+              <div>
+                <label className="block mb-1 text-red-700 font-black">🚨 شريط تنبيه / خبر عاجل (يظهر للجميع في الصفحة الرئيسية):</label>
+                <input placeholder="اكتب أي إشعار أو تنبيه طارئ يظهر للكل في الصفحة الرئيسية..." className="w-full p-2 border border-red-300 rounded-xl bg-red-50/50" value={churchSettingsForm.emergency_notice || ''} onChange={e => setChurchSettingsForm({ ...churchSettingsForm, emergency_notice: e.target.value })} />
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-2.5">
+                <div className="bg-indigo-50/60 p-3 rounded-2xl border border-indigo-200 space-y-2">
+                  <label className="block text-indigo-950 font-black">لوجو الكنيسة (رفع ملف مباشر من جهازك JPG / PNG / WEBP):</label>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <label className={`px-3 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer ${uploadingLogo ? 'bg-gray-300 text-gray-600' : 'bg-indigo-700 hover:bg-indigo-800 text-white shadow'}`}>
+                      <Upload size={13} /> {uploadingLogo ? 'جاري الرفع...' : 'اختر لوجو الكنيسة من جهازك'}
+                      <input type="file" accept="image/*" className="hidden" disabled={uploadingLogo} onChange={handleUploadLogo} />
+                    </label>
+                    {churchSettingsForm.url && (
+                      <button type="button" onClick={() => setChurchSettingsForm(prev => ({ ...prev, url: '' }))} className="px-2.5 py-1.5 bg-red-100 text-red-700 rounded-xl font-bold cursor-pointer">حذف اللوجو الحالي</button>
+                    )}
+                  </div>
+                  {churchSettingsForm.url && <img src={churchSettingsForm.url} alt="لوجو الكنيسة" className="h-16 rounded-xl border object-cover bg-white p-1" />}
+                </div>
+
+                <div className="bg-amber-50/60 p-3 rounded-2xl border border-amber-200 space-y-2">
+                  <label className="block text-amber-950 font-black">صورة السيدة العذراء مريم (رفع ملف مباشر من جهازك JPG / PNG / WEBP):</label>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <label className={`px-3 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer ${uploadingMary ? 'bg-gray-300 text-gray-600' : 'bg-amber-700 hover:bg-amber-800 text-white shadow'}`}>
+                      <Upload size={13} /> {uploadingMary ? 'جاري الرفع...' : 'اختر صورة السيدة العذراء من جهازك'}
+                      <input type="file" accept="image/*" className="hidden" disabled={uploadingMary} onChange={handleUploadMaryImage} />
+                    </label>
+                    {churchSettingsForm.virgin_mary_image_url && (
+                      <button type="button" onClick={() => setChurchSettingsForm(prev => ({ ...prev, virgin_mary_image_url: '' }))} className="px-2.5 py-1.5 bg-red-100 text-red-700 rounded-xl font-bold cursor-pointer">حذف صورة العذراء</button>
+                    )}
+                  </div>
+                  {churchSettingsForm.virgin_mary_image_url && <img src={churchSettingsForm.virgin_mary_image_url} alt="السيدة العذراء" className="h-16 rounded-xl border object-cover bg-white p-1" />}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button type="submit" disabled={savingSettings || uploadingLogo || uploadingMary} className="px-5 py-2.5 bg-[#7a1c24] text-white rounded-xl font-black text-xs flex items-center gap-2 cursor-pointer shadow">
+                  <Save size={15} /> {savingSettings ? 'جاري الحفظ...' : 'حفظ هوية الكنيسة والتليفون والصور ✅'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!confirm('مسح الحقول وتفريغ الصور؟')) return;
+                    setChurchSettingsForm({ title: '', body: '', url: '', virgin_mary_image_url: '', church_phone: '', emergency_notice: '' });
+                  }}
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold cursor-pointer"
+                >
+                  مسح الحقول
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+      </div>
 
       {transferModal.open && isAdmin && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b pb-2">
               <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5">
                 <ArrowLeftRight size={16} />
