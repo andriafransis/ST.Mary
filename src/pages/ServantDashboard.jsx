@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useRef } from 'react';
 import {
   Phone, Search, UserPlus, Calendar, MessageSquareText, Layers,
@@ -162,6 +163,7 @@ export default function ServantDashboard({
   servant, users = [], services = [], serviceGroups = [], activities = [], memberNotes = [], birthdays = [],
   onAddMember, onSaveActivity, onSaveMemberNote, onAcknowledgeNote, onRefresh, onUpdateServiceStructure
 }) {
+  const scrollBoxRef = useRef(null);
   const isAdminUser = servant?.role === 'admin';
   const canEditSchedule = canManageOfficialSchedule(servant);
   const canAdd = isAdminUser || servant?.permissions?.can_add !== false;
@@ -282,7 +284,7 @@ export default function ServantDashboard({
     try {
       localStorage.setItem(CUSTOM_ITEMS_STORAGE_KEY, JSON.stringify(payload));
     } catch {
-      // تجاهل خطأ التخزين المحلي
+      // ignore
     }
 
     if (supabase && typeof supabase.from === 'function') {
@@ -298,7 +300,7 @@ export default function ServantDashboard({
             { onConflict: 'key' }
           );
       } catch {
-        // يعمل محلياً حتى لو جدول service_settings غير منشأ بعد
+        // works locally
       }
     }
   };
@@ -340,7 +342,7 @@ export default function ServantDashboard({
           setRewardStreakThreshold(Number(data.value.rewardStreakThreshold));
         }
       } catch {
-        // تجاهل إذا لم يكن الجدول موجوداً
+        // ignore
       }
     })();
     return () => {
@@ -452,7 +454,7 @@ export default function ServantDashboard({
             }
           }
         } catch {
-          // نستخدم الصورة المضغوطة مباشرة في حال عدم تفعيل Bucket التخزين
+          // ignore
         }
       }
 
@@ -505,14 +507,14 @@ export default function ServantDashboard({
     try {
       localStorage.setItem(acknowledgedStorageKey, JSON.stringify(updatedMap));
     } catch {
-      // تجاهل خطأ التخزين المحلي إذا كان غير متاح
+      // ignore
     }
 
     if (typeof onAcknowledgeNote === 'function') {
       try {
         await onAcknowledgeNote(note);
       } catch {
-        // استمرار العمل حتى لو الدالة غير مفعلة
+        // ignore
       }
     }
 
@@ -652,7 +654,8 @@ export default function ServantDashboard({
 
   const [selectedGenderFilter, setSelectedGenderFilter] = useState(defaultGenderScope);
 
-  const [activeServiceModule, setActiveServiceModule] = useState('search');
+  // التاب النشط: 'search' (كشف وبحث المخدومين) | 'attendance' (تسجيل الحضور الفوري) | 'followup' (افتقاد وغياب) | 'cases' (متابعة وملاحظات) | 'analytics' (تحليلات ومكافآت الشهر) | 'birthdays' (أعياد ميلاد)
+  const [activeTab, setActiveTab] = useState('search');
   const [selectedCaseTagFilter, setSelectedCaseTagFilter] = useState('الكل');
 
   const [cardDensity, setCardDensity] = useState('compact');
@@ -1231,9 +1234,9 @@ export default function ServantDashboard({
   });
 
   const modulePool =
-    activeServiceModule === 'followup'
+    activeTab === 'followup'
       ? followUpMembers
-      : activeServiceModule === 'cases'
+      : activeTab === 'cases'
       ? caseTrackingMembers
       : scopeMembers;
 
@@ -1416,7 +1419,7 @@ export default function ServantDashboard({
 
         if (typeof onRefresh === 'function') onRefresh();
       } catch {
-        // يعمل حتى لو الجدول غير منشأ بعد
+        // works locally
       }
     }
 
@@ -1512,8 +1515,17 @@ export default function ServantDashboard({
 
   const activeBirthdayList = birthdayTab === 'members' ? currentMonthMemberBirthdays : currentMonthServantBirthdays;
 
+  const tabsList = [
+    { id: 'search', label: '🔍 كشف وبحث المخدومين', badge: scopeMembers.length },
+    { id: 'attendance', label: '📋 تسجيل الحضور الفوري', badge: scopeMembers.length },
+    { id: 'followup', label: '⚠️ افتقاد وغياب', badge: followUpMembers.length },
+    { id: 'cases', label: '🤝 المتابعة وملاحظات الحالة', badge: caseTrackingMembers.length },
+    { id: 'analytics', label: '📊 تحليلات ومكافآت الشهر' },
+    { id: 'birthdays', label: `🎂 أعياد الميلاد (${activeBirthdayList.length})` }
+  ];
+
   return (
-    <div className="space-y-4" dir="rtl">
+    <div className="space-y-3 text-xs" dir="rtl">
       <input
         ref={cameraInputRef}
         type="file"
@@ -1525,128 +1537,43 @@ export default function ServantDashboard({
 
       <BirthdayBanner birthdays={scopeBirthdays} />
 
-      <div className="bg-white p-4 rounded-3xl border border-pink-200/80 shadow-2xs space-y-3 text-xs">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 font-black text-gray-900">
-            <Cake size={16} className="text-pink-600" />
-            <span>إشعارات أعياد ميلاد شهر ({currentMonth}) داخل شاشة الخدمة:</span>
+      {/* هيدر الخدمة وشيت التسلسل */}
+      <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base sm:text-xl font-black text-amber-200">لوحة الخادم — {servant?.full_name}</h2>
+            <span className="px-2.5 py-0.5 rounded-full bg-white/15 text-amber-100 text-[11px] font-black">
+              {selectedScope}
+            </span>
           </div>
-
-          <div className="flex items-center gap-1.5 bg-pink-50/80 p-1 rounded-2xl border border-pink-200 font-black">
-            <button
-              type="button"
-              onClick={() => setBirthdayTab('members')}
-              className={`px-3.5 py-1.5 rounded-xl cursor-pointer transition flex items-center gap-1.5 ${
-                birthdayTab === 'members'
-                  ? 'bg-[#7a1c24] text-white shadow-2xs'
-                  : 'text-gray-800 hover:bg-white'
-              }`}
-            >
-              🎂 أعياد ميلاد المخدومين ({currentMonthMemberBirthdays.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setBirthdayTab('servants')}
-              className={`px-3.5 py-1.5 rounded-xl cursor-pointer transition flex items-center gap-1.5 ${
-                birthdayTab === 'servants'
-                  ? 'bg-amber-800 text-white shadow-2xs'
-                  : 'text-gray-800 hover:bg-white'
-              }`}
-            >
-              🙏 أعياد ميلاد الخدام ({currentMonthServantBirthdays.length})
-            </button>
-          </div>
+          <p className="text-xs text-white/85 mt-1">
+            متابعة الحضور، الانصراف المبكر، فترة السماح ({graceMinutes} د)، الملاحظات، والافتقاد • المخدومين: <strong>{scopeMembers.length}</strong>
+          </p>
         </div>
 
-        {activeBirthdayList.length > 0 ? (
-          <div className="flex gap-2.5 overflow-x-auto pb-1">
-            {activeBirthdayList.map(person => {
-              const isTodayBday = person.birthDay === currentToday;
-              const phoneNum = person.phone || person.father_phone || person.mother_phone;
-              return (
-                <div
-                  key={person.id}
-                  className={`shrink-0 min-w-[230px] p-3 rounded-2xl border flex flex-col justify-between gap-2 ${
-                    isTodayBday
-                      ? 'bg-amber-50 border-amber-400'
-                      : 'bg-[#fbfaf7] border-pink-100'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black inline-block mb-1 ${
-                        isTodayBday ? 'bg-amber-600 text-white' : 'bg-pink-100 text-pink-900'
-                      }`}>
-                        {isTodayBday ? `🎉 النهارده (${person.birthDay}/${person.birthMonth})` : `📅 يوم ${person.birthDay}/${person.birthMonth}`}
-                      </span>
-                      <strong className="block text-xs font-black text-gray-900">{person.full_name}</strong>
-                      <span className="block text-[10px] text-gray-500 font-bold">
-                        {birthdayTab === 'members'
-                          ? (person.assigned_class || person.detailed_stage || 'مخدوم')
-                          : (person.assigned_class || person.service_stage || 'خادم')}
-                      </span>
-                    </div>
-                  </div>
-
-                  {phoneNum && (
-                    <div className="flex items-center gap-1.5 pt-1">
-                      <a
-                        href={`https://wa.me/2${phoneNum.replace(/\D/g, '')}?text=${encodeURIComponent(`كل سنة وأنت طيب يا ${person.full_name} 🎂🎉`)}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex-1 px-2.5 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-1"
-                      >
-                        <MessageCircle size={12} /> معايدة واتس
-                      </a>
-                      <a
-                        href={`tel:${phoneNum}`}
-                        className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-[11px] font-bold flex items-center justify-center"
-                        title="اتصال"
-                      >
-                        <Phone size={12} />
-                      </a>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="text-[11px] text-gray-500 font-bold bg-[#fbfaf7] p-3 rounded-2xl border border-gray-100">
-            {birthdayTab === 'members'
-              ? `لا توجد أعياد ميلاد مسجلة للمخدومين في شهر (${currentMonth}) حالياً.`
-              : `لا توجد أعياد ميلاد مسجلة للخدام في شهر (${currentMonth}) حالياً.`}
-          </p>
-        )}
-      </div>
-
-      {canExtractSheet && (
-        <div className="bg-teal-50/70 border border-teal-200 p-3.5 rounded-2xl flex flex-wrap justify-between items-center gap-2 text-xs">
-          <div className="font-bold text-teal-950">
-            📋 {isAdminUser ? 'بصفتك سوبر أدمن' : 'بصفتك أمين الخدمة'}، يمكنك سحب شيت التسلسل والافتقاد والترحيم وتصديره أو طباعته.
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {canEditSchedule && (
-              <button
-                type="button"
-                onClick={() => setShowItemsManager(prev => !prev)}
-                className={`px-3.5 py-2 rounded-xl font-black flex items-center gap-1.5 cursor-pointer transition ${
-                  showItemsManager ? 'bg-[#7a1c24] text-white' : 'bg-white text-[#7a1c24] border border-teal-300 hover:bg-teal-100/50'
-                }`}
-              >
-                <SlidersHorizontal size={14} /> المواعيد والبنود والمكافآت
-              </button>
-            )}
+        <div className="flex flex-wrap items-center gap-2">
+          {canExtractSheet && (
             <button
               type="button"
               onClick={() => setShowMasterSheet(true)}
-              className="px-4 py-2 bg-teal-800 hover:bg-teal-900 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
+              className="px-3.5 py-2 bg-teal-800 hover:bg-teal-900 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer shadow"
             >
-              <FileSpreadsheet size={15} /> فتح شيت التسلسل والافتقاد
+              <FileSpreadsheet size={15} /> شيت التسلسل والافتقاد
             </button>
-          </div>
+          )}
+          {canEditSchedule && (
+            <button
+              type="button"
+              onClick={() => setShowItemsManager(prev => !prev)}
+              className={`px-3 py-2 rounded-xl font-black flex items-center gap-1.5 cursor-pointer shadow transition ${
+                showItemsManager ? 'bg-amber-400 text-[#4a0e13]' : 'bg-white/15 hover:bg-white/25 text-white'
+              }`}
+            >
+              <SlidersHorizontal size={14} /> الإعدادات والمكافآت
+            </button>
+          )}
         </div>
-      )}
+      </div>
 
       {canEditSchedule && showItemsManager && (
         <div className="bg-white p-4 sm:p-5 rounded-3xl border border-[#7a1c24]/30 shadow-sm space-y-4 text-xs">
@@ -1745,145 +1672,14 @@ export default function ServantDashboard({
               />
             </label>
           </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-amber-200 space-y-2.5">
-              <strong className="text-amber-950 block font-black">1) بنود الملاحظات ومتابعة الحالة:</strong>
-              <form onSubmit={handleAddNoteTagItem} className="flex gap-1.5">
-                <input
-                  type="text"
-                  placeholder="مثال: يحتاج متابعة أو مشاكل..."
-                  className="flex-1 px-2.5 py-1.5 bg-white border rounded-xl text-xs font-bold"
-                  value={newNoteTagInput}
-                  onChange={e => setNewNoteTagInput(e.target.value)}
-                />
-                <button
-                  type="submit"
-                  className="px-3 py-1.5 bg-[#7a1c24] text-white rounded-xl font-black cursor-pointer shrink-0"
-                >
-                  إضافة
-                </button>
-              </form>
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {noteTags.map((tag, idx) => (
-                  <span
-                    key={idx}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-amber-200 rounded-xl text-[11px] font-bold text-gray-800"
-                  >
-                    {tag}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveNoteTagItem(tag)}
-                      className="text-red-600 hover:text-red-800 cursor-pointer"
-                      title="حذف البند"
-                    >
-                      <X size={12} />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-emerald-200 space-y-2.5">
-              <strong className="text-emerald-950 block font-black">2) أنواع الحضور والانصراف:</strong>
-              <form onSubmit={handleAddActivityTypeItem} className="flex gap-1.5">
-                <input
-                  type="text"
-                  placeholder="مثال: مدارس أحد أو قداس..."
-                  className="flex-1 px-2.5 py-1.5 bg-white border rounded-xl text-xs font-bold"
-                  value={newActivityTypeInput}
-                  onChange={e => setNewActivityTypeInput(e.target.value)}
-                />
-                <button
-                  type="submit"
-                  className="px-3 py-1.5 bg-emerald-700 text-white rounded-xl font-black cursor-pointer shrink-0"
-                >
-                  إضافة
-                </button>
-              </form>
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {activityTypes.map((actType, idx) => (
-                  <span
-                    key={idx}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-emerald-200 rounded-xl text-[11px] font-bold text-gray-800"
-                  >
-                    {actType}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveActivityTypeItem(actType)}
-                      className="text-red-600 hover:text-red-800 cursor-pointer"
-                      title="حذف النوع"
-                    >
-                      <X size={12} />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-blue-200 space-y-2.5">
-              <strong className="text-blue-950 block font-black">3) حالات الحضور والانصراف:</strong>
-              <form onSubmit={handleAddAttendanceStatusItem} className="space-y-1.5">
-                <div className="flex gap-1.5">
-                  <input
-                    type="text"
-                    placeholder="اسم الحالة (مثال: انصراف مبكر)"
-                    className="flex-1 px-2.5 py-1.5 bg-white border rounded-xl text-xs font-bold"
-                    value={newStatusLabelInput}
-                    onChange={e => setNewStatusLabelInput(e.target.value)}
-                  />
-                  <input
-                    type="text"
-                    className="w-12 px-2 py-1.5 bg-white border rounded-xl text-xs font-bold text-center"
-                    value={newStatusEmojiInput}
-                    onChange={e => setNewStatusEmojiInput(e.target.value)}
-                    title="رمز"
-                  />
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <select
-                    className="flex-1 px-2.5 py-1.5 bg-white border rounded-xl text-[11px] font-bold"
-                    value={newStatusAttendedInput ? 'yes' : 'no'}
-                    onChange={e => setNewStatusAttendedInput(e.target.value === 'yes')}
-                  >
-                    <option value="yes">يُحسب ضمن الحضور ✅</option>
-                    <option value="no">يُحسب ضمن الغياب/الافتقاد ❌</option>
-                  </select>
-                  <button
-                    type="submit"
-                    className="px-3 py-1.5 bg-blue-700 text-white rounded-xl font-black cursor-pointer shrink-0"
-                  >
-                    إضافة
-                  </button>
-                </div>
-              </form>
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {attendanceStatuses.map(st => (
-                  <span
-                    key={st.code}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-blue-200 rounded-xl text-[11px] font-bold text-gray-800"
-                  >
-                    {st.label} {st.emoji}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveAttendanceStatusItem(st.code)}
-                      className="text-red-600 hover:text-red-800 cursor-pointer"
-                      title="حذف الحالة"
-                    >
-                      <X size={12} />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
         </div>
       )}
 
-      <div className="space-y-3 bg-white p-4 rounded-3xl border border-gray-200 shadow-2xs">
-        <div className="flex flex-wrap justify-between items-center gap-2 px-1">
-          <div className="flex items-center gap-1.5 text-xs font-black text-gray-800">
-            <Layers size={15} className="text-[#7a1c24]" /> الخدمات الرئيسية (اضغط على الخدمة لفتح سنواتها وفصولها وبنود المتابعة):
+      {/* كارت اختيار الخدمة والمرحلة والفصل وتصفية النوع */}
+      <div className="bg-white p-4 rounded-3xl border border-gray-200 shadow-2xs space-y-3">
+        <div className="flex flex-wrap justify-between items-center gap-2">
+          <div className="flex items-center gap-1.5 font-black text-gray-800">
+            <Layers size={15} className="text-[#7a1c24]" /> الخدمة والفصل المستهدف:
           </div>
           <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold">
             <button
@@ -1891,7 +1687,7 @@ export default function ServantDashboard({
               onClick={() => setShowAllChurchServices(true)}
               className={`px-3 py-1 rounded-xl cursor-pointer transition ${showAllChurchServices ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700'}`}
             >
-              كل خدمات الكنيسة ({availableServicesList.length})
+              كل الخدمات ({availableServicesList.length})
             </button>
             {servantBoundMainGroups.length > 0 && (
               <button
@@ -1906,7 +1702,7 @@ export default function ServantDashboard({
                 }}
                 className={`px-3 py-1 rounded-xl cursor-pointer transition ${!showAllChurchServices ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700'}`}
               >
-                خدماتي المربوطة ({servantBoundMainGroups.length})
+                خدماتي فقط ({servantBoundMainGroups.length})
               </button>
             )}
             {canManageStructure && (
@@ -1917,7 +1713,7 @@ export default function ServantDashboard({
                   editMode ? 'bg-amber-700 text-white' : 'bg-amber-50 text-amber-900 border border-amber-200'
                 }`}
               >
-                <Pencil size={12} /> {editMode ? 'إنهاء التعديل' : 'إضافة / تعديل / حذف'}
+                <Pencil size={12} /> {editMode ? 'إنهاء التعديل' : 'تعديل الهيكل'}
               </button>
             )}
           </div>
@@ -1925,10 +1721,10 @@ export default function ServantDashboard({
 
         {editMode && canManageStructure && (
           <div className="bg-amber-50/70 p-3 rounded-2xl border border-amber-200 flex flex-wrap items-center gap-2 text-xs">
-            <span className="font-black text-amber-950">إضافة خدمة رئيسية جديدة:</span>
+            <span className="font-black text-amber-950">إضافة خدمة رئيسية:</span>
             <input
               type="text"
-              placeholder="مثال: خدمة الشباب أو خدمة أسر..."
+              placeholder="مثال: خدمة إعدادي / خدمة ثانوي..."
               className="px-3 py-1.5 bg-white border rounded-xl text-xs font-bold flex-1 min-w-[180px]"
               value={newGroupName}
               onChange={e => setNewGroupName(e.target.value)}
@@ -1938,522 +1734,174 @@ export default function ServantDashboard({
               onClick={handleAddMainService}
               className="px-3.5 py-1.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center gap-1 cursor-pointer"
             >
-              <Plus size={14} /> إضافة خدمة
+              <Plus size={14} /> إضافة
             </button>
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+        <div className="flex gap-2 overflow-x-auto pb-1">
           {displayedServiceTabs.map((srv, idx) => {
             const count = allMembers.filter(m => memberMatchesScope(m, srv, selectedGenderFilter)).length;
-            const srvStructure = getScopeStructure(srv);
             const isSelected = selectedScope === srv;
-            const isBound = isBoundToSpecificService(srv);
 
             return (
-              <div
+              <button
                 key={idx}
-                className={`p-3.5 rounded-3xl border transition shadow-2xs flex flex-col justify-between gap-2 ${
+                type="button"
+                onClick={() => {
+                  setSelectedScope(srv);
+                  setSelectedYearFilter('');
+                  setSelectedClassFilter('');
+                  setSearchQuery('');
+                  if (srv.includes('بنات')) setSelectedGenderFilter('بنات');
+                  else if (srv.includes('بنين')) setSelectedGenderFilter('بنين');
+                }}
+                className={`shrink-0 px-3.5 py-2 rounded-2xl border text-right transition cursor-pointer flex items-center gap-2 ${
                   isSelected
-                    ? 'bg-linear-to-l from-[#5c1319] to-[#7a1c24] text-white border-[#7a1c24]'
-                    : 'bg-[#fbfaf7] text-gray-900 hover:bg-red-50/40 border-gray-200'
+                    ? 'bg-[#7a1c24] text-white border-[#7a1c24] shadow-xs font-black'
+                    : 'bg-[#fbfaf7] text-gray-800 hover:bg-gray-100 border-gray-200 font-bold'
                 }`}
               >
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedScope(srv);
-                    setSelectedYearFilter('');
-                    setSelectedClassFilter('');
-                    setSearchQuery('');
-                    setActiveServiceModule('search');
-                    if (srv.includes('بنات')) setSelectedGenderFilter('بنات');
-                    else if (srv.includes('بنين')) setSelectedGenderFilter('بنين');
-                  }}
-                  className="w-full text-right cursor-pointer flex justify-between items-start gap-2"
-                >
-                  <div>
-                    <span className={`text-[10px] font-bold block mb-0.5 ${isSelected ? 'text-amber-200' : 'text-gray-400'}`}>
-                      {isAdminUser ? '🛡️ متاح للسوبر أدمن' : (isBound ? '⭐ خدمة مخصصة لك' : '⛪ خدمة بالكنيسة')}
-                    </span>
-                    <strong className="text-sm sm:text-base font-black block">{srv}</strong>
-                    <span className={`text-[10px] font-bold block mt-1 ${isSelected ? 'text-white/85' : 'text-gray-500'}`}>
-                      {srvStructure.years.length} سنوات/مراحل • {srvStructure.groupClasses.length} فصول
-                    </span>
-                  </div>
-                  <div className={`px-3 py-1 rounded-2xl text-xs font-black shrink-0 ${isSelected ? 'bg-white/20 text-white' : 'bg-red-50 text-[#7a1c24]'}`}>
-                    {count} مخدوم
-                  </div>
-                </button>
-
-                {editMode && canManageStructure && (
-                  <div className="pt-2 border-t border-black/10 flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
-                    {editingGroupOriginal === srv ? (
-                      <div className="flex items-center gap-1 w-full">
-                        <input
-                          type="text"
-                          className="px-2 py-1 rounded-lg bg-white text-gray-900 border flex-1 text-xs font-bold"
-                          value={editingGroupValue}
-                          onChange={e => setEditingGroupValue(e.target.value)}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleSaveGroupRename(srv)}
-                          className="px-2 py-1 bg-green-700 text-white rounded-lg cursor-pointer"
-                        >
-                          <Check size={12} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingGroupOriginal('')}
-                          className="px-2 py-1 bg-gray-200 text-gray-800 rounded-lg cursor-pointer"
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingGroupOriginal(srv);
-                            setEditingGroupValue(srv);
-                          }}
-                          className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 cursor-pointer ${
-                            isSelected ? 'bg-white/15 text-white hover:bg-white/25' : 'bg-white text-gray-800 border'
-                          }`}
-                        >
-                          <Pencil size={11} /> تعديل الاسم
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteGroup(srv)}
-                          className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 cursor-pointer ${
-                            isSelected ? 'bg-red-950/60 text-red-100 hover:bg-red-950' : 'bg-red-50 text-red-700 border border-red-200'
-                          }`}
-                        >
-                          <Trash2 size={11} /> حذف
-                        </button>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
+                <span>{srv}</span>
+                <span className={`px-2 py-0.5 rounded-xl text-[10px] font-black ${isSelected ? 'bg-white/20 text-white' : 'bg-red-50 text-[#7a1c24]'}`}>
+                  {count}
+                </span>
+              </button>
             );
           })}
         </div>
 
-        <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-amber-200/80 space-y-3 text-xs">
+        {/* السنوات والفصول وتصفية النوع */}
+        <div className="bg-[#fbfaf7] p-3 rounded-2xl border border-gray-200/80 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-1.5 font-black">
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedYearFilter('');
-                  setSelectedClassFilter('');
-                }}
-                className={`px-3 py-1 rounded-xl cursor-pointer ${
-                  !selectedYearFilter && !selectedClassFilter ? 'bg-[#7a1c24] text-white' : 'bg-white border text-gray-800'
-                }`}
-              >
-                🏫 {selectedScope}
-              </button>
+            <div className="flex flex-wrap items-center gap-1.5 font-black text-[11px]">
+              <span className="text-gray-500 font-normal">المسار:</span>
+              <span className="px-2.5 py-1 rounded-xl bg-white border text-gray-900">{selectedScope}</span>
               {selectedYearFilter && (
                 <>
                   <span className="text-gray-400">/</span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedClassFilter('')}
-                    className={`px-3 py-1 rounded-xl cursor-pointer ${
-                      !selectedClassFilter ? 'bg-amber-700 text-white' : 'bg-amber-50 border text-amber-950'
-                    }`}
-                  >
-                    📘 {selectedYearFilter}
-                  </button>
+                  <span className="px-2.5 py-1 rounded-xl bg-amber-50 border border-amber-300 text-amber-950">📘 {selectedYearFilter}</span>
                 </>
               )}
               {selectedClassFilter && (
                 <>
                   <span className="text-gray-400">/</span>
-                  <span className="px-3 py-1 rounded-xl bg-blue-700 text-white">
-                    📖 {selectedClassFilter}
-                  </span>
+                  <span className="px-2.5 py-1 rounded-xl bg-blue-700 text-white">📖 {selectedClassFilter}</span>
                 </>
               )}
             </div>
 
-            {(selectedYearFilter || selectedClassFilter) && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (selectedClassFilter) setSelectedClassFilter('');
-                  else setSelectedYearFilter('');
-                }}
-                className="px-2.5 py-1 bg-white hover:bg-gray-100 border rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-              >
-                <ArrowRight size={12} /> رجوع للمستوى السابق
-              </button>
-            )}
+            <div className="flex items-center gap-1 bg-white p-1 rounded-xl border font-bold">
+              {GENDER_SCOPES.map(gScope => (
+                <button
+                  key={gScope}
+                  type="button"
+                  onClick={() => setSelectedGenderFilter(gScope)}
+                  className={`px-2.5 py-0.5 rounded-lg text-[10px] cursor-pointer transition ${
+                    selectedGenderFilter === gScope ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  {gScope === 'الكل' ? '👥 الكل' : gScope === 'بنين' ? '♂️ بنين' : '♀️ بنات'}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {currentScopeStructure.matchedGroup && (
-            <div className="flex flex-wrap gap-3 text-[11px] text-gray-600 font-bold">
-              {currentScopeStructure.matchedGroup.head_servant_name && (
-                <span>⭐ الأمين: <strong className="text-gray-900">{currentScopeStructure.matchedGroup.head_servant_name}</strong></span>
-              )}
-              {(currentScopeStructure.matchedGroup.service_day || currentScopeStructure.matchedGroup.start_time) && (
-                <span>
-                  ⏰ {currentScopeStructure.matchedGroup.service_day}
-                  {currentScopeStructure.matchedGroup.start_time && ` (${currentScopeStructure.matchedGroup.start_time}`}
-                  {currentScopeStructure.matchedGroup.end_time && ` - ${currentScopeStructure.matchedGroup.end_time}`}
-                  {currentScopeStructure.matchedGroup.start_time && ')'}
-                </span>
-              )}
+          {currentScopeStructure.years.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              <span className="text-[11px] font-bold text-gray-500 self-center ml-1">السنوات:</span>
+              <button
+                type="button"
+                onClick={() => { setSelectedYearFilter(''); setSelectedClassFilter(''); }}
+                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold cursor-pointer ${
+                  !selectedYearFilter ? 'bg-[#7a1c24] text-white' : 'bg-white border text-gray-700'
+                }`}
+              >
+                الكل
+              </button>
+              {currentScopeStructure.years.map((yr, yIdx) => (
+                <button
+                  key={yIdx}
+                  type="button"
+                  onClick={() => { setSelectedYearFilter(selectedYearFilter === yr.yearName ? '' : yr.yearName); setSelectedClassFilter(''); }}
+                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold cursor-pointer border ${
+                    selectedYearFilter === yr.yearName ? 'bg-amber-700 text-white border-amber-700' : 'bg-white text-gray-800 hover:bg-amber-50'
+                  }`}
+                >
+                  {yr.yearName}
+                </button>
+              ))}
             </div>
           )}
 
-          <div className="space-y-1.5">
-            <span className="text-[11px] font-bold text-gray-700 block">
-              السنوات / المراحل داخل ({selectedScope}):
-            </span>
-            {currentScopeStructure.years.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
-                {currentScopeStructure.years.map((yr, yIdx) => {
-                  const yrCount = allMembers.filter(m => memberMatchesScope(m, selectedScope, selectedGenderFilter, yr.yearName, '')).length;
-                  const activeYr = selectedYearFilter === yr.yearName;
-
-                  return (
-                    <div
-                      key={yIdx}
-                      className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-bold transition ${
-                        activeYr ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-gray-800 hover:bg-amber-50'
-                      }`}
-                    >
-                      {editMode && editingYearOriginal === yr.yearName ? (
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="text"
-                            className="px-2 py-0.5 rounded bg-white text-gray-900 border text-xs font-bold"
-                            value={editingYearValue}
-                            onChange={e => setEditingYearValue(e.target.value)}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleSaveYearRename(yr.yearName)}
-                            className="px-1.5 py-0.5 bg-green-700 text-white rounded cursor-pointer"
-                          >
-                            <Check size={11} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditingYearOriginal('')}
-                            className="px-1.5 py-0.5 bg-gray-200 text-gray-800 rounded cursor-pointer"
-                          >
-                            <X size={11} />
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedYearFilter(activeYr ? '' : yr.yearName);
-                              setSelectedClassFilter('');
-                            }}
-                            className="cursor-pointer font-bold"
-                          >
-                            {yr.yearName} ({yrCount})
-                          </button>
-                          {editMode && canManageStructure && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingYearOriginal(yr.yearName);
-                                  setEditingYearValue(yr.yearName);
-                                }}
-                                className="p-0.5 hover:opacity-80 cursor-pointer"
-                                title="تعديل الاسم"
-                              >
-                                <Pencil size={11} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteYear(yr.yearName)}
-                                className="p-0.5 hover:opacity-80 cursor-pointer"
-                                title="حذف"
-                              >
-                                <Trash2 size={11} />
-                              </button>
-                            </>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-[11px] text-gray-500">لا توجد سنوات مسجلة بعد داخل هذه الخدمة — يمكنك إضافتها مباشرة من هنا.</p>
-            )}
-
-            {editMode && canManageStructure && (
-              <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                <input
-                  type="text"
-                  placeholder={`إضافة سنة أو اجتماع جديد داخل ${selectedScope}...`}
-                  className="px-3 py-1.5 bg-white border rounded-xl text-xs font-bold min-w-[180px]"
-                  value={newYearName}
-                  onChange={e => setNewYearName(e.target.value)}
-                />
-                <button
-                  type="button"
-                  onClick={handleAddYearToScope}
-                  className="px-3 py-1.5 bg-amber-700 hover:bg-amber-800 text-white rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer"
-                >
-                  <Plus size={13} /> إضافة سنة / اجتماع
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-1.5 pt-1 border-t border-amber-200/60">
-            <span className="text-[11px] font-bold text-gray-700 block">
-              الفصول {selectedYearFilter ? `التابعة لـ (${selectedYearFilter})` : `التابعة لـ (${selectedScope})`}:
-            </span>
-            {visibleClassesForSelection.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
-                {visibleClassesForSelection.map((cls) => {
-                  const clsCount = allMembers.filter(m => memberMatchesScope(m, selectedScope, selectedGenderFilter, selectedYearFilter, cls.class_name)).length;
-                  const activeCls = selectedClassFilter === cls.class_name;
-                  return (
-                    <div
-                      key={cls.id}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold transition ${
-                        activeCls ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-blue-950 hover:bg-blue-50'
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setSelectedClassFilter(activeCls ? '' : cls.class_name)}
-                        className="inline-flex items-center gap-1 cursor-pointer font-bold"
-                      >
-                        <BookOpen size={12} /> {cls.class_name} ({clsCount})
-                      </button>
-                      {editMode && canManageStructure && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteClass(cls)}
-                          className="p-0.5 hover:opacity-80 cursor-pointer"
-                          title="حذف الفصل"
-                        >
-                          <Trash2 size={11} />
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="text-[11px] text-gray-500">لا توجد فصول مضافة في هذا المستوى حالياً.</p>
-            )}
-
-            {editMode && canManageStructure && (
-              <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                <input
-                  type="text"
-                  placeholder={`إضافة فصل داخل (${selectedYearFilter || selectedScope})...`}
-                  className="px-3 py-1.5 bg-white border rounded-xl text-xs font-bold min-w-[180px]"
-                  value={newClassName}
-                  onChange={e => setNewClassName(e.target.value)}
-                />
-                <button
-                  type="button"
-                  onClick={handleAddClassToCurrentLevel}
-                  className="px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer"
-                >
-                  <Plus size={13} /> إضافة فصل
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="pt-2 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-          <span className="font-bold text-gray-700">
-            تخصيص الفئة داخل <strong className="text-[#7a1c24]">{selectedClassFilter || selectedYearFilter || selectedScope}</strong> (مفيد في إعدادي وثانوي):
-          </span>
-          <div className="flex items-center gap-1.5 bg-gray-100 p-1 rounded-xl font-bold">
-            {GENDER_SCOPES.map(gScope => (
+          {visibleClassesForSelection.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-1 border-t border-gray-200">
+              <span className="text-[11px] font-bold text-gray-500 self-center ml-1">الفصول:</span>
               <button
-                key={gScope}
                 type="button"
-                onClick={() => setSelectedGenderFilter(gScope)}
-                className={`px-3 py-1 rounded-lg cursor-pointer transition ${
-                  selectedGenderFilter === gScope ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-white'
+                onClick={() => setSelectedClassFilter('')}
+                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold cursor-pointer ${
+                  !selectedClassFilter ? 'bg-blue-700 text-white' : 'bg-white border text-gray-700'
                 }`}
               >
-                {gScope === 'الكل' ? '👥 الكل' : gScope === 'بنين' ? '♂️ بنين' : '♀️ بنات'}
+                كل الفصول
               </button>
-            ))}
-          </div>
+              {visibleClassesForSelection.map((cls) => (
+                <button
+                  key={cls.id}
+                  type="button"
+                  onClick={() => setSelectedClassFilter(selectedClassFilter === cls.class_name ? '' : cls.class_name)}
+                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold cursor-pointer border ${
+                    selectedClassFilter === cls.class_name ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-blue-950 hover:bg-blue-50'
+                  }`}
+                >
+                  {cls.class_name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-4 text-xs">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div>
-            <h2 className="text-base sm:text-lg font-black text-gray-900">
-              📖 {selectedScope}
-              {selectedYearFilter ? ` ← ${selectedYearFilter}` : ''}
-              {selectedClassFilter ? ` ← ${selectedClassFilter}` : ''}
-              {selectedGenderFilter !== 'الكل' ? ` (${selectedGenderFilter})` : ''}
-            </h2>
-            <p className="text-gray-500 font-bold mt-0.5">
-              المسؤول: {servant?.full_name || ''} • تاريخ اليوم: <strong className="text-gray-800">{getTodayLocalDate()}</strong> • الموعد: <strong className="text-gray-800">{officialStartTime}</strong> (سماح {graceMinutes} د)
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-            <div className="flex items-center bg-gray-100 p-1 rounded-2xl">
-              <button
-                type="button"
-                onClick={() => setCardDensity('compact')}
-                className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1 cursor-pointer transition ${
-                  cardDensity === 'compact' ? 'bg-white text-[#7a1c24] shadow-2xs' : 'text-gray-600'
-                }`}
-              >
-                <LayoutGrid size={13} /> مدمج
-              </button>
-              <button
-                type="button"
-                onClick={() => setCardDensity('detailed')}
-                className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1 cursor-pointer transition ${
-                  cardDensity === 'detailed' ? 'bg-white text-[#7a1c24] shadow-2xs' : 'text-gray-600'
-                }`}
-              >
-                <List size={13} /> تفصيلي
-              </button>
-            </div>
-
-            {canAdd && (
-              <button
-                type="button"
-                onClick={openAddMemberModal}
-                className="flex-1 md:flex-initial px-4 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white text-xs font-black rounded-2xl flex items-center justify-center gap-1.5 shadow cursor-pointer transition"
-              >
-                <UserPlus size={16} /> إضافة مخدوم للفصل
-              </button>
+      {/* شريط التابات الداخلية المنظمة */}
+      <div className="bg-white p-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto font-black">
+        {tabsList.map(tab => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => {
+              setActiveTab(tab.id);
+              if (['search', 'attendance', 'followup', 'cases'].includes(tab.id)) {
+                setActiveServiceModule(tab.id);
+              }
+            }}
+            className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 transition ${
+              activeTab === tab.id
+                ? 'bg-[#7a1c24] text-white shadow-2xs'
+                : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+            }`}
+          >
+            <span>{tab.label}</span>
+            {tab.badge !== undefined && (
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+                activeTab === tab.id ? 'bg-white/20 text-white' : 'bg-[#f9ecee] text-[#7a1c24]'
+              }`}>
+                {tab.badge}
+              </span>
             )}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-          <button
-            type="button"
-            onClick={() => setActiveServiceModule('search')}
-            className={`p-3.5 rounded-2xl border text-right transition cursor-pointer flex items-center justify-between gap-2 ${
-              activeServiceModule === 'search'
-                ? 'bg-[#7a1c24] text-white border-[#7a1c24] shadow-xs'
-                : 'bg-[#fbfaf7] text-gray-900 border-gray-200 hover:bg-red-50/40'
-            }`}
-          >
-            <div>
-              <span className="font-black text-xs sm:text-sm block">🔍 بحث ومخدومين</span>
-              <span className={`text-[10px] font-bold block mt-0.5 ${activeServiceModule === 'search' ? 'text-amber-100' : 'text-gray-500'}`}>
-                وصول سريع وبيانات كاملة
-              </span>
-            </div>
-            <span className={`px-2.5 py-1 rounded-xl font-black text-xs ${activeServiceModule === 'search' ? 'bg-white/20 text-white' : 'bg-red-50 text-[#7a1c24]'}`}>
-              {scopeMembers.length}
-            </span>
           </button>
+        ))}
+      </div>
 
-          <button
-            type="button"
-            onClick={() => setActiveServiceModule('attendance')}
-            className={`p-3.5 rounded-2xl border text-right transition cursor-pointer flex items-center justify-between gap-2 ${
-              activeServiceModule === 'attendance'
-                ? 'bg-emerald-800 text-white border-emerald-800 shadow-xs'
-                : 'bg-emerald-50/50 text-emerald-950 border-emerald-200 hover:bg-emerald-50'
-            }`}
-          >
-            <div>
-              <span className="font-black text-xs sm:text-sm block flex items-center gap-1">
-                <ClipboardCheck size={15} /> حضور وانصراف
-              </span>
-              <span className={`text-[10px] font-bold block mt-0.5 ${activeServiceModule === 'attendance' ? 'text-emerald-100' : 'text-emerald-700'}`}>
-                تسجيل فوري بتاريخ اليوم
-              </span>
-            </div>
-            <span className={`px-2.5 py-1 rounded-xl font-black text-xs ${activeServiceModule === 'attendance' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-900'}`}>
-              {scopeMembers.length}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveServiceModule('followup')}
-            className={`p-3.5 rounded-2xl border text-right transition cursor-pointer flex items-center justify-between gap-2 ${
-              activeServiceModule === 'followup'
-                ? 'bg-red-700 text-white border-red-700 shadow-xs'
-                : 'bg-red-50/50 text-red-950 border-red-200 hover:bg-red-50'
-            }`}
-          >
-            <div>
-              <span className="font-black text-xs sm:text-sm block flex items-center gap-1">
-                <AlertTriangle size={15} /> افتقاد
-              </span>
-              <span className={`text-[10px] font-bold block mt-0.5 ${activeServiceModule === 'followup' ? 'text-red-100' : 'text-red-700'}`}>
-                غياب/انقطاع لأكثر من {absenceDaysThreshold} يوم
-              </span>
-            </div>
-            <span className={`px-2.5 py-1 rounded-xl font-black text-xs ${activeServiceModule === 'followup' ? 'bg-white/20 text-white' : 'bg-red-100 text-red-800'}`}>
-              {followUpMembers.length}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveServiceModule('cases')}
-            className={`p-3.5 rounded-2xl border text-right transition cursor-pointer flex items-center justify-between gap-2 ${
-              activeServiceModule === 'cases'
-                ? 'bg-amber-800 text-white border-amber-800 shadow-xs'
-                : 'bg-amber-50/60 text-amber-950 border-amber-200 hover:bg-amber-50'
-            }`}
-          >
-            <div>
-              <span className="font-black text-xs sm:text-sm block flex items-center gap-1">
-                <HeartHandshake size={15} /> متابعة ومواظبة
-              </span>
-              <span className={`text-[10px] font-bold block mt-0.5 ${activeServiceModule === 'cases' ? 'text-amber-100' : 'text-amber-800'}`}>
-                ملاحظات، تنبيهات، ورحلات/مكافآت
-              </span>
-            </div>
-            <span className={`px-2.5 py-1 rounded-xl font-black text-xs ${activeServiceModule === 'cases' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-900'}`}>
-              {caseTrackingMembers.length}
-            </span>
-          </button>
-        </div>
-
-        <MonthlyAnalyticsAndRewards
-          servant={servant}
-          allMembers={allMembers}
-          scopedMembers={scopeMembers}
-          activities={activities}
-          availableServices={availableServicesList}
-          selectedScope={selectedScope}
-          hasClassesInScope={hasClassesInCurrentScope}
-          boundClasses={boundClassesForServant}
-        />
-
-        <div className="bg-[#fbfaf7] p-3 rounded-2xl border border-gray-200 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+      {/* شريط البحث الموحد وأزرار الإضافة والتنسيق (يظهر مع تابات المخدومين) */}
+      {['search', 'attendance', 'followup', 'cases'].includes(activeTab) && (
+        <div className="bg-white p-3 rounded-2xl border border-gray-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
           <div className="relative flex-1">
             <Search size={16} className="absolute right-3.5 top-2.5 text-[#7a1c24]" />
             <input
               type="text"
               placeholder="ابحث بالاسم، الأب، الأم، التليفون، أو العنوان..."
-              className="w-full pr-10 pl-8 py-2 bg-white border border-gray-200 rounded-xl text-xs font-bold outline-none focus:border-[#7a1c24]"
+              className="w-full pr-10 pl-8 py-2 bg-[#fbfaf7] border border-gray-200 rounded-xl text-xs font-bold outline-none focus:border-[#7a1c24] focus:bg-white"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
             />
@@ -2467,280 +1915,403 @@ export default function ServantDashboard({
               </button>
             )}
           </div>
-          <span className="text-[11px] font-bold text-gray-600 px-2">
-            النتائج: <strong className="text-gray-900">{displayedMembers.length}</strong>
-          </span>
-        </div>
 
-        {activeServiceModule === 'cases' && (
-          <div className="bg-amber-50/70 p-3 rounded-2xl border border-amber-200 flex flex-wrap items-center gap-1.5">
-            <span className="font-black text-amber-950 ml-1">تصفية الحالات:</span>
-            {['الكل', ...noteTags].map(tag => (
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center bg-gray-100 p-1 rounded-xl font-bold">
               <button
-                key={tag}
                 type="button"
-                onClick={() => setSelectedCaseTagFilter(tag)}
-                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold cursor-pointer transition ${
-                  selectedCaseTagFilter === tag
-                    ? 'bg-amber-800 text-white'
-                    : 'bg-white text-amber-950 border border-amber-200 hover:bg-amber-100/60'
+                onClick={() => setCardDensity('compact')}
+                className={`px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer ${
+                  cardDensity === 'compact' ? 'bg-white text-[#7a1c24] shadow-2xs font-black' : 'text-gray-600'
                 }`}
               >
-                {tag}
+                <LayoutGrid size={12} /> مدمج
               </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {displayedMembers.length === 0 ? (
-        <div className="bg-white p-8 sm:p-10 rounded-3xl border border-dashed border-gray-300 text-center space-y-3">
-          <div className="w-12 h-12 rounded-2xl bg-red-50 text-[#7a1c24] flex items-center justify-center mx-auto">
-            <Users size={24} />
-          </div>
-          <div>
-            <p className="text-sm font-black text-gray-800">لا يوجد مخدومون في هذا البند حالياً</p>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {searchQuery ? 'جرّب البحث بكلمة مختلفة أو امسح خانة البحث.' : 'يمكنك التبديل بين البنود أو إضافة مخدوم جديد للفصل.'}
-            </p>
-          </div>
-          {!searchQuery && activeServiceModule === 'search' && canAdd && (
-            <button
-              type="button"
-              onClick={openAddMemberModal}
-              className="px-4 py-2 bg-[#7a1c24] text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
-            >
-              <UserPlus size={15} /> إضافة مخدوم الآن
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className={cardDensity === 'compact' ? 'grid grid-cols-1 xl:grid-cols-2 gap-3' : 'grid gap-3'}>
-          {displayedMembers.map((m, index) => {
-            const mActs = activities.filter(a => a.member_id === m.id);
-            const mNotes = getMemberActiveNotes(m.id);
-            const insights = getMemberInsights(m.id);
-            const callPhone = m.phone || m.father_phone || m.mother_phone;
-            const memberPhoto = getMemberPhoto(m);
-
-            return (
-              <div
-                key={m.id}
-                className={`p-4 rounded-3xl border text-xs space-y-3 shadow-2xs hover:shadow-sm transition bg-white border-gray-200 ${insights.accentBar}`}
+              <button
+                type="button"
+                onClick={() => setCardDensity('detailed')}
+                className={`px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer ${
+                  cardDensity === 'detailed' ? 'bg-white text-[#7a1c24] shadow-2xs font-black' : 'text-gray-600'
+                }`}
               >
-                <div className="flex items-start gap-2.5 w-full">
-                  <div className="relative shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => triggerMemberPhotoCapture(m)}
-                      title="تصوير / تحديث صورة المخدوم"
-                      className={`w-12 h-12 rounded-2xl border overflow-hidden flex items-center justify-center font-black text-xs cursor-pointer transition ${insights.avatarTone}`}
-                    >
-                      {uploadingPhotoMemberId === m.id ? (
-                        <span className="text-[10px]">...</span>
-                      ) : memberPhoto ? (
-                        <img src={memberPhoto} alt={m.full_name} className="w-full h-full object-cover" />
-                      ) : (
-                        <span>{getInitials(m.full_name)}</span>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => triggerMemberPhotoCapture(m)}
-                      title="التقاط صورة للمخدوم"
-                      className="w-5 h-5 rounded-full bg-[#7a1c24] text-white flex items-center justify-center absolute -bottom-1 -left-1 shadow cursor-pointer"
-                    >
-                      <Camera size={11} />
-                    </button>
-                  </div>
+                <List size={12} /> تفصيلي
+              </button>
+            </div>
 
-                  <div className="space-y-1.5 w-full min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="px-2 py-0.5 bg-[#7a1c24] text-white rounded-lg text-[10px] font-black">#{index + 1}</span>
-                      <h3 className="text-sm font-black text-gray-900">{m.full_name}</h3>
-                      {m.gender && (
-                        <span className="px-2 py-0.5 bg-pink-50 text-pink-900 rounded-lg text-[10px] font-bold">
-                          {m.gender === 'أنثى' ? '♀️ بنات' : '♂️ بنين'}
-                        </span>
-                      )}
-                      {m.assigned_class && (
-                        <span className="px-2 py-0.5 bg-red-50 text-[#7a1c24] rounded-lg text-[10px] font-bold">
-                          ⛪ {m.assigned_class}
-                        </span>
-                      )}
-                      <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${insights.badgeColor}`}>
-                        {insights.label}
-                      </span>
-                      {insights.isRegularAndRewardEligible && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setRewardModal({
-                              open: true,
-                              member: m,
-                              streakCount: insights.attendedCount,
-                              reward_type: 'رحلة مجانية',
-                              reward_title: 'رحلة مجانية للمواظبين',
-                              notes: ''
-                            })
-                          }
-                          className="px-2 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 rounded-lg text-[10px] font-black cursor-pointer inline-flex items-center gap-1"
-                          title="مواظب ومتميز — اضغط لتسجيل رحلة أو مكافأة"
-                        >
-                          <Award size={11} /> مواظب ({insights.attendedCount}) — رحلة/مكافأة
-                        </button>
-                      )}
-                      {insights.hasQuestionMarks && (
-                        <span className="px-2 py-0.5 bg-amber-100 text-amber-950 border border-amber-300 rounded-lg text-[10px] font-black">
-                          ❓❓ تكرار تأخير/انصراف ({insights.irregularCount}) — متابعة
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="text-gray-600 space-y-1 text-[11px]">
-                      <p className="flex flex-wrap gap-x-3 gap-y-1">
-                        <span>👨‍👦 الأب: <strong className="text-gray-800">{m.father_full_name || '—'}</strong> (📞 {m.father_phone || '—'})</span>
-                        <span>👩‍👦 الأم: <strong className="text-gray-800">{m.mother_full_name || '—'}</strong> (📞 {m.mother_phone || '—'})</span>
-                      </p>
-                      <p className="text-gray-500 flex flex-wrap items-center gap-x-3 gap-y-1">
-                        <span className="inline-flex items-center gap-1"><Phone size={11} /> {m.phone || 'غير مسجل'}</span>
-                        <span className="inline-flex items-center gap-1"><MapPin size={11} /> {m.address || 'بدون عنوان'}</span>
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {activeServiceModule === 'attendance' && (
-                  <div className="bg-emerald-50/50 p-2.5 rounded-2xl border border-emerald-200/80 flex flex-wrap gap-1.5">
-                    {attendanceStatuses.map(st => (
-                      <button
-                        key={st.code}
-                        type="button"
-                        onClick={() => handleQuickMemberAttendance(m, st.code)}
-                        className={`px-2.5 py-1.5 rounded-xl font-bold text-[11px] cursor-pointer text-white ${
-                          st.attended
-                            ? 'bg-emerald-700 hover:bg-emerald-800'
-                            : 'bg-red-700 hover:bg-red-800'
-                        }`}
-                      >
-                        {st.label} {st.emoji}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 pt-1">
-                  {callPhone ? (
-                    <>
-                      <a
-                        href={`https://wa.me/2${callPhone.replace(/\D/g, '')}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-2.5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold flex items-center justify-center gap-1 transition"
-                      >
-                        <MessageCircle size={13} /> واتس
-                      </a>
-                      <a
-                        href={`tel:${callPhone}`}
-                        className="px-2.5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl font-bold flex items-center justify-center gap-1 transition"
-                      >
-                        <Phone size={13} /> اتصال
-                      </a>
-                    </>
-                  ) : (
-                    <>
-                      <span className="px-2.5 py-2 bg-gray-50 text-gray-400 rounded-xl font-bold flex items-center justify-center gap-1">
-                        <MessageCircle size={13} /> واتس
-                      </span>
-                      <span className="px-2.5 py-2 bg-gray-50 text-gray-400 rounded-xl font-bold flex items-center justify-center gap-1">
-                        <Phone size={13} /> اتصال
-                      </span>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setNoteMember(m);
-                      setNewNoteTag(insights.hasQuestionMarks ? (noteTags.find(t => t.includes('متابعة')) || noteTags[0]) : (noteTags[0] || 'عادي'));
-                      setNoteModal(true);
-                    }}
-                    className="px-2.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition"
-                  >
-                    <MessageSquareText size={13} /> ملاحظة ({mNotes.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const firstStatus = attendanceStatuses[0] || { code: 'present', attended: true };
-                      setSelectedMember(m);
-                      setActForm({
-                        activity_date: getTodayLocalDate(),
-                        activity_type: activityTypes[0] || 'مدارس أحد',
-                        status_code: firstStatus.code,
-                        expected_time: officialStartTime || '10:00',
-                        check_in_time: getNowHHMM(),
-                        check_out_time: '',
-                        attended: firstStatus.attended,
-                        notes: ''
-                      });
-                      setActModal(true);
-                    }}
-                    className="px-2.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition"
-                  >
-                    <Calendar size={13} /> حضور وأوقات
-                  </button>
-                </div>
-
-                {mNotes.length > 0 && (
-                  <div className="bg-amber-50/90 p-3 rounded-2xl border border-amber-300 space-y-2 text-[11px]">
-                    <span className="font-black text-[#7a1c24] flex items-center gap-1">
-                      <CheckCircle2 size={13} /> تنبيهات وملاحظات المتابعة:
-                    </span>
-                    {mNotes.map(n => (
-                      <div key={n.id} className="bg-white p-2.5 rounded-xl border border-amber-200 flex flex-col sm:flex-row justify-between sm:items-center gap-2">
-                        <div className="space-y-1">
-                          <span className="px-1.5 py-0.5 bg-red-100 text-[#7a1c24] rounded text-[9px] font-bold ml-1">{n.behavior_tag || noteTags[0] || 'عادي'}</span>
-                          <span className="text-gray-800 font-bold">{n.note_text}</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleAcknowledgeNote(n)}
-                          className="px-3 py-1.5 bg-green-700 hover:bg-green-800 text-white rounded-xl font-bold text-[11px] shrink-0 cursor-pointer self-end sm:self-center transition"
-                        >
-                          علمت ✅
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-[#fbfaf7] p-2.5 rounded-2xl border border-gray-100 text-[11px]">
-                  <div>
-                    <span className="text-gray-400 block text-[10px]">أب الاعتراف:</span>
-                    <strong className="text-[#7a1c24]">{m.confession_father || 'غير محدد'}</strong>
-                  </div>
-                  <div>
-                    <span className="text-gray-400 block text-[10px]">الاعتراف:</span>
-                    <span className={`px-2 py-0.5 rounded font-bold inline-block text-[10px] ${m.confession_status === 'منتظم' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900'}`}>
-                      {m.confession_status}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400 block text-[10px]">التناول:</span>
-                    <strong className={m.has_communion ? 'text-green-700' : 'text-red-600'}>
-                      {m.has_communion ? 'تناول ✅' : 'لم يتناول ❌'}
-                    </strong>
-                  </div>
-                  <div>
-                    <span className="text-gray-400 block text-[10px]">المواظبة والأنشطة:</span>
-                    <strong className="text-blue-700">{insights.attendedCount} حضور / {mActs.length} سجل</strong>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+            {canAdd && (
+              <button
+                type="button"
+                onClick={openAddMemberModal}
+                className="px-3.5 py-2 bg-[#7a1c24] hover:bg-[#5c1319] text-white text-xs font-black rounded-xl flex items-center gap-1 cursor-pointer shadow"
+              >
+                <UserPlus size={14} /> إضافة مخدوم
+              </button>
+            )}
+          </div>
         </div>
       )}
+
+      {/* حاوية الـ Scroll المنظمة لمحتوى التاب المختار */}
+      <div ref={scrollBoxRef} className="max-h-[calc(100vh-270px)] overflow-y-auto pr-1 space-y-3">
+        {/* TAB 1: التحليلات الشهرية والمكافآت */}
+        {activeTab === 'analytics' && (
+          <MonthlyAnalyticsAndRewards
+            servant={servant}
+            allMembers={allMembers}
+            scopedMembers={scopeMembers}
+            activities={activities}
+            availableServices={availableServicesList}
+            selectedScope={selectedScope}
+            hasClassesInScope={hasClassesInCurrentScope}
+            boundClasses={boundClassesForServant}
+          />
+        )}
+
+        {/* TAB 2: أعياد ميلاد الشهر */}
+        {activeTab === 'birthdays' && (
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-pink-200 space-y-3">
+            <div className="flex items-center justify-between gap-2 border-b pb-2.5">
+              <strong className="text-sm font-black text-gray-900 flex items-center gap-1.5">
+                <Cake size={16} className="text-pink-600" /> كل أعياد ميلاد شهر ({currentMonth})
+              </strong>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setBirthdayTab('members')}
+                  className={`px-3 py-1.5 rounded-xl font-bold cursor-pointer ${
+                    birthdayTab === 'members' ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  المخدومين ({currentMonthMemberBirthdays.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBirthdayTab('servants')}
+                  className={`px-3 py-1.5 rounded-xl font-bold cursor-pointer ${
+                    birthdayTab === 'servants' ? 'bg-amber-800 text-white' : 'bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  الخدام ({currentMonthServantBirthdays.length})
+                </button>
+              </div>
+            </div>
+
+            {activeBirthdayList.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-6">لا توجد أعياد ميلاد مسجلة في هذا الشهر.</p>
+            ) : (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                {activeBirthdayList.map(person => {
+                  const isTodayBday = person.birthDay === currentToday;
+                  const phoneNum = person.phone || person.father_phone || person.mother_phone;
+                  return (
+                    <div
+                      key={person.id}
+                      className={`p-3.5 rounded-2xl border flex flex-col justify-between gap-2 ${
+                        isTodayBday ? 'bg-amber-50 border-amber-400' : 'bg-[#fbfaf7]'
+                      }`}
+                    >
+                      <div>
+                        <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black inline-block mb-1 ${
+                          isTodayBday ? 'bg-amber-600 text-white' : 'bg-pink-100 text-pink-900'
+                        }`}>
+                          {isTodayBday ? `🎉 النهارده (${person.birthDay}/${person.birthMonth})` : `📅 يوم ${person.birthDay}/${person.birthMonth}`}
+                        </span>
+                        <strong className="block text-sm text-gray-900">{person.full_name}</strong>
+                        <span className="text-gray-500">
+                          {birthdayTab === 'members' ? (person.assigned_class || person.detailed_stage) : (person.service_stage || 'خادم')}
+                        </span>
+                      </div>
+                      {phoneNum && (
+                        <div className="flex gap-1.5 pt-1">
+                          <a
+                            href={`https://wa.me/2${phoneNum.replace(/\D/g, '')}?text=${encodeURIComponent(`كل سنة وأنت طيب يا ${person.full_name} 🎂🎉`)}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex-1 py-1.5 bg-green-600 text-white rounded-xl font-bold flex items-center justify-center gap-1 text-[11px]"
+                          >
+                            <MessageCircle size={12} /> معايدة واتس
+                          </a>
+                          <a
+                            href={`tel:${phoneNum}`}
+                            className="px-3 py-1.5 bg-gray-100 text-gray-800 rounded-xl font-bold"
+                          >
+                            <Phone size={12} />
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TABS (search, attendance, followup, cases) */}
+        {['search', 'attendance', 'followup', 'cases'].includes(activeTab) && (
+          <>
+            {activeTab === 'cases' && (
+              <div className="bg-amber-50/70 p-3 rounded-2xl border border-amber-200 flex flex-wrap items-center gap-1.5">
+                <span className="font-black text-amber-950 ml-1">تصفية الحالات:</span>
+                {['الكل', ...noteTags].map(tag => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setSelectedCaseTagFilter(tag)}
+                    className={`px-2.5 py-1 rounded-xl text-[11px] font-bold cursor-pointer transition ${
+                      selectedCaseTagFilter === tag
+                        ? 'bg-amber-800 text-white'
+                        : 'bg-white text-amber-950 border border-amber-200 hover:bg-amber-100/60'
+                    }`}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {displayedMembers.length === 0 ? (
+              <div className="bg-white p-8 sm:p-10 rounded-3xl border border-dashed border-gray-300 text-center space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-red-50 text-[#7a1c24] flex items-center justify-center mx-auto">
+                  <Users size={24} />
+                </div>
+                <div>
+                  <p className="text-sm font-black text-gray-800">لا يوجد مخدومون في هذا البند حالياً</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {searchQuery ? 'جرّب البحث بكلمة مختلفة أو امسح خانة البحث.' : 'يمكنك التبديل بين البنود أو إضافة مخدوم جديد للفصل.'}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className={cardDensity === 'compact' ? 'grid grid-cols-1 xl:grid-cols-2 gap-3' : 'grid gap-3'}>
+                {displayedMembers.map((m, index) => {
+                  const mActs = activities.filter(a => a.member_id === m.id);
+                  const mNotes = getMemberActiveNotes(m.id);
+                  const insights = getMemberInsights(m.id);
+                  const callPhone = m.phone || m.father_phone || m.mother_phone;
+                  const memberPhoto = getMemberPhoto(m);
+
+                  return (
+                    <div
+                      key={m.id}
+                      className={`p-4 rounded-3xl border text-xs space-y-3 shadow-2xs hover:shadow-sm transition bg-white border-gray-200 ${insights.accentBar}`}
+                    >
+                      <div className="flex items-start gap-2.5 w-full">
+                        <div className="relative shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => triggerMemberPhotoCapture(m)}
+                            title="تصوير / تحديث صورة المخدوم"
+                            className={`w-12 h-12 rounded-2xl border overflow-hidden flex items-center justify-center font-black text-xs cursor-pointer transition ${insights.avatarTone}`}
+                          >
+                            {uploadingPhotoMemberId === m.id ? (
+                              <span className="text-[10px]">...</span>
+                            ) : memberPhoto ? (
+                              <img src={memberPhoto} alt={m.full_name} className="w-full h-full object-cover" />
+                            ) : (
+                              <span>{getInitials(m.full_name)}</span>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => triggerMemberPhotoCapture(m)}
+                            title="التقاط صورة للمخدوم"
+                            className="w-5 h-5 rounded-full bg-[#7a1c24] text-white flex items-center justify-center absolute -bottom-1 -left-1 shadow cursor-pointer"
+                          >
+                            <Camera size={11} />
+                          </button>
+                        </div>
+
+                        <div className="space-y-1.5 w-full min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="px-2 py-0.5 bg-[#7a1c24] text-white rounded-lg text-[10px] font-black">#{index + 1}</span>
+                            <h3 className="text-sm font-black text-gray-900">{m.full_name}</h3>
+                            {m.gender && (
+                              <span className="px-2 py-0.5 bg-pink-50 text-pink-900 rounded-lg text-[10px] font-bold">
+                                {m.gender === 'أنثى' ? '♀️ بنات' : '♂️ بنين'}
+                              </span>
+                            )}
+                            {m.assigned_class && (
+                              <span className="px-2 py-0.5 bg-red-50 text-[#7a1c24] rounded-lg text-[10px] font-bold">
+                                ⛪ {m.assigned_class}
+                              </span>
+                            )}
+                            <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${insights.badgeColor}`}>
+                              {insights.label}
+                            </span>
+                            {insights.isRegularAndRewardEligible && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setRewardModal({
+                                    open: true,
+                                    member: m,
+                                    streakCount: insights.attendedCount,
+                                    reward_type: 'رحلة مجانية',
+                                    reward_title: 'رحلة مجانية للمواظبين',
+                                    notes: ''
+                                  })
+                                }
+                                className="px-2 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 rounded-lg text-[10px] font-black cursor-pointer inline-flex items-center gap-1"
+                                title="مواظب ومتميز — اضغط لتسجيل رحلة أو مكافأة"
+                              >
+                                <Award size={11} /> مواظب ({insights.attendedCount}) — رحلة/مكافأة
+                              </button>
+                            )}
+                            {insights.hasQuestionMarks && (
+                              <span className="px-2 py-0.5 bg-amber-100 text-amber-950 border border-amber-300 rounded-lg text-[10px] font-black">
+                                ❓❓ تكرار تأخير/انصراف ({insights.irregularCount}) — متابعة
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="text-gray-600 space-y-1 text-[11px]">
+                            <p className="flex flex-wrap gap-x-3 gap-y-1">
+                              <span>👨‍👦 الأب: <strong className="text-gray-800">{m.father_full_name || '—'}</strong> (📞 {m.father_phone || '—'})</span>
+                              <span>👩‍👦 الأم: <strong className="text-gray-800">{m.mother_full_name || '—'}</strong> (📞 {m.mother_phone || '—'})</span>
+                            </p>
+                            <p className="text-gray-500 flex flex-wrap items-center gap-x-3 gap-y-1">
+                              <span className="inline-flex items-center gap-1"><Phone size={11} /> {m.phone || 'غير مسجل'}</span>
+                              <span className="inline-flex items-center gap-1"><MapPin size={11} /> {m.address || 'بدون عنوان'}</span>
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {activeTab === 'attendance' && (
+                        <div className="bg-emerald-50/50 p-2.5 rounded-2xl border border-emerald-200/80 flex flex-wrap gap-1.5">
+                          {attendanceStatuses.map(st => (
+                            <button
+                              key={st.code}
+                              type="button"
+                              onClick={() => handleQuickMemberAttendance(m, st.code)}
+                              className={`px-2.5 py-1.5 rounded-xl font-bold text-[11px] cursor-pointer text-white ${
+                                st.attended
+                                  ? 'bg-emerald-700 hover:bg-emerald-800'
+                                  : 'bg-red-700 hover:bg-red-800'
+                              }`}
+                            >
+                              {st.label} {st.emoji}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 pt-1">
+                        {callPhone ? (
+                          <>
+                            <a
+                              href={`https://wa.me/2${callPhone.replace(/\D/g, '')}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-2.5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold flex items-center justify-center gap-1 transition"
+                            >
+                              <MessageCircle size={13} /> واتس
+                            </a>
+                            <a
+                              href={`tel:${callPhone}`}
+                              className="px-2.5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl font-bold flex items-center justify-center gap-1 transition"
+                            >
+                              <Phone size={13} /> اتصال
+                            </a>
+                          </>
+                        ) : (
+                          <>
+                            <span className="px-2.5 py-2 bg-gray-50 text-gray-400 rounded-xl font-bold flex items-center justify-center gap-1">
+                              <MessageCircle size={13} /> واتس
+                            </span>
+                            <span className="px-2.5 py-2 bg-gray-50 text-gray-400 rounded-xl font-bold flex items-center justify-center gap-1">
+                              <Phone size={13} /> اتصال
+                            </span>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNoteMember(m);
+                            setNewNoteTag(insights.hasQuestionMarks ? (noteTags.find(t => t.includes('متابعة')) || noteTags[0]) : (noteTags[0] || 'عادي'));
+                            setNoteModal(true);
+                          }}
+                          className="px-2.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition"
+                        >
+                          <MessageSquareText size={13} /> ملاحظة ({mNotes.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const firstStatus = attendanceStatuses[0] || { code: 'present', attended: true };
+                            setSelectedMember(m);
+                            setActForm({
+                              activity_date: getTodayLocalDate(),
+                              activity_type: activityTypes[0] || 'مدارس أحد',
+                              status_code: firstStatus.code,
+                              expected_time: officialStartTime || '10:00',
+                              check_in_time: getNowHHMM(),
+                              check_out_time: '',
+                              attended: firstStatus.attended,
+                              notes: ''
+                            });
+                            setActModal(true);
+                          }}
+                          className="px-2.5 py-2 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition"
+                        >
+                          <Calendar size={13} /> حضور وأوقات
+                        </button>
+                      </div>
+
+                      {mNotes.length > 0 && (
+                        <div className="bg-amber-50/90 p-3 rounded-2xl border border-amber-300 space-y-2 text-[11px]">
+                          <span className="font-black text-[#7a1c24] flex items-center gap-1">
+                            <CheckCircle2 size={13} /> تنبيهات وملاحظات المتابعة:
+                          </span>
+                          {mNotes.map(n => (
+                            <div key={n.id} className="bg-white p-2.5 rounded-xl border border-amber-200 flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                              <div className="space-y-1">
+                                <span className="px-1.5 py-0.5 bg-red-100 text-[#7a1c24] rounded text-[9px] font-bold ml-1">{n.behavior_tag || noteTags[0] || 'عادي'}</span>
+                                <span className="text-gray-800 font-bold">{n.note_text}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleAcknowledgeNote(n)}
+                                className="px-3 py-1.5 bg-green-700 hover:bg-green-800 text-white rounded-xl font-bold text-[11px] shrink-0 cursor-pointer self-end sm:self-center transition"
+                              >
+                                علمت ✅
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-[#fbfaf7] p-2.5 rounded-2xl border border-gray-100 text-[11px]">
+                        <div>
+                          <span className="text-gray-400 block text-[10px]">أب الاعتراف:</span>
+                          <strong className="text-[#7a1c24]">{m.confession_father || 'غير محدد'}</strong>
+                        </div>
+                        <div>
+                          <span className="text-gray-400 block text-[10px]">الاعتراف:</span>
+                          <span className={`px-2 py-0.5 rounded font-bold inline-block text-[10px] ${m.confession_status === 'منتظم' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900'}`}>
+                            {m.confession_status}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-400 block text-[10px]">التناول:</span>
+                          <strong className={m.has_communion ? 'text-green-700' : 'text-red-600'}>
+                            {m.has_communion ? 'تناول ✅' : 'لم يتناول ❌'}
+                          </strong>
+                        </div>
+                        <div>
+                          <span className="text-gray-400 block text-[10px]">المواظبة والأنشطة:</span>
+                          <strong className="text-blue-700">{insights.attendedCount} حضور / {mActs.length} سجل</strong>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {quickStatusModal.open && quickStatusModal.member && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-55">
