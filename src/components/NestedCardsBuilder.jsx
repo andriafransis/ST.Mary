@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import {
   FolderPlus, Edit3, Trash2, ArrowRight, FolderOpen,
   Save, X, Layers, ExternalLink, FileText, ChevronLeft,
-  Search, Power, Play, RotateCcw, ShieldCheck, Plus, LayoutGrid
+  Search, Power, Play, RotateCcw, ShieldCheck, Plus, LayoutGrid, ArrowLeftRight
 } from 'lucide-react';
 
 const COLOR_THEMES = {
@@ -45,12 +45,12 @@ export const ADMIN_CARDS_LOCAL_KEY = 'church_admin_cards_config_v1';
 export const SCREEN_TARGETS = [
   { key: 'admin_hub', label: '🛡️ لوحة الإدارة الرئيسية' },
   { key: 'setup_hub', label: '🛠️ الإعدادات SETUP' },
-  { key: 'priest_hub', label: '✝ شاشة الأب الكاهن' },
-  { key: 'service_hub', label: '🏫 الخدمة ومدارس الأحد' },
+  { key: 'priest_hub', label: '✝ شاشة الكاهن' },
+  { key: 'service_hub', label: '🏫 الخدمة (الكاهن)' },
   { key: 'confessions', label: '🙏 الاعترافات' },
   { key: 'masses', label: '⛪ جدول القداسات' },
   { key: 'personal', label: '📅 الجدول الخاص بالكاهن' },
-  { key: 'cases', label: '🔍 بحث الحالة والأسر' },
+  { key: 'cases', label: '🔍 بحث الحالة' },
   { key: 'edu_center', label: '🎓 المركز التعليمي' },
   { key: 'joseph_arimathea', label: '🕊️ خدمة يوسف الرامي' },
   { key: 'servant_hub', label: '📖 شاشة الخادم' },
@@ -85,6 +85,31 @@ export const INTERNAL_SCREENS = [
   { key: 'custom_cards', label: 'كروت إضافية للكاهن' },
   { key: 'page_designer', label: 'التصميم وتعديل الصفحات' },
   { key: 'settings', label: 'الإعدادات وهوية الكنيسة' }
+];
+
+const DEFAULT_PRIEST_CARDS = [
+  { id: 'service_hub', icon: '🏫', title: 'الخدمة ومدارس الأحد', desc: '3 كروت مستقلة: شيت التسلسل والافتقاد والترحيم • الالتزام والكفاءة والعروض والرحلات • جدول الخدمة', screen: 'priest_hub' },
+  { id: 'confessions', icon: '🙏', title: 'الاعترافات', desc: 'المواعيد بالمدة، المعترفون (داخل/خارج الكنيسة) والملف الروحي، والافتقاد', screen: 'priest_hub' },
+  { id: 'masses', icon: '⛪', title: 'جدول القداسات', desc: 'اسم القداس، كاهن خادم أو شريك، والفئات', screen: 'priest_hub' },
+  { id: 'personal', icon: '📅', title: 'الجدول الخاص بالكاهن', desc: 'صلاة طشت، خطوبة، أكاليل، رحلات ومؤتمرات بالأقساط والأتوبيسات وطباعة الكشوفات', screen: 'priest_hub' },
+  { id: 'cases', icon: '🔍', title: 'بحث الحالة / العيلة', desc: 'البحث، التصنيفات، الإضافة، المرفقات، وطلبات الأسر المستترة وطباعة PDF', screen: 'priest_hub' },
+  { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل التعليمية، المواد الدراسية، الأسعار، وتسجيل الحضور', screen: 'priest_hub' },
+  { id: 'joseph_arimathea', icon: '🕊️', title: 'خدمة يوسف الرامي', desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، وخط سير السائق ومكان الدفن', screen: 'priest_hub' }
+];
+
+const DEFAULT_PRIEST_SUBCARDS = [
+  // كروت الخدمة (الكاهن)
+  { id: 'priest_srv_sequence', icon: '📋', title: 'شيت التسلسل والافتقاد والترحيم', desc: 'عرض كل خدمة على حدة وبند المعاشات + حالة الافتقاد وذكرى الترحيم', screen: 'service_hub' },
+  { id: 'priest_srv_commitment', icon: '🏅', title: 'الالتزام والكفاءة والعروض والرحلات', desc: 'متابعة الالتزام والغياب والتأخير، ومنح العروض والخصومات، والملاحظات لولي الأمر', screen: 'service_hub' },
+  { id: 'priest_srv_schedule', icon: '🏫', title: 'جدول الخدمة', desc: 'كروت الخدمات، القيادات، الفصول، الخدام، وافتقاد الخدمة', screen: 'service_hub' },
+  // كروت الاعترافات
+  { id: 'priest_conf_slots', icon: '📅', title: 'إضافة مواعيد الاعتراف', desc: 'تحديد المدة (أسبوع/شهر/3 شهور)، صباحي/مسائي', screen: 'confessions' },
+  { id: 'priest_conf_list', icon: '🙏', title: 'المعترفون', desc: 'الملف الروحي، الثغرات والإجراءات، والقانون الروحي', screen: 'confessions' },
+  { id: 'priest_conf_visitations', icon: '🕊️', title: 'افتقاد المعترفين', desc: 'افتقاد بزيارة، رسالة واتساب، أو اتصال', screen: 'confessions' },
+  // كروت بحث الحالة
+  { id: 'priest_cases_search', icon: '🔎', title: 'بحث الحالة / العيلة', desc: 'الاسم الرباعي، الموبايل، العنوان، التقييم، المرفقات، وطباعة شيت رسمي', screen: 'cases' },
+  { id: 'priest_cases_cats', icon: '📂', title: 'تصنيفات الحالات', desc: 'حالات مستترة، إخوة الرب، متوسطة، مستقرة', screen: 'cases' },
+  { id: 'priest_cases_add', icon: '➕', title: 'إضافة حالة جديدة', desc: 'رب الأسرة، الزوجة، الأولاد، الاحتياجات، والمرفقات', screen: 'cases' }
 ];
 
 export const isCardAllowedForRole = (allowedRoles = ['all'], userRole = null, isAdmin = false) => {
@@ -242,7 +267,7 @@ export default function NestedCardsBuilder({
     is_active: true
   });
 
-  // نافذة تعديل كارت نظام أساسي أو كارت خدمة/فصل/بحث حالة
+  // نافذة تعديل / نقل أي كارت في النظام
   const [liveModalOpen, setLiveModalOpen] = useState(false);
   const [editingLiveCard, setEditingLiveCard] = useState(null);
   const [liveForm, setLiveForm] = useState({
@@ -265,7 +290,7 @@ export default function NestedCardsBuilder({
   });
   const [savingLive, setSavingLive] = useState(false);
 
-  // نافذة الشاشة/المحتوى الديناميكي المدمج داخل الكارت
+  // نافذة بناء وإدارة محتوى/عناصر الشاشة داخل الكارت
   const [activeBuilderCard, setActiveBuilderCard] = useState(null);
   const [entryForm, setEntryForm] = useState({
     id: null,
@@ -339,15 +364,15 @@ export default function NestedCardsBuilder({
       items.push({
         key,
         kind: 'builtin',
-        sourceType: defaultScreen === 'setup_hub' ? 'setup_virtual' : 'hub_virtual',
+        sourceType: 'card_override',
         id: raw.id,
         raw,
         title: ov.title || raw.title || '',
-        subtitle: defaultScreen === 'setup_hub' ? 'كارت الإعدادات SETUP' : 'كارت لوحة الإدارة',
+        subtitle: getScreenLabel(placementScreen),
         description: ov.desc !== undefined ? ov.desc : (raw.desc || ''),
         icon: ov.icon || raw.icon || '🗂️',
         badge: raw.count || '',
-        accent: defaultScreen === 'setup_hub' ? 'amber' : 'red',
+        accent: defaultScreen === 'setup_hub' ? 'amber' : (defaultScreen === 'priest_hub' ? 'purple' : 'red'),
         isActive: ov.is_active !== undefined ? ov.is_active : raw.is_active !== false,
         hasOverride: Boolean(overrides[raw.id]),
         placement_mode: placementMode,
@@ -364,6 +389,12 @@ export default function NestedCardsBuilder({
 
     (hubCards || []).forEach(c => addBuiltin(c, 'admin_hub'));
     (setupCards || []).forEach(c => addBuiltin(c, 'setup_hub'));
+
+    const sourcePriestCards = (customCards && customCards.length > 0)
+      ? DEFAULT_PRIEST_CARDS
+      : DEFAULT_PRIEST_CARDS;
+    sourcePriestCards.forEach(pc => addBuiltin(pc, pc.screen || 'priest_hub'));
+    DEFAULT_PRIEST_SUBCARDS.forEach(psc => addBuiltin(psc, psc.screen || 'priest_hub'));
 
     (nestedRows || []).forEach(row => {
       const meta = cardMeta[row.id] || {};
@@ -403,23 +434,25 @@ export default function NestedCardsBuilder({
     });
 
     (serviceGroups || []).forEach((grp, idx) => {
+      const id = grp.id || `grp_${idx}`;
+      const ov = overrides[`srvgrp:${id}`] || {};
       items.push({
-        key: `srvgrp:${grp.id || idx}`,
+        key: `srvgrp:${id}`,
         kind: 'db_item',
         sourceType: 'service_group',
         id: grp.id,
         raw: grp,
-        title: grp.group_name || '',
+        title: ov.title || grp.group_name || '',
         subtitle: [grp.gender_target, grp.head_servant_name ? `الأمين: ${grp.head_servant_name}` : ''].filter(Boolean).join(' • '),
-        description: grp.servants_names ? `الخدام: ${grp.servants_names}` : '',
-        icon: grp.icon || (grp.has_classes !== false ? '🏫' : '🕊️'),
+        description: ov.desc !== undefined ? ov.desc : (grp.servants_names ? `الخدام: ${grp.servants_names}` : ''),
+        icon: ov.icon || grp.icon || (grp.has_classes !== false ? '🏫' : '🕊️'),
         badge: grp.has_classes !== false ? 'خدمة بفصول' : 'اجتماع عام',
         accent: 'blue',
-        isActive: true,
-        placement_mode: 'screen',
-        placement_screen: 'services',
-        parent_key: null,
-        allowed_roles: ['all'],
+        isActive: ov.is_active !== undefined ? ov.is_active : true,
+        placement_mode: ov.parent_key ? 'card' : 'screen',
+        placement_screen: ov.placement_screen || 'services',
+        parent_key: ov.parent_key || null,
+        allowed_roles: Array.isArray(ov.allowed_roles) && ov.allowed_roles.length > 0 ? ov.allowed_roles : ['all'],
         target_action: 'screen',
         target_screen: 'services',
         editable: true,
@@ -429,23 +462,25 @@ export default function NestedCardsBuilder({
     });
 
     (services || []).forEach((srv, idx) => {
+      const id = srv.id || `cls_${idx}`;
+      const ov = overrides[`srvcls:${id}`] || {};
       items.push({
-        key: `srvcls:${srv.id || idx}`,
+        key: `srvcls:${id}`,
         kind: 'db_item',
         sourceType: 'service_class',
         id: srv.id,
         raw: srv,
-        title: srv.class_name || '',
+        title: ov.title || srv.class_name || '',
         subtitle: [srv.stage_name, srv.head_servant_name ? `الأمين: ${srv.head_servant_name}` : ''].filter(Boolean).join(' • '),
-        description: [srv.vice_head_name, srv.meeting_time, srv.room_name].filter(Boolean).join(' • '),
-        icon: '📘',
+        description: ov.desc !== undefined ? ov.desc : [srv.vice_head_name, srv.meeting_time, srv.room_name].filter(Boolean).join(' • '),
+        icon: ov.icon || '📘',
         badge: 'فصل دراسي',
         accent: 'emerald',
-        isActive: true,
-        placement_mode: 'screen',
-        placement_screen: 'services',
-        parent_key: null,
-        allowed_roles: ['all'],
+        isActive: ov.is_active !== undefined ? ov.is_active : true,
+        placement_mode: ov.parent_key ? 'card' : 'screen',
+        placement_screen: ov.placement_screen || 'services',
+        parent_key: ov.parent_key || null,
+        allowed_roles: Array.isArray(ov.allowed_roles) && ov.allowed_roles.length > 0 ? ov.allowed_roles : ['all'],
         target_action: 'screen',
         target_screen: 'services',
         editable: Boolean(srv.id),
@@ -455,23 +490,25 @@ export default function NestedCardsBuilder({
     });
 
     (caseCategories || []).forEach((cat, idx) => {
+      const id = cat.id || `cat_${idx}`;
+      const ov = overrides[`cat:${id}`] || {};
       items.push({
-        key: `cat:${cat.id || idx}`,
+        key: `cat:${id}`,
         kind: 'db_item',
         sourceType: 'case_category',
         id: cat.id,
         raw: cat,
-        title: cat.name || '',
+        title: ov.title || cat.name || '',
         subtitle: 'تصنيف بحث الحالة في مكتب الكاهن',
-        description: '',
-        icon: cat.icon || '📂',
+        description: ov.desc !== undefined ? ov.desc : '',
+        icon: ov.icon || cat.icon || '📂',
         badge: 'تصنيف حالة',
         accent: 'emerald',
-        isActive: true,
-        placement_mode: 'screen',
-        placement_screen: 'categories',
-        parent_key: null,
-        allowed_roles: ['admin', 'priest'],
+        isActive: ov.is_active !== undefined ? ov.is_active : true,
+        placement_mode: ov.parent_key ? 'card' : 'screen',
+        placement_screen: ov.placement_screen || 'categories',
+        parent_key: ov.parent_key || null,
+        allowed_roles: Array.isArray(ov.allowed_roles) && ov.allowed_roles.length > 0 ? ov.allowed_roles : ['admin', 'priest'],
         target_action: 'screen',
         target_screen: 'categories',
         editable: Boolean(cat.id),
@@ -481,23 +518,25 @@ export default function NestedCardsBuilder({
     });
 
     (customCards || []).forEach((cc, idx) => {
+      const id = cc.id || `pcc_${idx}`;
+      const ov = overrides[`priestcc:${id}`] || {};
       items.push({
-        key: `priestcc:${cc.id || idx}`,
+        key: `priestcc:${id}`,
         kind: 'db_item',
         sourceType: 'custom_card',
         id: cc.id,
         raw: cc,
-        title: cc.card_title || '',
+        title: ov.title || cc.card_title || '',
         subtitle: 'كارت مخصص في صفحة الأب الكاهن',
-        description: cc.description || '',
-        icon: cc.card_icon || '📌',
+        description: ov.desc !== undefined ? ov.desc : (cc.description || ''),
+        icon: ov.icon || cc.card_icon || '📌',
         badge: 'كارت كاهن',
         accent: 'purple',
-        isActive: true,
-        placement_mode: 'screen',
-        placement_screen: 'custom_cards',
-        parent_key: null,
-        allowed_roles: ['admin', 'priest'],
+        isActive: ov.is_active !== undefined ? ov.is_active : true,
+        placement_mode: ov.parent_key ? 'card' : 'screen',
+        placement_screen: ov.placement_screen || 'custom_cards',
+        parent_key: ov.parent_key || null,
+        allowed_roles: Array.isArray(ov.allowed_roles) && ov.allowed_roles.length > 0 ? ov.allowed_roles : ['admin', 'priest'],
         target_action: 'screen',
         target_screen: 'custom_cards',
         editable: Boolean(cc.id),
@@ -775,7 +814,7 @@ export default function NestedCardsBuilder({
     try {
       const targetId = liveForm.id || editingLiveCard.id;
 
-      if (liveForm.sourceType === 'hub_virtual' || liveForm.sourceType === 'setup_virtual') {
+      if (liveForm.sourceType === 'card_override') {
         const chosenParentKey = liveForm.placement_mode === 'card' ? liveForm.parent_key : null;
         if (chosenParentKey === `builtin:${targetId}`) {
           alert('لا يمكن وضع الكارت داخل نفسه');
@@ -1134,10 +1173,10 @@ export default function NestedCardsBuilder({
         ))}
       </div>
 
-      {/* شريط الفلتر والبحث */}
-      <div className="bg-white p-2.5 rounded-2xl border flex flex-wrap items-center justify-between gap-2">
+      {/* شريط الفلتر والبحث بدون سكرول أفقي مضغوط */}
+      <div className="bg-white p-3 rounded-2xl border space-y-2.5">
         {!currentParentKey ? (
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 font-bold">
+          <div className="flex items-center gap-1.5 flex-wrap font-bold">
             {[
               { key: 'all', label: 'كل الكروت' },
               { key: 'admin_hub', label: 'لوحة الإدارة' },
@@ -1155,7 +1194,7 @@ export default function NestedCardsBuilder({
                 key={tab.key}
                 type="button"
                 onClick={() => setScreenFilter(tab.key)}
-                className={`px-2.5 py-1.5 rounded-xl shrink-0 cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl cursor-pointer transition ${
                   screenFilter === tab.key
                     ? 'bg-[#7a1c24] text-white font-black'
                     : 'bg-gray-50 border text-gray-700 hover:bg-gray-100'
@@ -1182,7 +1221,7 @@ export default function NestedCardsBuilder({
           </div>
         )}
 
-        <div className="relative min-w-52 mr-auto">
+        <div className="relative">
           <Search size={14} className="absolute right-3 top-2.5 text-gray-400" />
           <input
             type="text"
@@ -1218,156 +1257,154 @@ export default function NestedCardsBuilder({
           )}
         </div>
       ) : (
-        <div className="max-h-[56vh] overflow-y-auto pr-1">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {visibleCards.map((item) => {
-              const theme = COLOR_THEMES[item.accent] || COLOR_THEMES.red;
-              const innerCount = (childrenByParentKey[item.key] || []).length;
-              const entriesCount = dynamicEntries.filter(en => String(en.card_id) === String(item.id)).length;
-              const rolesLabel = item.allowed_roles.includes('all')
-                ? 'للجميع'
-                : item.allowed_roles.map(r => CARD_ROLE_OPTIONS.find(o => o.key === r)?.label || r).join('، ');
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {visibleCards.map((item) => {
+            const theme = COLOR_THEMES[item.accent] || COLOR_THEMES.red;
+            const innerCount = (childrenByParentKey[item.key] || []).length;
+            const entriesCount = dynamicEntries.filter(en => String(en.card_id) === String(item.id)).length;
+            const rolesLabel = item.allowed_roles.includes('all')
+              ? 'للجميع'
+              : item.allowed_roles.map(r => CARD_ROLE_OPTIONS.find(o => o.key === r)?.label || r).join('، ');
 
-              return (
-                <div
-                  key={item.key}
-                  onClick={() => handleOpenOrRunCard(item)}
-                  className={`${theme.card} ${item.isActive === false ? 'opacity-60 border-dashed' : ''} border-2 p-4 rounded-2xl shadow-2xs hover:shadow-md transition flex flex-col justify-between gap-3 cursor-pointer`}
-                >
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between items-start gap-2">
-                      <span className="text-2xl">{item.icon}</span>
-                      <div className="flex items-center gap-1 flex-wrap justify-end">
-                        {item.isActive === false && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-100 text-red-800">
-                            متوقف
-                          </span>
-                        )}
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-gray-100 text-gray-800">
-                          {item.parent_key
-                            ? `جوا: ${itemByKey[item.parent_key]?.title || 'كارت'}`
-                            : getScreenLabel(item.placement_screen)}
+            return (
+              <div
+                key={item.key}
+                onClick={() => handleOpenOrRunCard(item)}
+                className={`${theme.card} ${item.isActive === false ? 'opacity-60 border-dashed' : ''} border-2 p-4 rounded-2xl shadow-2xs hover:shadow-md transition flex flex-col justify-between gap-3 cursor-pointer`}
+              >
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-start gap-2">
+                    <span className="text-2xl">{item.icon}</span>
+                    <div className="flex items-center gap-1 flex-wrap justify-end">
+                      {item.isActive === false && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-100 text-red-800">
+                          متوقف
                         </span>
-                        {item.canNestInside && (
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${theme.badge}`}>
-                            {innerCount} جواه
-                          </span>
-                        )}
-                        {item.target_action === 'link' && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-sky-100 text-sky-900 flex items-center gap-0.5">
-                            <ExternalLink size={10} /> رابط
-                          </span>
-                        )}
-                        {item.target_action === 'info' && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-100 text-indigo-900 flex items-center gap-0.5">
-                            <FileText size={10} /> محتوى ({entriesCount})
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div>
-                      <h4 className="text-sm font-black text-gray-900">{item.title}</h4>
-                      {item.subtitle && (
-                        <div className="text-[11px] font-bold text-[#7a1c24] mt-0.5">{item.subtitle}</div>
                       )}
-                      {item.description && (
-                        <p className="text-[11px] text-gray-600 mt-1 line-clamp-2">{item.description}</p>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-gray-100 text-gray-800">
+                        {item.parent_key
+                          ? `جوا: ${itemByKey[item.parent_key]?.title || 'كارت'}`
+                          : getScreenLabel(item.placement_screen)}
+                      </span>
+                      {item.canNestInside && (
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${theme.badge}`}>
+                          {innerCount} جواه
+                        </span>
                       )}
-                      <div className="text-[10px] text-emerald-900 font-bold mt-1 flex items-center gap-1">
-                        <ShieldCheck size={11} /> الصلاحية: {rolesLabel}
-                      </div>
+                      {item.target_action === 'link' && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-sky-100 text-sky-900 flex items-center gap-0.5">
+                          <ExternalLink size={10} /> رابط
+                        </span>
+                      )}
+                      {item.target_action === 'info' && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-100 text-indigo-900 flex items-center gap-0.5">
+                          <FileText size={10} /> محتوى ({entriesCount})
+                        </span>
+                      )}
                     </div>
                   </div>
 
-                  <div
-                    onClick={(e) => e.stopPropagation()}
-                    className="pt-2 border-t flex items-center justify-between gap-1.5 flex-wrap"
-                  >
-                    <div className="flex items-center gap-1 flex-wrap">
-                      {isAdmin && item.canNestInside && (
-                        <button
-                          type="button"
-                          onClick={() => openCreateNestedModal(item.key)}
-                          className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer ${theme.btn}`}
-                        >
-                          <FolderPlus size={12} /> + كارت جواه
-                        </button>
-                      )}
-                      {item.kind === 'nested' && item.target_action === 'info' && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEntryForm({ id: null, title: '', entry_date: '', details: '', field_label: '', field_value: '' });
-                            setActiveBuilderCard(item);
-                          }}
-                          className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer"
-                        >
-                          <LayoutGrid size={12} /> عناصر الشاشة ({entriesCount})
-                        </button>
-                      )}
-                      {item.kind === 'builtin' && onNavigateScreen && (
-                        <button
-                          type="button"
-                          onClick={() => onNavigateScreen(item.id)}
-                          className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer"
-                          title="فتح شاشة هذا الكارت"
-                        >
-                          <Play size={11} /> فتح
-                        </button>
-                      )}
-                    </div>
-
-                    {isAdmin && (
-                      <div className="flex items-center gap-1 flex-wrap mr-auto">
-                        {(item.kind === 'nested' || item.kind === 'builtin') && (
-                          <button
-                            type="button"
-                            onClick={(e) => handleToggleActive(item, e)}
-                            className={`px-2 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer ${
-                              item.isActive !== false
-                                ? 'bg-amber-50 hover:bg-amber-100 text-amber-900'
-                                : 'bg-emerald-100 hover:bg-emerald-200 text-emerald-900'
-                            }`}
-                          >
-                            <Power size={11} /> {item.isActive !== false ? 'إيقاف' : 'تشغيل'}
-                          </button>
-                        )}
-                        {item.editable && (
-                          <button
-                            type="button"
-                            onClick={(e) => openEditCard(item, e)}
-                            className="px-2 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                          >
-                            <Edit3 size={11} /> تعديل
-                          </button>
-                        )}
-                        {item.hasOverride && (
-                          <button
-                            type="button"
-                            onClick={(e) => handleResetBuiltinOverride(item, e)}
-                            className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl cursor-pointer"
-                            title="استعادة الوضع الافتراضي"
-                          >
-                            <RotateCcw size={12} />
-                          </button>
-                        )}
-                        {item.deletable && (
-                          <button
-                            type="button"
-                            onClick={(e) => handleDeleteCard(item, e)}
-                            className="px-2 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                          >
-                            <Trash2 size={11} /> حذف
-                          </button>
-                        )}
-                      </div>
+                  <div>
+                    <h4 className="text-sm font-black text-gray-900">{item.title}</h4>
+                    {item.subtitle && (
+                      <div className="text-[11px] font-bold text-[#7a1c24] mt-0.5">{item.subtitle}</div>
                     )}
+                    {item.description && (
+                      <p className="text-[11px] text-gray-600 mt-1 line-clamp-2">{item.description}</p>
+                    )}
+                    <div className="text-[10px] text-emerald-900 font-bold mt-1 flex items-center gap-1">
+                      <ShieldCheck size={11} /> الصلاحية: {rolesLabel}
+                    </div>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="pt-2 border-t flex items-center justify-between gap-1.5 flex-wrap"
+                >
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {isAdmin && item.canNestInside && (
+                      <button
+                        type="button"
+                        onClick={() => openCreateNestedModal(item.key)}
+                        className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer ${theme.btn}`}
+                      >
+                        <FolderPlus size={12} /> + كارت جواه
+                      </button>
+                    )}
+                    {item.kind === 'nested' && item.target_action === 'info' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEntryForm({ id: null, title: '', entry_date: '', details: '', field_label: '', field_value: '' });
+                          setActiveBuilderCard(item);
+                        }}
+                        className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer"
+                      >
+                        <LayoutGrid size={12} /> عناصر الشاشة ({entriesCount})
+                      </button>
+                    )}
+                    {item.kind === 'builtin' && onNavigateScreen && (
+                      <button
+                        type="button"
+                        onClick={() => onNavigateScreen(item.id)}
+                        className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer"
+                        title="فتح شاشة هذا الكارت"
+                      >
+                        <Play size={11} /> فتح
+                      </button>
+                    )}
+                  </div>
+
+                  {isAdmin && (
+                    <div className="flex items-center gap-1 flex-wrap mr-auto">
+                      {(item.kind === 'nested' || item.kind === 'builtin') && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleToggleActive(item, e)}
+                          className={`px-2 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer ${
+                            item.isActive !== false
+                              ? 'bg-amber-50 hover:bg-amber-100 text-amber-900'
+                              : 'bg-emerald-100 hover:bg-emerald-200 text-emerald-900'
+                          }`}
+                        >
+                          <Power size={11} /> {item.isActive !== false ? 'إيقاف' : 'تشغيل'}
+                        </button>
+                      )}
+                      {item.editable && (
+                        <button
+                          type="button"
+                          onClick={(e) => openEditCard(item, e)}
+                          className="px-2 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Edit3 size={11} /> تعديل / نقل
+                        </button>
+                      )}
+                      {item.hasOverride && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleResetBuiltinOverride(item, e)}
+                          className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl cursor-pointer"
+                          title="استعادة الوضع الافتراضي"
+                        >
+                          <RotateCcw size={12} />
+                        </button>
+                      )}
+                      {item.deletable && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteCard(item, e)}
+                          className="px-2 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 size={11} /> حذف
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -1629,12 +1666,14 @@ export default function NestedCardsBuilder({
         </div>
       )}
 
-      {/* نافذة تعديل كارت أساسي أو كارت خدمة/فصل/تصنيف */}
+      {/* نافذة تعديل / نقل كارت أساسي أو كارت خدمة/فصل/تصنيف */}
       {liveModalOpen && isAdmin && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b pb-2">
-              <h3 className="text-sm font-black text-[#7a1c24]">✏️ تعديل الكارت وصلاحياته</h3>
+              <h3 className="text-sm font-black text-[#7a1c24] flex items-center gap-1.5">
+                <ArrowLeftRight size={15} /> تعديل ونقل الكارت وصلاحياته
+              </h3>
               <button
                 type="button"
                 onClick={() => setLiveModalOpen(false)}
@@ -1645,10 +1684,10 @@ export default function NestedCardsBuilder({
             </div>
 
             <form onSubmit={handleSaveLiveCard} className="space-y-3">
-              {(liveForm.sourceType === 'hub_virtual' || liveForm.sourceType === 'setup_virtual') && (
+              {liveForm.sourceType === 'card_override' && (
                 <>
                   <div className="bg-amber-50/60 p-3 rounded-2xl border border-amber-200 space-y-2">
-                    <label className="block text-[#7a1c24] font-black">مكان ظهور الكارت:</label>
+                    <label className="block text-[#7a1c24] font-black">نقل الكارت إلى لوحة أو كارت آخر:</label>
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"
@@ -1657,7 +1696,7 @@ export default function NestedCardsBuilder({
                           liveForm.placement_mode === 'screen' ? 'bg-[#7a1c24] text-white' : 'bg-white'
                         }`}
                       >
-                        🖥️ في شاشة مباشرة
+                        🖥️ في لوحة / شاشة
                       </button>
                       <button
                         type="button"
@@ -1676,8 +1715,9 @@ export default function NestedCardsBuilder({
                         value={liveForm.placement_screen}
                         onChange={e => setLiveForm({ ...liveForm, placement_screen: e.target.value })}
                       >
-                        <option value="admin_hub">🛡️ لوحة الإدارة الرئيسية</option>
-                        <option value="setup_hub">🛠️ الإعدادات SETUP</option>
+                        {SCREEN_TARGETS.map(s => (
+                          <option key={s.key} value={s.key}>{s.label}</option>
+                        ))}
                       </select>
                     ) : (
                       <select
@@ -1741,7 +1781,7 @@ export default function NestedCardsBuilder({
                 </div>
               </div>
 
-              {(liveForm.sourceType === 'hub_virtual' || liveForm.sourceType === 'setup_virtual' || liveForm.sourceType === 'custom_card') && (
+              {(liveForm.sourceType === 'card_override' || liveForm.sourceType === 'custom_card') && (
                 <div>
                   <label className="block mb-1">الوصف</label>
                   <textarea
@@ -1783,7 +1823,7 @@ export default function NestedCardsBuilder({
                 </>
               )}
 
-              {(liveForm.sourceType === 'hub_virtual' || liveForm.sourceType === 'setup_virtual') && (
+              {liveForm.sourceType === 'card_override' && (
                 <label className="flex items-center gap-2 cursor-pointer text-emerald-900">
                   <input
                     type="checkbox"
