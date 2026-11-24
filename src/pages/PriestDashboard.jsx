@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { startUserSession, logActivity } from '../lib/activityLogger';
 import WhatsAppComposerModal, { FALLBACK_WA_TEMPLATES, formatWaMessage } from '../components/priest/WhatsAppComposerModal';
@@ -19,7 +20,7 @@ import {
   ArrowRight, Lock, Globe, Trash2, Edit3, X, Printer,
   Sun, Moon, MessageCircle, UserPlus, Link2, Bus,
   Upload, Paperclip, Eye, ExternalLink, Cake, BellRing, AlertTriangle,
-  Award, ClipboardCheck, Gift, ClipboardList, School
+  Award, ClipboardCheck, Gift, ClipboardList, School, CheckCircle2
 } from 'lucide-react';
 
 const MASS_AUDIENCES = [
@@ -36,7 +37,11 @@ const MONTHS_AR = ['يناير', 'فبراير', 'مارس', 'أبريل', 'ما
 
 const ATTACHMENT_TYPES = ['صورة بطاقة', 'عقد إيجار', 'تحاليل وأشعة', 'إيصال كهرباء ومرافق', 'أخرى'];
 
+const formatEventTypeDisplay = (val = '') =>
+  String(val || '').replace(/\s*\(قبل المعمودية\)/g, '');
+
 export default function PriestDashboard({ priest, users = [], onRefresh }) {
+  const scrollBoxRef = useRef(null);
   const [activeCard, setActiveCard] = useState('hub');
   // null = عرض التلات كروت فقط • 'sequence' | 'commitment' | 'schedule' = الدخول داخل كارت واحد فقط
   const [activeServiceCard, setActiveServiceCard] = useState(null);
@@ -51,6 +56,14 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     const stopSession = startUserSession(priest);
     return () => stopSession();
   }, [priest?.id]);
+
+  const scrollPanelTop = () => {
+    if (scrollBoxRef.current) {
+      scrollBoxRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
 
   const todayISO = new Date().toISOString().split('T')[0];
 
@@ -70,6 +83,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   const [userChildren, setUserChildren] = useState([]);
   const [customCards, setCustomCards] = useState([]);
   const [customEntries, setCustomEntries] = useState([]);
+  const [hiddenEditRequests, setHiddenEditRequests] = useState([]);
 
   const [commitmentStats, setCommitmentStats] = useState([]);
   const [rewardCampaigns, setRewardCampaigns] = useState([]);
@@ -184,7 +198,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     if (!priest?.id) return;
     const [
       us, sl, cb, sh, sn, vs, sr, ms, ps, fm, fa, cats, sb, uc, cc, ce, wt, jc, jm,
-      sg, commView, campRes, rewRes, notesRes
+      sg, commView, campRes, rewRes, notesRes, hidReqsRes
     ] = await Promise.all([
       supabase.from('church_users').select('*').order('created_at', { ascending: true }),
       supabase.from('priest_confession_slots').select('*').eq('priest_id', priest.id).order('slot_date', { ascending: true }),
@@ -209,7 +223,8 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
       supabase.from('v_parent_member_commitment').select('*'),
       supabase.from('reward_campaigns').select('*').order('created_at', { ascending: false }),
       supabase.from('member_rewards').select('*').order('created_at', { ascending: false }),
-      supabase.from('member_notes').select('*')
+      supabase.from('member_notes').select('*'),
+      supabase.from('church_notifications').select('*').eq('type', 'hidden_family_edit_request').order('created_at', { ascending: false })
     ]);
     if (us.data) setLocalUsers(us.data);
     if (sl.data) setConfessionSlots(sl.data);
@@ -236,6 +251,15 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     if (campRes?.data) setRewardCampaigns(campRes.data);
     if (rewRes?.data) setMemberRewards(rewRes.data);
     if (notesRes?.data) setMemberNotes(notesRes.data);
+    if (hidReqsRes?.data) {
+      setHiddenEditRequests(
+        hidReqsRes.data.map(r => {
+          let meta = {};
+          try { meta = r.message ? JSON.parse(r.message) : {}; } catch { meta = {}; }
+          return { id: r.id, is_read: r.is_read, created_at: r.created_at, ...meta };
+        })
+      );
+    }
   };
 
   useEffect(() => {
@@ -311,6 +335,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   const pendingCasesCount = josephCases.filter(c => c.status === 'جديد / طارئ').length;
   const pendingMemorialsCount = josephMemorials.filter(m => m.status === 'معلق').length;
   const totalJosephAlerts = pendingCasesCount + pendingMemorialsCount;
+  const pendingHiddenReqsCount = hiddenEditRequests.filter(r => r.status !== 'done').length;
 
   const openWhatsAppComposer = ({ name = '', phone = '', targetId = null, defaultCategory = 'افتقاد', initialMessage = '' }) => {
     const activeTpls = waTemplates.length > 0 ? waTemplates : FALLBACK_WA_TEMPLATES;
@@ -420,6 +445,56 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
       setNoteForm({ member_id: '', behavior_tag: 'متابعة روحية', note_text: '', visible_to_parent: false });
       alert('تم حفظ الملاحظة بنجاح!');
     }
+  };
+
+  const handleMarkHiddenRequestDone = async (req) => {
+    const { id, is_read, created_at, ...meta } = req;
+    const nextMeta = { ...meta, status: 'done' };
+    const { error } = await supabase
+      .from('church_notifications')
+      .update({ is_read: true, message: JSON.stringify(nextMeta) })
+      .eq('id', req.id);
+    if (!error) {
+      setHiddenEditRequests(prev => prev.map(r => (r.id === req.id ? { ...r, is_read: true, status: 'done' } : r)));
+    }
+  };
+
+  const renderQuickNavBar = () => {
+    const tabs = [
+      { id: 'hub', label: '🏠 الرئيسية' },
+      { id: 'service_hub', label: '🏫 الخدمة' },
+      { id: 'confessions', label: '🙏 الاعترافات' },
+      { id: 'masses', label: '⛪ القداسات' },
+      { id: 'personal', label: '📅 الجدول الخاص' },
+      { id: 'cases', label: '🔍 بحث الحالة', badge: pendingHiddenReqsCount },
+      { id: 'edu_center', label: '🎓 المركز التعليمي' },
+      { id: 'joseph_arimathea', label: '🕊️ يوسف الرامي', badge: totalJosephAlerts }
+    ];
+
+    return (
+      <div className="bg-white px-3 py-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto print:hidden mb-3">
+        {tabs.map(t => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => {
+              setActiveCard(t.id);
+              if (t.id === 'service_hub') setActiveServiceCard(null);
+            }}
+            className={`px-3 py-1.5 rounded-xl text-[11px] font-black shrink-0 flex items-center gap-1 cursor-pointer transition ${
+              activeCard === t.id
+                ? 'bg-[#7a1c24] text-white shadow-2xs'
+                : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+            }`}
+          >
+            <span>{t.label}</span>
+            {t.badge > 0 && (
+              <span className="px-1.5 py-0.5 bg-red-600 text-white rounded-full text-[9px]">{t.badge}</span>
+            )}
+          </button>
+        ))}
+      </div>
+    );
   };
 
   const renderBellPanel = () => (
@@ -885,9 +960,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     </>
   );
 
-  // ==============================================================
-  // مكوّن داخلي لجدول الخدمة عند الدخول لكارت "جدول الخدمة" فقط
-  // ==============================================================
   const renderServiceScheduleContent = () => {
     const stageClasses = selectedStage ? myServices.filter(s => s.stage_name === selectedStage) : [];
     const stageServants = selectedStage
@@ -923,19 +995,11 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
         ) : (
           <div className="space-y-4">
             <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => { setSelectedStage(null); setServiceSubCard('menu'); setSelectedClass(null); }}
-                className="px-4 py-2 bg-white border rounded-xl font-bold text-sm"
-              >
+              <button type="button" onClick={() => { setSelectedStage(null); setServiceSubCard('menu'); setSelectedClass(null); }} className="px-4 py-2 bg-white border rounded-xl font-bold text-sm">
                 ← كل الخدمات
               </button>
               {serviceSubCard !== 'menu' && (
-                <button
-                  type="button"
-                  onClick={() => setServiceSubCard('menu')}
-                  className="px-4 py-2 bg-amber-100 rounded-xl font-bold text-sm"
-                >
+                <button type="button" onClick={() => setServiceSubCard('menu')} className="px-4 py-2 bg-amber-100 rounded-xl font-bold text-sm">
                   ← كروت {selectedStage}
                 </button>
               )}
@@ -943,35 +1007,17 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
 
             {serviceSubCard === 'menu' && (
               <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <button type="button" onClick={() => setServiceSubCard('leaders')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer">
-                  <span className="text-3xl block">👑</span>
-                  <strong className="text-base block">القيادات</strong>
-                </button>
-                <button type="button" onClick={() => setServiceSubCard('classes')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer">
-                  <span className="text-3xl block">🏫</span>
-                  <strong className="text-base block">الفصول والمخدومين ({stageClasses.length})</strong>
-                </button>
-                <button type="button" onClick={() => setServiceSubCard('servants')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer">
-                  <span className="text-3xl block">👥</span>
-                  <strong className="text-base block">الخدام ({stageServants.length})</strong>
-                </button>
-                <button type="button" onClick={() => setServiceSubCard('visitations')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer">
-                  <span className="text-3xl block">🕊️</span>
-                  <strong className="text-base block">افتقاد {selectedStage} ({stageVisitations.length})</strong>
-                </button>
+                <button type="button" onClick={() => setServiceSubCard('leaders')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-3xl block">👑</span><strong className="text-base block">القيادات</strong></button>
+                <button type="button" onClick={() => setServiceSubCard('classes')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-3xl block">🏫</span><strong className="text-base block">الفصول والمخدومين ({stageClasses.length})</strong></button>
+                <button type="button" onClick={() => setServiceSubCard('servants')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-3xl block">👥</span><strong className="text-base block">الخدام ({stageServants.length})</strong></button>
+                <button type="button" onClick={() => setServiceSubCard('visitations')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-3xl block">🕊️</span><strong className="text-base block">افتقاد {selectedStage} ({stageVisitations.length})</strong></button>
               </div>
             )}
 
             {serviceSubCard === 'leaders' && (
               <div className="bg-white p-5 rounded-3xl border grid md:grid-cols-2 gap-3">
-                <div className="p-4 bg-[#fbfaf7] rounded-2xl border">
-                  <span className="text-gray-500 block">أمين الخدمة:</span>
-                  <strong className="text-base">{stageClasses[0]?.head_servant_name || 'غير محدد'}</strong>
-                </div>
-                <div className="p-4 bg-[#fbfaf7] rounded-2xl border">
-                  <span className="text-gray-500 block">مساعد الأمين:</span>
-                  <strong className="text-base">{stageClasses[0]?.vice_head_name || 'غير محدد'}</strong>
-                </div>
+                <div className="p-4 bg-[#fbfaf7] rounded-2xl border"><span className="text-gray-500 block">أمين الخدمة:</span><strong className="text-base">{stageClasses[0]?.head_servant_name || 'غير محدد'}</strong></div>
+                <div className="p-4 bg-[#fbfaf7] rounded-2xl border"><span className="text-gray-500 block">مساعد الأمين:</span><strong className="text-base">{stageClasses[0]?.vice_head_name || 'غير محدد'}</strong></div>
               </div>
             )}
 
@@ -979,32 +1025,16 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
               <div className="space-y-4">
                 <div className="grid sm:grid-cols-3 gap-3">
                   {stageClasses.map(cls => (
-                    <button
-                      type="button"
-                      key={cls.id}
-                      onClick={() => setSelectedClass(selectedClass?.id === cls.id ? null : cls)}
-                      className={`p-4 rounded-2xl border-2 text-right ${selectedClass?.id === cls.id ? 'bg-[#f9ecee] border-[#7a1c24]' : 'bg-white'}`}
-                    >
+                    <button type="button" key={cls.id} onClick={() => setSelectedClass(selectedClass?.id === cls.id ? null : cls)} className={`p-4 rounded-2xl border-2 text-right ${selectedClass?.id === cls.id ? 'bg-[#f9ecee] border-[#7a1c24]' : 'bg-white'}`}>
                       <strong className="text-base block">{cls.class_name}</strong>
                       <span className="text-sm text-gray-600">⏰ {cls.meeting_time}</span>
                     </button>
                   ))}
                 </div>
                 <div className="bg-white p-4 rounded-3xl border grid sm:grid-cols-2 gap-2.5">
-                  {(selectedClass
-                    ? stageMembers.filter(m => m.assigned_class === selectedClass.class_name || (m.detailed_stage || '').includes(selectedClass.class_name))
-                    : stageMembers
-                  ).map(m => (
-                    <button
-                      type="button"
-                      key={m.id}
-                      onClick={() => setInspectMember(m)}
-                      className="p-3.5 bg-[#fbfaf7] rounded-2xl border text-right flex justify-between items-center"
-                    >
-                      <div>
-                        <strong className="text-base">{m.full_name}</strong>
-                        <span className="block text-sm text-gray-600">🎂 {calcAge(m.dob)}</span>
-                      </div>
+                  {(selectedClass ? stageMembers.filter(m => m.assigned_class === selectedClass.class_name || (m.detailed_stage || '').includes(selectedClass.class_name)) : stageMembers).map(m => (
+                    <button type="button" key={m.id} onClick={() => setInspectMember(m)} className="p-3.5 bg-[#fbfaf7] rounded-2xl border text-right flex justify-between items-center">
+                      <div><strong className="text-base">{m.full_name}</strong><span className="block text-sm text-gray-600">🎂 {calcAge(m.dob)}</span></div>
                       <span className="text-[#7a1c24] font-bold">التفاصيل</span>
                     </button>
                   ))}
@@ -1018,26 +1048,14 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                   <div key={sv.id} className="p-3.5 bg-[#fbfaf7] rounded-2xl border flex flex-wrap justify-between items-center gap-2">
                     <div>
                       <strong className="text-base">{sv.full_name}</strong>
-                      <span className="mr-2 px-2.5 py-0.5 rounded bg-amber-100 text-amber-950 text-xs font-bold">
-                        {sv.servant_training_status || 'خادم متكلم (اجتاز إعداد خدام)'}
-                      </span>
-                      <p className="text-sm text-gray-600 mt-0.5">
-                        💼 {sv.job_title || '—'} {sv.assigned_class && `• 🏫 فصل: ${sv.assigned_class}`}
-                      </p>
+                      <span className="mr-2 px-2.5 py-0.5 rounded bg-amber-100 text-amber-950 text-xs font-bold">{sv.servant_training_status || 'خادم متكلم (اجتاز إعداد خدام)'}</span>
+                      <p className="text-sm text-gray-600 mt-0.5">💼 {sv.job_title || '—'} {sv.assigned_class && `• 🏫 فصل: ${sv.assigned_class}`}</p>
                     </div>
                     <div className="flex gap-1.5">
                       {sv.phone && (
                         <>
-                          <button
-                            type="button"
-                            onClick={() => openWhatsAppComposer({ name: sv.full_name, phone: sv.phone, targetId: sv.id, defaultCategory: 'افتقاد' })}
-                            className="px-3 py-2 bg-green-600 text-white rounded-xl font-bold text-xs cursor-pointer"
-                          >
-                            <MessageCircle size={14} />
-                          </button>
-                          <a href={`tel:${sv.phone}`} className="px-3.5 py-2 bg-white border rounded-xl font-bold text-sm">
-                            {sv.phone}
-                          </a>
+                          <button type="button" onClick={() => openWhatsAppComposer({ name: sv.full_name, phone: sv.phone, targetId: sv.id, defaultCategory: 'افتقاد' })} className="px-3 py-2 bg-green-600 text-white rounded-xl font-bold text-xs cursor-pointer"><MessageCircle size={14} /></button>
+                          <a href={`tel:${sv.phone}`} className="px-3.5 py-2 bg-white border rounded-xl font-bold text-sm">{sv.phone}</a>
                         </>
                       )}
                     </div>
@@ -1055,34 +1073,15 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                       <option value="">-- اختر الفصل --</option>
                       {stageClasses.map(c => <option key={c.id} value={c.class_name}>{c.class_name}</option>)}
                     </select>
-                    <select
-                      className="p-2.5 border rounded-xl"
-                      value={visitForm.target_user_id}
-                      onChange={e => {
-                        const u = allMembers.find(x => x.id === e.target.value);
-                        setVisitForm({ ...visitForm, target_user_id: e.target.value, target_name: u?.full_name || '' });
-                      }}
-                    >
+                    <select className="p-2.5 border rounded-xl" value={visitForm.target_user_id} onChange={e => { const u = allMembers.find(x => x.id === e.target.value); setVisitForm({ ...visitForm, target_user_id: e.target.value, target_name: u?.full_name || '' }); }}>
                       <option value="">-- اختر المخدوم --</option>
-                      {(stageMembers.length > 0 ? stageMembers : allMembers).map(m => (
-                        <option key={m.id} value={m.id}>{m.full_name} ({m.detailed_stage})</option>
-                      ))}
+                      {(stageMembers.length > 0 ? stageMembers : allMembers).map(m => <option key={m.id} value={m.id}>{m.full_name} ({m.detailed_stage})</option>)}
                     </select>
-                    <input
-                      required
-                      placeholder="الاسم *"
-                      className="p-2.5 border rounded-xl"
-                      value={visitForm.target_name}
-                      onChange={e => setVisitForm({ ...visitForm, target_name: e.target.value })}
-                    />
+                    <input required placeholder="الاسم *" className="p-2.5 border rounded-xl" value={visitForm.target_name} onChange={e => setVisitForm({ ...visitForm, target_name: e.target.value })} />
                   </div>
                   <div className="flex flex-wrap gap-3 items-center">
-                    <label className="flex items-center gap-1.5">
-                      <input type="checkbox" checked={visitForm.needs_visit} onChange={e => setVisitForm({ ...visitForm, needs_visit: e.target.checked })} /> يحتاج افتقاد
-                    </label>
-                    <label className="flex items-center gap-1.5">
-                      <input type="checkbox" checked={visitForm.needs_confession} onChange={e => setVisitForm({ ...visitForm, needs_confession: e.target.checked })} /> يحتاج اعتراف
-                    </label>
+                    <label className="flex items-center gap-1.5"><input type="checkbox" checked={visitForm.needs_visit} onChange={e => setVisitForm({ ...visitForm, needs_visit: e.target.checked })} /> يحتاج افتقاد</label>
+                    <label className="flex items-center gap-1.5"><input type="checkbox" checked={visitForm.needs_confession} onChange={e => setVisitForm({ ...visitForm, needs_confession: e.target.checked })} /> يحتاج اعتراف</label>
                     <button type="submit" className="px-5 py-2.5 bg-[#7a1c24] text-white rounded-xl">حفظ</button>
                   </div>
                 </form>
@@ -1090,20 +1089,10 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                   const targetObj = allMembers.find(m => m.id === v.target_user_id);
                   return (
                     <div key={v.id} className="p-3.5 bg-[#fbfaf7] rounded-2xl border flex justify-between items-center">
-                      <div>
-                        <strong>{v.target_name}</strong> {v.class_name && `(${v.class_name})`} {v.needs_visit && '• 🕊️ يحتاج افتقاد'} {v.needs_confession && '• 🙏 يحتاج اعتراف'}
-                      </div>
+                      <div><strong>{v.target_name}</strong> {v.class_name && `(${v.class_name})`} {v.needs_visit && '• 🕊️ يحتاج افتقاد'} {v.needs_confession && '• 🙏 يحتاج اعتراف'}</div>
                       <div className="flex gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => openWhatsAppComposer({ name: v.target_name, phone: targetObj?.phone || '', targetId: v.target_user_id, defaultCategory: 'افتقاد' })}
-                          className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs cursor-pointer"
-                        >
-                          <MessageCircle size={14} />
-                        </button>
-                        <button type="button" onClick={() => deleteVisitation(v.id)} className="p-2 bg-red-50 text-red-700 rounded-lg">
-                          <Trash2 size={15} />
-                        </button>
+                        <button type="button" onClick={() => openWhatsAppComposer({ name: v.target_name, phone: targetObj?.phone || '', targetId: v.target_user_id, defaultCategory: 'افتقاد' })} className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs cursor-pointer"><MessageCircle size={14} /></button>
+                        <button type="button" onClick={() => deleteVisitation(v.id)} className="p-2 bg-red-50 text-red-700 rounded-lg"><Trash2 size={15} /></button>
                       </div>
                     </div>
                   );
@@ -1123,11 +1112,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
               <p>🎂 {inspectMember.dob} ({calcAge(inspectMember.dob)}) • 🎓 {inspectMember.detailed_stage}</p>
               <p>📍 {inspectMember.address || '—'} • 📞 {inspectMember.phone}</p>
               {inspectMember.phone && (
-                <button
-                  type="button"
-                  onClick={() => openWhatsAppComposer({ name: inspectMember.full_name, phone: inspectMember.phone, targetId: inspectMember.id, defaultCategory: 'افتقاد' })}
-                  className="px-3 py-1.5 bg-green-600 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
-                >
+                <button type="button" onClick={() => openWhatsAppComposer({ name: inspectMember.full_name, phone: inspectMember.phone, targetId: inspectMember.id, defaultCategory: 'افتقاد' })} className="px-3 py-1.5 bg-green-600 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
                   <MessageCircle size={14} /> إرسال واتساب
                 </button>
               )}
@@ -1141,7 +1126,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     );
   };
 
-  // مكوّن داخلي للالتزام والكفاءة والعروض والرحلات وملاحظات ولي الأمر عند الدخول لكارتها فقط
   const renderCommitmentRewardsContent = () => {
     const filteredCommitments = commitmentStats.filter(item => {
       if (commitmentFilter !== 'all' && item.commitment_code !== commitmentFilter) return false;
@@ -1158,174 +1142,72 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
       <div className="space-y-4 text-sm md:text-base">
         <div className="grid lg:grid-cols-2 gap-4">
           <form onSubmit={handleGrantReward} className="bg-white p-5 rounded-3xl border space-y-3 font-bold shadow-2xs">
-            <h3 className="text-base font-black text-[#7a1c24] flex items-center gap-1.5">
-              <Gift size={18} /> منح عرض / خصم رحلة أو مكافأة حضور
-            </h3>
+            <h3 className="text-base font-black text-[#7a1c24] flex items-center gap-1.5"><Gift size={18} /> منح عرض / خصم رحلة أو مكافأة حضور</h3>
             <div className="grid sm:grid-cols-2 gap-2">
-              <select
-                className="p-2.5 border rounded-xl bg-[#fbfaf7]"
-                value={rewardForm.member_id}
-                onChange={e => setRewardForm({ ...rewardForm, member_id: e.target.value })}
-              >
+              <select className="p-2.5 border rounded-xl bg-[#fbfaf7]" value={rewardForm.member_id} onChange={e => setRewardForm({ ...rewardForm, member_id: e.target.value })}>
                 <option value="">-- اختر المخدوم --</option>
-                {allMembers.map(m => (
-                  <option key={m.id} value={m.id}>{m.full_name} ({m.assigned_class || m.service_stage || 'عام'})</option>
-                ))}
+                {allMembers.map(m => <option key={m.id} value={m.id}>{m.full_name} ({m.assigned_class || m.service_stage || 'عام'})</option>)}
               </select>
-
-              <select
-                className="p-2.5 border rounded-xl bg-[#fbfaf7]"
-                value={rewardForm.campaign_id}
-                onChange={e => setRewardForm({ ...rewardForm, campaign_id: e.target.value })}
-              >
+              <select className="p-2.5 border rounded-xl bg-[#fbfaf7]" value={rewardForm.campaign_id} onChange={e => setRewardForm({ ...rewardForm, campaign_id: e.target.value })}>
                 <option value="">-- اختر عرض / رحلة متاحة --</option>
-                {rewardCampaigns.map(c => (
-                  <option key={c.id} value={c.id}>{c.title} ({c.target_scope})</option>
-                ))}
+                {rewardCampaigns.map(c => <option key={c.id} value={c.id}>{c.title} ({c.target_scope})</option>)}
               </select>
             </div>
-
             <div className="grid sm:grid-cols-3 gap-2">
-              <select
-                className="p-2.5 border rounded-xl bg-[#fbfaf7]"
-                value={rewardForm.reward_type}
-                onChange={e => setRewardForm({ ...rewardForm, reward_type: e.target.value })}
-              >
-                <option value="خصم رحلة">خصم رحلة</option>
-                <option value="مكافأة التزام">مكافأة التزام</option>
-                <option value="عرض مؤتمر">عرض مؤتمر</option>
-                <option value="مكافأة تميز">مكافأة تميز</option>
+              <select className="p-2.5 border rounded-xl bg-[#fbfaf7]" value={rewardForm.reward_type} onChange={e => setRewardForm({ ...rewardForm, reward_type: e.target.value })}>
+                <option value="خصم رحلة">خصم رحلة</option><option value="مكافأة التزام">مكافأة التزام</option><option value="عرض مؤتمر">عرض مؤتمر</option><option value="مكافأة تميز">مكافأة تميز</option>
               </select>
-
-              <input
-                required
-                placeholder="عنوان المكافأة / العرض *"
-                className="p-2.5 border rounded-xl bg-[#fbfaf7]"
-                value={rewardForm.reward_title}
-                onChange={e => setRewardForm({ ...rewardForm, reward_title: e.target.value })}
-              />
-
-              <input
-                type="number"
-                min="0"
-                max="100"
-                placeholder="نسبة الخصم %"
-                className="p-2.5 border rounded-xl bg-[#fbfaf7]"
-                value={rewardForm.discount_percent}
-                onChange={e => setRewardForm({ ...rewardForm, discount_percent: e.target.value })}
-              />
+              <input required placeholder="عنوان المكافأة / العرض *" className="p-2.5 border rounded-xl bg-[#fbfaf7]" value={rewardForm.reward_title} onChange={e => setRewardForm({ ...rewardForm, reward_title: e.target.value })} />
+              <input type="number" min="0" max="100" placeholder="نسبة الخصم %" className="p-2.5 border rounded-xl bg-[#fbfaf7]" value={rewardForm.discount_percent} onChange={e => setRewardForm({ ...rewardForm, discount_percent: e.target.value })} />
             </div>
-
-            <input
-              placeholder="ملاحظة إضافية..."
-              className="w-full p-2.5 border rounded-xl bg-[#fbfaf7]"
-              value={rewardForm.notes}
-              onChange={e => setRewardForm({ ...rewardForm, notes: e.target.value })}
-            />
-
-            <button type="submit" className="px-5 py-2.5 bg-[#7a1c24] text-white rounded-xl font-black text-xs cursor-pointer">
-              + تسجيل المكافأة / العرض
-            </button>
+            <input placeholder="ملاحظة إضافية..." className="w-full p-2.5 border rounded-xl bg-[#fbfaf7]" value={rewardForm.notes} onChange={e => setRewardForm({ ...rewardForm, notes: e.target.value })} />
+            <button type="submit" className="px-5 py-2.5 bg-[#7a1c24] text-white rounded-xl font-black text-xs cursor-pointer">+ تسجيل المكافأة / العرض</button>
           </form>
 
           <form onSubmit={handleAddMemberNote} className="bg-white p-5 rounded-3xl border space-y-3 font-bold shadow-2xs">
-            <h3 className="text-base font-black text-[#7a1c24] flex items-center gap-1.5">
-              <ClipboardCheck size={18} /> تسجيل ملاحظة متابعة (تظهر لولي الأمر أو داخلية)
-            </h3>
+            <h3 className="text-base font-black text-[#7a1c24] flex items-center gap-1.5"><ClipboardCheck size={18} /> تسجيل ملاحظة متابعة (تظهر لولي الأمر أو داخلية)</h3>
             <div className="grid sm:grid-cols-2 gap-2">
-              <select
-                className="p-2.5 border rounded-xl bg-[#fbfaf7]"
-                value={noteForm.member_id}
-                onChange={e => setNoteForm({ ...noteForm, member_id: e.target.value })}
-              >
+              <select className="p-2.5 border rounded-xl bg-[#fbfaf7]" value={noteForm.member_id} onChange={e => setNoteForm({ ...noteForm, member_id: e.target.value })}>
                 <option value="">-- اختر المخدوم --</option>
-                {allMembers.map(m => (
-                  <option key={m.id} value={m.id}>{m.full_name} ({m.assigned_class || m.service_stage || 'عام'})</option>
-                ))}
+                {allMembers.map(m => <option key={m.id} value={m.id}>{m.full_name} ({m.assigned_class || m.service_stage || 'عام'})</option>)}
               </select>
-
-              <select
-                className="p-2.5 border rounded-xl bg-[#fbfaf7]"
-                value={noteForm.behavior_tag}
-                onChange={e => setNoteForm({ ...noteForm, behavior_tag: e.target.value })}
-              >
-                <option value="متابعة روحية">متابعة روحية</option>
-                <option value="التزام وكفاءة">التزام وكفاءة</option>
-                <option value="محتاج افتقاد">محتاج افتقاد</option>
-                <option value="تأخير / غياب">تأخير / غياب</option>
+              <select className="p-2.5 border rounded-xl bg-[#fbfaf7]" value={noteForm.behavior_tag} onChange={e => setNoteForm({ ...noteForm, behavior_tag: e.target.value })}>
+                <option value="متابعة روحية">متابعة روحية</option><option value="التزام وكفاءة">التزام وكفاءة</option><option value="محتاج افتقاد">محتاج افتقاد</option><option value="تأخير / غياب">تأخير / غياب</option>
               </select>
             </div>
-
-            <textarea
-              rows="2"
-              placeholder="اكتب ملاحظة المتابعة..."
-              className="w-full p-2.5 border rounded-xl bg-[#fbfaf7]"
-              value={noteForm.note_text}
-              onChange={e => setNoteForm({ ...noteForm, note_text: e.target.value })}
-            />
-
+            <textarea rows="2" placeholder="اكتب ملاحظة المتابعة..." className="w-full p-2.5 border rounded-xl bg-[#fbfaf7]" value={noteForm.note_text} onChange={e => setNoteForm({ ...noteForm, note_text: e.target.value })} />
             <div className="flex flex-wrap items-center justify-between gap-2">
               <label className="flex items-center gap-2 text-xs text-gray-800 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={noteForm.visible_to_parent}
-                  onChange={e => setNoteForm({ ...noteForm, visible_to_parent: e.target.checked })}
-                />
+                <input type="checkbox" checked={noteForm.visible_to_parent} onChange={e => setNoteForm({ ...noteForm, visible_to_parent: e.target.checked })} />
                 <span>إظهار هذه الملاحظة لولي الأمر في شاشة ولي الأمر</span>
               </label>
-
-              <button type="submit" className="px-5 py-2.5 bg-teal-800 text-white rounded-xl font-black text-xs cursor-pointer">
-                + حفظ الملاحظة
-              </button>
+              <button type="submit" className="px-5 py-2.5 bg-teal-800 text-white rounded-xl font-black text-xs cursor-pointer">+ حفظ الملاحظة</button>
             </div>
           </form>
         </div>
 
         <div className="bg-white p-5 rounded-3xl border space-y-3 shadow-2xs">
           <div className="flex flex-wrap justify-between items-center gap-2">
-            <h3 className="text-base font-black text-gray-900 flex items-center gap-1.5">
-              <Award size={18} className="text-[#7a1c24]" /> مؤشر الالتزام والكفاءة والغياب والتأخير ({filteredCommitments.length})
-            </h3>
+            <h3 className="text-base font-black text-gray-900 flex items-center gap-1.5"><Award size={18} className="text-[#7a1c24]" /> مؤشر الالتزام والكفاءة والغياب والتأخير ({filteredCommitments.length})</h3>
             <div className="flex flex-wrap gap-2">
-              <input
-                placeholder="بحث بالاسم أو الفصل..."
-                className="p-2 border rounded-xl text-xs bg-[#fbfaf7]"
-                value={commitmentSearch}
-                onChange={e => setCommitmentSearch(e.target.value)}
-              />
-              <select
-                className="p-2 border rounded-xl text-xs font-bold bg-[#fbfaf7]"
-                value={commitmentFilter}
-                onChange={e => setCommitmentFilter(e.target.value)}
-              >
-                <option value="all">كل الحالات</option>
-                <option value="high_commitment">ممتاز وكفء جداً</option>
-                <option value="high_absence">كثير الغياب</option>
-                <option value="needs_encouragement">يحتاج تشجيع / متابعة</option>
-                <option value="unrecorded">لم يُسجل حضور بعد</option>
+              <input placeholder="بحث بالاسم أو الفصل..." className="p-2 border rounded-xl text-xs bg-[#fbfaf7]" value={commitmentSearch} onChange={e => setCommitmentSearch(e.target.value)} />
+              <select className="p-2 border rounded-xl text-xs font-bold bg-[#fbfaf7]" value={commitmentFilter} onChange={e => setCommitmentFilter(e.target.value)}>
+                <option value="all">كل الحالات</option><option value="high_commitment">ممتاز وكفء جداً</option><option value="high_absence">كثير الغياب</option><option value="needs_encouragement">يحتاج تشجيع / متابعة</option><option value="unrecorded">لم يُسجل حضور بعد</option>
               </select>
             </div>
           </div>
 
-          <div className="overflow-x-auto border rounded-2xl">
+          <div className="overflow-x-auto border rounded-2xl max-h-96 overflow-y-auto">
             <table className="w-full text-right border-collapse text-xs">
-              <thead>
+              <thead className="sticky top-0">
                 <tr className="bg-[#7a1c24] text-white font-black">
-                  <th className="p-2.5">الاسم</th>
-                  <th className="p-2.5">الخدمة / الفصل</th>
-                  <th className="p-2.5">نسبة الحضور</th>
-                  <th className="p-2.5">حضور / غياب</th>
-                  <th className="p-2.5">تأخير / انصراف مبكر</th>
-                  <th className="p-2.5">تقييم الكفاءة والالتزام</th>
+                  <th className="p-2.5">الاسم</th><th className="p-2.5">الخدمة / الفصل</th><th className="p-2.5">نسبة الحضور</th>
+                  <th className="p-2.5">حضور / غياب</th><th className="p-2.5">تأخير / انصراف مبكر</th><th className="p-2.5">تقييم الكفاءة والالتزام</th>
                 </tr>
               </thead>
               <tbody className="divide-y font-bold">
                 {filteredCommitments.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="p-6 text-center text-gray-400">
-                      لا توجد سجلات التزام مطابقة حالياً.
-                    </td>
-                  </tr>
+                  <tr><td colSpan={6} className="p-6 text-center text-gray-400">لا توجد سجلات التزام مطابقة حالياً.</td></tr>
                 ) : (
                   filteredCommitments.map(row => (
                     <tr key={row.member_id} className="hover:bg-[#fbfaf7]">
@@ -1336,11 +1218,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                       <td className="p-2.5">تأخير: {row.late_count ?? 0} • مبكر: {row.early_leave_count ?? 0}</td>
                       <td className="p-2.5">
                         <span className={`px-2.5 py-1 rounded-xl text-[11px] font-black ${
-                          row.commitment_code === 'high_commitment'
-                            ? 'bg-emerald-100 text-emerald-900'
-                            : row.commitment_code === 'high_absence'
-                              ? 'bg-rose-100 text-rose-900'
-                              : 'bg-amber-100 text-amber-950'
+                          row.commitment_code === 'high_commitment' ? 'bg-emerald-100 text-emerald-900' : row.commitment_code === 'high_absence' ? 'bg-rose-100 text-rose-900' : 'bg-amber-100 text-amber-950'
                         }`}>
                           {row.commitment_status}
                         </span>
@@ -1366,9 +1244,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                       <span className="text-[11px] text-[#7a1c24] font-bold">{n.behavior_tag || 'ملاحظة'}</span>
                       <p className="text-gray-700 mt-0.5">{n.note_text}</p>
                     </div>
-                    <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black shrink-0 ${
-                      n.visible_to_parent ? 'bg-emerald-100 text-emerald-900' : 'bg-gray-200 text-gray-700'
-                    }`}>
+                    <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black shrink-0 ${n.visible_to_parent ? 'bg-emerald-100 text-emerald-900' : 'bg-gray-200 text-gray-700'}`}>
                       {n.visible_to_parent ? 'ظاهر لولي الأمر' : 'داخلي فقط'}
                     </span>
                   </div>
@@ -1381,38 +1257,23 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     );
   };
 
-  // ==============================================================
-  // Hub (الشاشة الرئيسية لأبونا)
-  // ==============================================================
   if (activeCard === 'hub') {
     const cards = [
-      {
-        id: 'service_hub',
-        icon: '🏫',
-        title: 'الخدمة ومدارس الأحد',
-        desc: '3 كروت مستقلة: شيت التسلسل والافتقاد والترحيم • الالتزام والكفاءة والعروض والرحلات • جدول الخدمة',
-        count: `${stagesMap.length} خدمة • ${localUsers.length} مسجل`,
-        color: 'border-teal-300 bg-teal-50/40'
-      },
+      { id: 'service_hub', icon: '🏫', title: 'الخدمة ومدارس الأحد', desc: '3 كروت مستقلة: شيت التسلسل والافتقاد والترحيم • الالتزام والكفاءة والعروض والرحلات • جدول الخدمة', count: `${stagesMap.length} خدمة • ${localUsers.length} مسجل`, color: 'border-teal-300 bg-teal-50/40' },
       { id: 'confessions', icon: '🙏', title: 'الاعترافات', desc: 'المواعيد بالمدة، المعترفون (داخل/خارج الكنيسة) والملف الروحي، والافتقاد', count: `${myConfessors.length} معترف • ${confessionSlots.length} موعد`, color: 'border-red-200 bg-white' },
       { id: 'masses', icon: '⛪', title: 'جدول القداسات', desc: 'اسم القداس، كاهن خادم أو شريك، والفئات', count: `${masses.length} قداس`, color: 'border-blue-200 bg-white' },
-      { id: 'personal', icon: '📅', title: 'الجدول الخاص بالكاهن', desc: 'طشت، خطوبة، أكاليل، رحلات ومؤتمرات بالأقساط والأتوبيسات وطباعة الكشوفات', count: `${personalItems.length} موعد`, color: 'border-purple-200 bg-white' },
-      { id: 'cases', icon: '🔍', title: 'بحث الحالة / العيلة', desc: 'البحث، التصنيفات، الإضافة، المرفقات (بطاقة/إيجار/تحاليل)، وطباعة PDF', count: `${families.length} أسرة`, color: 'border-emerald-200 bg-white' },
+      { id: 'personal', icon: '📅', title: 'الجدول الخاص بالكاهن', desc: 'صلاة طشت، خطوبة، أكاليل، رحلات ومؤتمرات بالأقساط والأتوبيسات وطباعة الكشوفات', count: `${personalItems.length} موعد`, color: 'border-purple-200 bg-white' },
+      { id: 'cases', icon: '🔍', title: 'بحث الحالة / العيلة', desc: 'البحث، التصنيفات، الإضافة، المرفقات (بطاقة/إيجار/تحاليل)، وطلبات الأسر المستترة وطباعة PDF', count: pendingHiddenReqsCount > 0 ? `📩 ${pendingHiddenReqsCount} طلب • ${families.length} أسرة` : `${families.length} أسرة`, color: pendingHiddenReqsCount > 0 ? 'border-amber-400 bg-amber-50/40' : 'border-emerald-200 bg-white' },
       { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل التعليمية، المواد الدراسية، الأسعار، وتسجيل الحضور', count: 'مركز الدروس', color: 'border-indigo-200 bg-white' },
-      {
-        id: 'joseph_arimathea',
-        icon: '🕊️',
-        title: 'خدمة يوسف الرامي',
-        desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، وخط سير السائق ومكان الدفن',
-        count: totalJosephAlerts > 0 ? `🚨 ${totalJosephAlerts} بحاجة للمتابعة` : `${josephCases.length} حالة مسجلة`,
-        color: totalJosephAlerts > 0 ? 'border-red-400 bg-red-50/50' : 'border-slate-300 bg-white'
-      }
+      { id: 'joseph_arimathea', icon: '🕊️', title: 'خدمة يوسف الرامي', desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، وخط سير السائق ومكان الدفن', count: totalJosephAlerts > 0 ? `🚨 ${totalJosephAlerts} بحاجة للمتابعة` : `${josephCases.length} حالة مسجلة`, color: totalJosephAlerts > 0 ? 'border-red-400 bg-red-50/50' : 'border-slate-300 bg-white' }
     ];
 
     const displayedBdays = bdayTab === 'week' ? weekBirthdays : monthBirthdays;
 
     return (
-      <div className="space-y-4 text-sm md:text-base">
+      <div className="space-y-3 text-sm md:text-base">
+        {renderQuickNavBar()}
+
         {liveJosephAlert && (
           <div className="bg-linear-to-r from-red-800 to-[#7a1c24] text-white p-4 rounded-3xl shadow-xl border-2 border-amber-300 flex flex-wrap justify-between items-center gap-3 animate-bounce">
             <div className="flex items-center gap-2.5">
@@ -1423,11 +1284,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => { setActiveCard('joseph_arimathea'); setLiveJosephAlert(null); }}
-                className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-red-950 font-black rounded-xl text-xs shadow cursor-pointer"
-              >
+              <button type="button" onClick={() => { setActiveCard('joseph_arimathea'); setLiveJosephAlert(null); }} className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-red-950 font-black rounded-xl text-xs shadow cursor-pointer">
                 فتح ومتابعة فوراً ↗
               </button>
               <button type="button" onClick={() => setLiveJosephAlert(null)} className="text-white/70 hover:text-white text-xs">✕</button>
@@ -1435,1017 +1292,981 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
           </div>
         )}
 
-        <div className="bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-6 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
+        <div className="bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-5 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
           <div>
             <h2 className="text-xl font-black text-amber-200">مكتب رعاية: {priest.full_name}</h2>
             <p className="text-sm text-white/85 mt-1">اختر الكارت للدخول إلى التفاصيل الكاملة</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {renderBellPanel()}
-            <button
-              type="button"
-              onClick={() => openWhatsAppComposer({ name: '', phone: '', defaultCategory: 'افتقاد' })}
-              className="px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-2xl font-black text-xs md:text-sm flex items-center gap-2 cursor-pointer shadow"
-            >
+            <button type="button" onClick={() => openWhatsAppComposer({ name: '', phone: '', defaultCategory: 'افتقاد' })} className="px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-2xl font-black text-xs md:text-sm flex items-center gap-2 cursor-pointer shadow">
               <MessageCircle size={17} /> إرسال رسالة واتساب / بحث بالاسم
             </button>
           </div>
         </div>
 
-        <div className="bg-linear-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-3xl p-4 shadow-sm space-y-3">
-          <div className="flex flex-wrap justify-between items-center gap-2">
-            <div className="flex items-center gap-2">
-              <span className="p-2 bg-amber-500 text-white rounded-2xl shadow-xs"><BellRing size={18} /></span>
-              <div>
-                <h3 className="text-sm md:text-base font-black text-amber-950 flex items-center gap-1.5">
-                  <Cake size={16} className="text-[#7a1c24]" /> تنبيه أعياد الميلاد (الأسبوع الحالي & شهر {currentMonthName})
-                </h3>
-                <p className="text-xs text-amber-900">
-                  هذا الأسبوع: <strong>{weekBirthdays.length}</strong> • خلال شهر {currentMonthName}: <strong>{monthBirthdays.length}</strong>
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-1.5 items-center">
-              <button type="button" onClick={() => setBdayTab('week')} className={`px-3 py-1.5 rounded-xl text-xs font-black border cursor-pointer ${bdayTab === 'week' ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-amber-950 border-amber-300'}`}>
-                🎂 هذا الأسبوع ({weekBirthdays.length})
-              </button>
-              <button type="button" onClick={() => setBdayTab('month')} className={`px-3 py-1.5 rounded-xl text-xs font-black border cursor-pointer ${bdayTab === 'month' ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-amber-950 border-amber-300'}`}>
-                📅 كل شهر {currentMonthName} ({monthBirthdays.length})
-              </button>
-              <select className="p-1.5 border border-amber-300 rounded-xl bg-white text-xs font-bold text-amber-950" value={bdayScope} onChange={e => setBdayScope(e.target.value)}>
-                <option value="confessors">معترفي أبونا فقط</option>
-                <option value="all">كل شعب الكنيسة</option>
-              </select>
-            </div>
-          </div>
-
-          {displayedBdays.length === 0 ? (
-            <div className="bg-white/80 p-3 rounded-2xl border border-amber-200 text-xs text-amber-900 text-center">
-              لا توجد أعياد ميلاد مسجلة في هذه الفترة ({bdayTab === 'week' ? 'الأسبوع الحالي' : `شهر ${currentMonthName}`}).
-            </div>
-          ) : (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-56 overflow-y-auto">
-              {displayedBdays.map(b => {
-                const isToday = b.daysLeft === 0;
-                return (
-                  <div key={b.id} className={`p-3 rounded-2xl border flex justify-between items-center gap-2 ${isToday ? 'bg-red-50 border-red-400' : 'bg-white border-amber-200'}`}>
-                    <div className="min-w-0">
-                      <strong className="text-xs md:text-sm text-gray-900 block truncate">{b.full_name}</strong>
-                      <span className="text-[11px] text-gray-600 block">
-                        🎂 {b.dob}
-                        {b.daysLeft === 0 && <strong className="mr-1 text-red-700">• اليوم 🎉</strong>}
-                        {b.daysLeft > 0 && <strong className="mr-1 text-amber-800">• خلال {b.daysLeft} يوم</strong>}
-                      </span>
-                    </div>
-                    {b.phone ? (
-                      <button
-                        type="button"
-                        onClick={() => openWhatsAppComposer({ name: b.full_name, phone: b.phone, targetId: b.id, defaultCategory: 'معايدة' })}
-                        className="px-2.5 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shrink-0 cursor-pointer"
-                      >
-                        <MessageCircle size={13} /> معايدة
-                      </button>
-                    ) : (
-                      <span className="text-[10px] text-gray-400 shrink-0">بدون رقم</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {cards.map(c => (
-            <button
-              type="button"
-              key={c.id}
-              onClick={() => {
-                setActiveCard(c.id);
-                if (c.id === 'service_hub') setActiveServiceCard(null);
-              }}
-              className={`${c.color} border-2 p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer`}
-            >
-              <div className="flex justify-between items-start w-full">
-                <span className="text-4xl">{c.icon}</span>
-                <span className="px-3 py-1 bg-[#f9ecee] text-[#7a1c24] rounded-full text-xs font-black">{c.count}</span>
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-gray-900">{c.title}</h3>
-                <p className="text-sm text-gray-600 mt-1">{c.desc}</p>
-              </div>
-            </button>
-          ))}
-          {customCards.map(cc => (
-            <button type="button" key={cc.id} onClick={() => setActiveCard('custom:' + cc.id)} className="bg-amber-50/50 border-2 border-amber-300 p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer">
-              <div className="flex justify-between items-start w-full">
-                <span className="text-4xl">{cc.card_icon || '📌'}</span>
-                <span className="px-3 py-1 bg-amber-200 text-amber-950 rounded-full text-xs font-black">كارت مضاف</span>
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-gray-900">{cc.card_title}</h3>
-                <p className="text-sm text-gray-700 mt-1">{cc.description || 'سجل مضاف من الأدمن'}</p>
-              </div>
-            </button>
-          ))}
-        </div>
-
-        {renderGlobalModals()}
-      </div>
-    );
-  }
-
-  // ==============================================================
-  // الخدمة ومدارس الأحد: 3 كروت فقط، وكل كارت يفتح حاجته لوحدها
-  // ==============================================================
-  if (activeCard === 'service_hub') {
-    const threeServiceCards = [
-      {
-        id: 'sequence',
-        title: 'شيت التسلسل والافتقاد والترحيم',
-        desc: 'عرض كل خدمة على حدة وبند المعاشات + حالة الافتقاد وذكرى الترحيم + تصدير وطباعة',
-        badge: `${localUsers.length} مسجل`,
-        icon: ClipboardList,
-        color: 'border-emerald-200 bg-white'
-      },
-      {
-        id: 'commitment',
-        title: 'الالتزام والكفاءة والعروض والرحلات',
-        desc: 'متابعة الالتزام والغياب والتأخير، ومنح العروض والخصومات، والملاحظات لولي الأمر',
-        badge: `${rewardCampaigns.length} عرض • ${memberRewards.length} مكافأة`,
-        icon: Award,
-        color: 'border-amber-200 bg-white'
-      },
-      {
-        id: 'schedule',
-        title: 'جدول الخدمة',
-        desc: 'كروت الخدمات، القيادات، الفصول، الخدام، وافتقاد الخدمة',
-        badge: `${stagesMap.length} خدمة`,
-        icon: School,
-        color: 'border-blue-200 bg-white'
-      }
-    ];
-
-    const currentCardMeta = threeServiceCards.find(c => c.id === activeServiceCard);
-
-    return (
-      <div className="space-y-4 text-sm md:text-base">
-        {renderTopBar(currentCardMeta ? `🏫 ${currentCardMeta.title}` : '🏫 الخدمة ومدارس الأحد')}
-
-        {activeServiceCard && (
-          <div>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveServiceCard(null);
-                setSelectedStage(null);
-                setServiceSubCard('menu');
-                setSelectedClass(null);
-              }}
-              className="px-4 py-2 bg-white border hover:bg-gray-50 rounded-xl font-bold text-sm inline-flex items-center gap-1.5 cursor-pointer"
-            >
-              ← رجوع لكروت الخدمة ومدارس الأحد (3 كروت)
-            </button>
-          </div>
-        )}
-
-        {!activeServiceCard && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {threeServiceCards.map(card => {
-              const Icon = card.icon;
-              return (
-                <button
-                  key={card.id}
-                  type="button"
-                  onClick={() => setActiveServiceCard(card.id)}
-                  className={`${card.color} border-2 p-6 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-4 cursor-pointer`}
-                >
-                  <div className="flex justify-between items-start w-full">
-                    <span className="p-3 bg-[#f9ecee] text-[#7a1c24] rounded-2xl">
-                      <Icon size={26} />
-                    </span>
-                    <span className="px-3 py-1 bg-amber-100 text-amber-950 rounded-full text-xs font-black">
-                      {card.badge}
-                    </span>
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-black text-gray-900">{card.title}</h3>
-                    <p className="text-sm text-gray-600 mt-1">{card.desc}</p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {activeServiceCard === 'sequence' && (
-          <MasterCongregationSheet
-            users={localUsers}
-            services={services}
-            serviceGroups={serviceGroups}
-            currentUser={priest}
-            onUpdateUser={handleUpdateUserFromSheet}
-            onRefresh={loadPriestData}
-          />
-        )}
-
-        {activeServiceCard === 'commitment' && renderCommitmentRewardsContent()}
-
-        {activeServiceCard === 'schedule' && renderServiceScheduleContent()}
-
-        {renderGlobalModals()}
-      </div>
-    );
-  }
-
-  // باقي الأقسام بنفس كودك الأصلي كاملاً دون نقص
-  if (activeCard === 'confessions') {
-    const y = calMonth.getFullYear(), m = calMonth.getMonth();
-    const daysInM = new Date(y, m + 1, 0).getDate();
-    const startOff = (new Date(y, m, 1).getDay() + 1) % 7;
-    const confVisitations = visitations.filter(v => v.category === 'افتقاد معترفين');
-
-    const filteredConfessors = myConfessors.filter(mObj => {
-      if (confessorOriginFilter === 'inside' && mObj.is_church_member === false) return false;
-      if (confessorOriginFilter === 'outside' && mObj.is_church_member !== false) return false;
-      if (!confessorSearchFilter.trim()) return true;
-      return ((mObj.full_name || '') + ' ' + (mObj.phone || '') + ' ' + (mObj.address || '')).toLowerCase().includes(confessorSearchFilter.toLowerCase());
-    });
-
-    const insideSearchMatches = insideConfSearch.trim().length < 1 ? [] : localUsers.filter(u =>
-      u.role !== 'admin' && u.is_church_member !== false && ((u.full_name || '') + ' ' + (u.phone || '')).toLowerCase().includes(insideConfSearch.toLowerCase())
-    ).slice(0, 10);
-
-    return (
-      <div className="space-y-4 text-sm md:text-base">
-        {renderTopBar('🙏 الاعترافات والمتابعة الروحية')}
-        {confSubView === 'menu' && (
-          <div className="grid sm:grid-cols-3 gap-4">
-            <button type="button" onClick={() => setConfSubView('slots')} className="bg-white border-2 border-blue-200 hover:border-[#7a1c24] p-6 rounded-3xl text-right shadow-sm space-y-2 transition cursor-pointer"><span className="text-4xl block">📅</span><h3 className="text-lg font-black text-gray-900">إضافة مواعيد الاعتراف</h3><p className="text-sm text-gray-600">تحديد المدة (أسبوع/شهر/3 شهور)، صباحي/مسائي ({confessionSlots.length})</p></button>
-            <button type="button" onClick={() => setConfSubView('confessors')} className="bg-white border-2 border-red-200 hover:border-[#7a1c24] p-6 rounded-3xl text-right shadow-sm space-y-2 transition cursor-pointer"><span className="text-4xl block">🙏</span><h3 className="text-lg font-black text-gray-900">المعترفون ({myConfessors.length})</h3><p className="text-sm text-gray-600">الملف الروحي، الثغرات والإجراءات، والقانون الروحي</p></button>
-            <button type="button" onClick={() => setConfSubView('visitations')} className="bg-white border-2 border-amber-200 hover:border-[#7a1c24] p-6 rounded-3xl text-right shadow-sm space-y-2 transition cursor-pointer"><span className="text-4xl block">🕊️</span><h3 className="text-lg font-black text-gray-900">افتقاد المعترفين ({confVisitations.length})</h3><p className="text-sm text-gray-600">افتقاد بزيارة، رسالة واتساب ممنهجة قابلة للتعديل، أو اتصال</p></button>
-          </div>
-        )}
-
-        {confSubView === 'slots' && (
-          <div className="space-y-4">
-            <button type="button" onClick={() => setConfSubView('menu')} className="px-4 py-2 bg-white border rounded-xl font-bold text-sm">← رجوع لكروت الاعترافات</button>
-            <div className="grid md:grid-cols-2 gap-4">
-              <div className="bg-white p-4 rounded-3xl border shadow-sm">
-                <div className="flex justify-between items-center mb-3 font-bold">
-                  <button type="button" onClick={() => setCalMonth(new Date(y, m - 1, 1))} className="px-3 py-1.5 border rounded-lg">▶</button>
-                  <span className="text-base font-black">{MONTHS_AR[m]} {y}</span>
-                  <button type="button" onClick={() => setCalMonth(new Date(y, m + 1, 1))} className="px-3 py-1.5 border rounded-lg">◀</button>
-                </div>
-                <div className="grid grid-cols-7 gap-1 text-center font-bold text-gray-600 mb-1">{['س', 'ح', 'ن', 'ث', 'ر', 'خ', 'ج'].map(w => <div key={w}>{w}</div>)}</div>
-                <div className="grid grid-cols-7 gap-1">
-                  {Array.from({ length: startOff }).map((_, i) => <div key={'e' + i} />)}
-                  {Array.from({ length: daysInM }).map((_, idx) => {
-                    const day = idx + 1;
-                    const iso = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                    const daySlots = confessionSlots.filter(s => s.slot_date === iso);
-                    return <button key={day} type="button" onClick={() => setSlotForm({ ...slotForm, slot_date: iso })} className={`p-2.5 rounded-xl border text-center font-bold ${slotForm.slot_date === iso ? 'border-2 border-[#7a1c24] bg-[#f9ecee]' : daySlots.some(s => s.is_cancelled) ? 'bg-red-50 border-red-300 text-red-700' : daySlots.length > 0 ? 'bg-green-50 border-green-300 text-green-800' : 'bg-white'}`}>{day}</button>;
-                  })}
-                </div>
-              </div>
-
-              <form onSubmit={handleSaveSlot} className="bg-white p-5 rounded-3xl border space-y-3 font-bold shadow-sm">
-                <h3 className="text-base font-black text-[#7a1c24]">{editingSlotId ? 'تعديل جلسة الاعتراف' : 'إضافة مواعيد اعتراف'}</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => selectPeriod('صباحية')} className={`p-3 rounded-xl border-2 flex items-center justify-center gap-1 cursor-pointer ${slotForm.period === 'صباحية' ? 'bg-amber-50 border-amber-500 text-amber-950' : 'bg-white border-gray-200'}`}><Sun size={16} /> صباحية (7-12)</button>
-                  <button type="button" onClick={() => selectPeriod('مسائية')} className={`p-3 rounded-xl border-2 flex items-center justify-center gap-1 cursor-pointer ${slotForm.period === 'مسائية' ? 'bg-indigo-50 border-indigo-500 text-indigo-950' : 'bg-white border-gray-200'}`}><Moon size={16} /> مسائية (12-10)</button>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <input required placeholder="عنوان الجلسة *" className="p-2.5 border rounded-xl" value={slotForm.confession_title} onChange={e => setSlotForm({ ...slotForm, confession_title: e.target.value })} />
-                  <input required placeholder="المكان *" className="p-2.5 border rounded-xl" value={slotForm.location} onChange={e => setSlotForm({ ...slotForm, location: e.target.value })} />
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <input type="date" className="p-2 border rounded-xl" value={slotForm.slot_date} onChange={e => setSlotForm({ ...slotForm, slot_date: e.target.value })} />
-                  <input required type="time" className="p-2 border rounded-xl" value={slotForm.start_time} onChange={e => setSlotForm({ ...slotForm, start_time: e.target.value })} />
-                  <input required type="time" className="p-2 border rounded-xl" value={slotForm.end_time} onChange={e => setSlotForm({ ...slotForm, end_time: e.target.value })} />
-                  <input required type="number" min="1" className="p-2 border rounded-xl" value={slotForm.max_confessors} onChange={e => setSlotForm({ ...slotForm, max_confessors: e.target.value })} />
-                </div>
-                {!editingSlotId && (
-                  <div className="bg-amber-50 p-3 rounded-2xl border border-amber-200 space-y-2">
-                    <select className="w-full p-2.5 border border-amber-300 rounded-xl bg-white" value={durationMode} onChange={e => setDurationMode(e.target.value)}>
-                      <option value="once">يوم واحد فقط</option>
-                      <option value="week">لمدة أسبوع (7 أيام)</option>
-                      <option value="month">لمدة شهر (30 يوم)</option>
-                      <option value="two_months">لمدة شهرين (60 يوم)</option>
-                      <option value="three_months">لمدة 3 شهور (90 يوم)</option>
-                    </select>
-                    <div className="flex flex-wrap gap-1.5">
-                      {WEEK_DAYS.map(wd => (
-                        <button key={wd.id} type="button" onClick={() => { const next = selectedDaysOfWeek.includes(wd.id) ? selectedDaysOfWeek.filter(x => x !== wd.id) : [...selectedDaysOfWeek, wd.id]; setSelectedDaysOfWeek(next); if (next.length > 0 && durationMode === 'once') setDurationMode('month'); }} className={`px-2.5 py-1.5 rounded-lg border text-xs cursor-pointer ${selectedDaysOfWeek.includes(wd.id) ? 'bg-[#7a1c24] text-white' : 'bg-white'}`}>{wd.label}</button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <button type="submit" className="flex-1 py-3 bg-[#7a1c24] text-white rounded-xl cursor-pointer">{editingSlotId ? 'حفظ التعديل' : 'نشر الموعد'}</button>
-                  {editingSlotId && <button type="button" onClick={() => { setEditingSlotId(null); setSlotForm(emptySlot); }} className="px-4 border rounded-xl">إلغاء</button>}
-                </div>
-              </form>
-            </div>
-
-            <div className="grid gap-2.5">
-              {confessionSlots.map(s => (
-                <div key={s.id} className={`p-4 rounded-2xl border flex flex-wrap justify-between items-center gap-2 ${s.is_cancelled ? 'bg-red-50 border-red-300' : 'bg-white'}`}>
-                  <div>
-                    <strong className="text-base">{s.confession_title}</strong>
-                    <span className="mr-2 px-2.5 py-0.5 rounded bg-amber-100 text-xs font-bold">{s.period}</span>
-                    <span className="mr-2 px-2.5 py-0.5 rounded bg-blue-50 text-xs font-bold">العدد: {s.booked_count || 0}/{s.max_confessors}</span>
-                    <p className="text-gray-600 mt-1">📅 {s.slot_date} • ⏰ {s.start_time} - {s.end_time} • 📍 {s.location}</p>
-                  </div>
-                  <div className="flex gap-1.5">
-                    <button type="button" onClick={() => { setEditingSlotId(s.id); setSlotForm({ ...s }); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="px-3 py-2 bg-gray-100 rounded-xl font-bold flex items-center gap-1 text-xs"><Edit3 size={14} /> تعديل</button>
-                    <button type="button" onClick={() => toggleCancelSlot(s)} className={`px-3 py-2 rounded-xl font-bold text-xs ${s.is_cancelled ? 'bg-green-600 text-white' : 'bg-amber-100'}`}>{s.is_cancelled ? 'تفعيل' : 'اعتذار'}</button>
-                    <button type="button" onClick={() => deleteSlot(s.id)} className="p-2.5 bg-red-100 text-red-700 rounded-xl"><Trash2 size={15} /></button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {confSubView === 'confessors' && (
-          <div className="space-y-4">
+        <div ref={scrollBoxRef} className="max-h-[calc(100vh-250px)] overflow-y-auto pr-1 space-y-4">
+          <div className="bg-linear-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-3xl p-4 shadow-sm space-y-3">
             <div className="flex flex-wrap justify-between items-center gap-2">
-              <button type="button" onClick={() => setConfSubView('menu')} className="px-4 py-2 bg-white border rounded-xl font-bold text-sm">← رجوع لكروت الاعترافات</button>
-              <button type="button" onClick={() => { setAddConfOrigin('inside'); setInsideConfSearch(''); setNewConfessor(emptyNewConf); setShowAddConfessor(true); }} className="px-4 py-2.5 bg-[#7a1c24] text-white rounded-xl font-bold flex items-center gap-1.5 shadow text-sm cursor-pointer"><UserPlus size={16} /> إضافة معترف</button>
-            </div>
-
-            {confBirthdays.length > 0 && (
-              <div className="bg-amber-50 border border-amber-300 p-4 rounded-3xl space-y-2">
-                <strong className="text-amber-950 block">🎂 أعياد ميلاد المعترفين هذا الأسبوع ({confBirthdays.length}):</strong>
-                <div className="flex flex-wrap gap-2">
-                  {confBirthdays.map(b => (
-                    <div key={b.id} className="bg-white p-3 rounded-2xl border flex items-center gap-3">
-                      <div><strong>{b.full_name}</strong><span className="block text-xs text-gray-500">{b.dob}</span></div>
-                      {b.phone && <button type="button" onClick={() => openWhatsAppComposer({ name: b.full_name, phone: b.phone, targetId: b.id, defaultCategory: 'معايدة' })} className="px-3 py-1.5 bg-green-600 text-white rounded-xl font-bold text-xs cursor-pointer">تهنئة واتس</button>}
-                    </div>
-                  ))}
+              <div className="flex items-center gap-2">
+                <span className="p-2 bg-amber-500 text-white rounded-2xl shadow-xs"><BellRing size={18} /></span>
+                <div>
+                  <h3 className="text-sm md:text-base font-black text-amber-950 flex items-center gap-1.5">
+                    <Cake size={16} className="text-[#7a1c24]" /> تنبيه أعياد الميلاد (الأسبوع الحالي & شهر {currentMonthName})
+                  </h3>
+                  <p className="text-xs text-amber-900">
+                    هذا الأسبوع: <strong>{weekBirthdays.length}</strong> • خلال شهر {currentMonthName}: <strong>{monthBirthdays.length}</strong>
+                  </p>
                 </div>
               </div>
-            )}
 
-            <div className="bg-white p-3 rounded-2xl border flex flex-wrap gap-2 items-center justify-between">
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  { id: 'all', label: `الكل (${myConfessors.length})` },
-                  { id: 'inside', label: `🏠 داخل الكنيسة (${myConfessors.filter(m => m.is_church_member !== false).length})` },
-                  { id: 'outside', label: `🌐 خارج الكنيسة (${myConfessors.filter(m => m.is_church_member === false).length})` }
-                ].map(f => (
-                  <button key={f.id} type="button" onClick={() => setConfessorOriginFilter(f.id)} className={`px-3 py-1.5 rounded-xl text-xs font-bold border cursor-pointer ${confessorOriginFilter === f.id ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-gray-50 text-gray-700'}`}>{f.label}</button>
-                ))}
+              <div className="flex flex-wrap gap-1.5 items-center">
+                <button type="button" onClick={() => setBdayTab('week')} className={`px-3 py-1.5 rounded-xl text-xs font-black border cursor-pointer ${bdayTab === 'week' ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-amber-950 border-amber-300'}`}>🎂 هذا الأسبوع ({weekBirthdays.length})</button>
+                <button type="button" onClick={() => setBdayTab('month')} className={`px-3 py-1.5 rounded-xl text-xs font-black border cursor-pointer ${bdayTab === 'month' ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-amber-950 border-amber-300'}`}>📅 كل شهر {currentMonthName} ({monthBirthdays.length})</button>
+                <select className="p-1.5 border border-amber-300 rounded-xl bg-white text-xs font-bold text-amber-950" value={bdayScope} onChange={e => setBdayScope(e.target.value)}>
+                  <option value="confessors">معترفي أبونا فقط</option>
+                  <option value="all">كل شعب الكنيسة</option>
+                </select>
               </div>
-              <input placeholder="بحث بالاسم أو التليفون..." className="flex-1 min-w-[200px] p-2 border rounded-xl text-xs" value={confessorSearchFilter} onChange={e => setConfessorSearchFilter(e.target.value)} />
             </div>
 
-            <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {filteredConfessors.map(m => {
-                const note = spiritualNotes.find(n => n.member_id === m.id);
-                const kids = userChildren.filter(k => k.parent_user_id === m.id);
-                const linkedFather = m.father_id ? localUsers.find(u => u.id === m.father_id) : null;
-                const isOutside = m.is_church_member === false;
-                const nextBooking = confessionBookings
-                  .filter(b => b.member_id === m.id && b.booking_date >= todayISO && b.status === 'محجوز')
-                  .sort((a, b) => (a.booking_date || '').localeCompare(b.booking_date || ''))[0];
-
-                return (
-                  <div key={m.id} onClick={() => setSelectedConfessor(m)} className="bg-white p-4 rounded-3xl border-2 border-gray-200 hover:border-[#7a1c24] shadow-sm space-y-2 transition cursor-pointer">
-                    <div className="flex justify-between items-start gap-2">
-                      <div>
-                        <strong className="text-base text-gray-900 block">{m.full_name}</strong>
-                        <span className={`inline-block mt-1 px-2 py-0.5 rounded text-[11px] font-bold ${isOutside ? 'bg-purple-100 text-purple-900' : 'bg-blue-100 text-blue-900'}`}>
-                          {isOutside ? '🌐 من خارج الكنيسة' : '🏠 من داخل الكنيسة'}
+            {displayedBdays.length === 0 ? (
+              <div className="bg-white/80 p-3 rounded-2xl border border-amber-200 text-xs text-amber-900 text-center">
+                لا توجد أعياد ميلاد مسجلة في هذه الفترة ({bdayTab === 'week' ? 'الأسبوع الحالي' : `شهر ${currentMonthName}`}).
+              </div>
+            ) : (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+                {displayedBdays.map(b => {
+                  const isToday = b.daysLeft === 0;
+                  return (
+                    <div key={b.id} className={`p-3 rounded-2xl border flex justify-between items-center gap-2 ${isToday ? 'bg-red-50 border-red-400' : 'bg-white border-amber-200'}`}>
+                      <div className="min-w-0">
+                        <strong className="text-xs md:text-sm text-gray-900 block truncate">{b.full_name}</strong>
+                        <span className="text-[11px] text-gray-600 block">
+                          🎂 {b.dob}
+                          {b.daysLeft === 0 && <strong className="mr-1 text-red-700">• اليوم 🎉</strong>}
+                          {b.daysLeft > 0 && <strong className="mr-1 text-amber-800">• خلال {b.daysLeft} يوم</strong>}
                         </span>
                       </div>
-                      <span className={`px-2.5 py-0.5 rounded text-xs font-bold ${note?.confession_status === 'منتظم' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900'}`}>{note?.confession_status || 'جديد'}</span>
-                    </div>
-                    {nextBooking && (
-                      <div className="px-2.5 py-1 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-xl text-xs font-black">
-                        📅 حجز قادم: {nextBooking.booking_date === todayISO ? 'اليوم' : nextBooking.booking_date} {nextBooking.booking_time ? `(${nextBooking.booking_time})` : ''}
-                      </div>
-                    )}
-                    <p className="text-sm text-gray-600">🎂 {m.dob || '—'} ({calcAge(m.dob)}) • 💼 {m.job_title || '—'}</p>
-                    {linkedFather && <p className="text-blue-800 text-xs font-bold flex items-center gap-1"><Link2 size={13} /> والده: {linkedFather.full_name}</p>}
-                    {m.is_studying && <p className="text-blue-700 text-xs">🎓 يدرس: {m.detailed_stage}</p>}
-                    {m.marital_status !== 'أعزب' && <p className="text-gray-700 text-xs">💍 {m.spouse_name || m.marital_status} {kids.length > 0 ? `• 👶 ${kids.length} أولاد` : ''}</p>}
-                    {note?.spiritual_rule && <p className="text-[#7a1c24] bg-red-50 p-2 rounded-xl text-xs truncate">📜 {note.spiritual_rule}</p>}
-                    <div className="flex justify-between items-center pt-1 text-xs">
-                      <span className="text-[#7a1c24] font-bold flex items-center gap-1"><Edit3 size={13} /> فتح الملف الروحي</span>
-                      {m.phone && (
-                        <button type="button" onClick={e => { e.stopPropagation(); openWhatsAppComposer({ name: m.full_name, phone: m.phone, targetId: m.id, defaultCategory: 'متابعة اعتراف' }); }} className="px-3 py-1.5 bg-green-600 text-white rounded-xl font-bold flex items-center gap-1 cursor-pointer">
-                          <MessageCircle size={13} /> واتس
+                      {b.phone ? (
+                        <button type="button" onClick={() => openWhatsAppComposer({ name: b.full_name, phone: b.phone, targetId: b.id, defaultCategory: 'معايدة' })} className="px-2.5 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shrink-0 cursor-pointer">
+                          <MessageCircle size={13} /> معايدة
                         </button>
-                      )}
+                      ) : <span className="text-[10px] text-gray-400 shrink-0">بدون رقم</span>}
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {cards.map(c => (
+              <button
+                type="button"
+                key={c.id}
+                onClick={() => {
+                  setActiveCard(c.id);
+                  if (c.id === 'service_hub') setActiveServiceCard(null);
+                }}
+                className={`${c.color} border-2 p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer`}
+              >
+                <div className="flex justify-between items-start w-full">
+                  <span className="text-4xl">{c.icon}</span>
+                  <span className="px-3 py-1 bg-[#f9ecee] text-[#7a1c24] rounded-full text-xs font-black">{c.count}</span>
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-gray-900">{c.title}</h3>
+                  <p className="text-sm text-gray-600 mt-1">{c.desc}</p>
+                </div>
+              </button>
+            ))}
+            {customCards.map(cc => (
+              <button type="button" key={cc.id} onClick={() => setActiveCard('custom:' + cc.id)} className="bg-amber-50/50 border-2 border-amber-300 p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer">
+                <div className="flex justify-between items-start w-full">
+                  <span className="text-4xl">{cc.card_icon || '📌'}</span>
+                  <span className="px-3 py-1 bg-amber-200 text-amber-950 rounded-full text-xs font-black">كارت مضاف</span>
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-gray-900">{cc.card_title}</h3>
+                  <p className="text-sm text-gray-700 mt-1">{cc.description || 'سجل مضاف من الأدمن'}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {renderGlobalModals()}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 text-sm md:text-base">
+      {renderQuickNavBar()}
+
+      <div ref={scrollBoxRef} className="max-h-[calc(100vh-195px)] overflow-y-auto pr-1 space-y-4">
+        {activeCard === 'service_hub' && (() => {
+          const threeServiceCards = [
+            { id: 'sequence', title: 'شيت التسلسل والافتقاد والترحيم', desc: 'عرض كل خدمة على حدة وبند المعاشات + حالة الافتقاد وذكرى الترحيم + تصدير وطباعة', badge: `${localUsers.length} مسجل`, icon: ClipboardList, color: 'border-emerald-200 bg-white' },
+            { id: 'commitment', title: 'الالتزام والكفاءة والعروض والرحلات', desc: 'متابعة الالتزام والغياب والتأخير، ومنح العروض والخصومات، والملاحظات لولي الأمر', badge: `${rewardCampaigns.length} عرض • ${memberRewards.length} مكافأة`, icon: Award, color: 'border-amber-200 bg-white' },
+            { id: 'schedule', title: 'جدول الخدمة', desc: 'كروت الخدمات، القيادات، الفصول، الخدام، وافتقاد الخدمة', badge: `${stagesMap.length} خدمة`, icon: School, color: 'border-blue-200 bg-white' }
+          ];
+          const currentCardMeta = threeServiceCards.find(c => c.id === activeServiceCard);
+          return (
+            <div className="space-y-4">
+              {renderTopBar(currentCardMeta ? `🏫 ${currentCardMeta.title}` : '🏫 الخدمة ومدارس الأحد')}
+              {activeServiceCard && (
+                <div>
+                  <button type="button" onClick={() => { setActiveServiceCard(null); setSelectedStage(null); setServiceSubCard('menu'); setSelectedClass(null); }} className="px-4 py-2 bg-white border hover:bg-gray-50 rounded-xl font-bold text-sm inline-flex items-center gap-1.5 cursor-pointer">
+                    ← رجوع لكروت الخدمة ومدارس الأحد (3 كروت)
+                  </button>
+                </div>
+              )}
+              {!activeServiceCard && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {threeServiceCards.map(card => {
+                    const Icon = card.icon;
+                    return (
+                      <button key={card.id} type="button" onClick={() => setActiveServiceCard(card.id)} className={`${card.color} border-2 p-6 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-4 cursor-pointer`}>
+                        <div className="flex justify-between items-start w-full">
+                          <span className="p-3 bg-[#f9ecee] text-[#7a1c24] rounded-2xl"><Icon size={26} /></span>
+                          <span className="px-3 py-1 bg-amber-100 text-amber-950 rounded-full text-xs font-black">{card.badge}</span>
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-black text-gray-900">{card.title}</h3>
+                          <p className="text-sm text-gray-600 mt-1">{card.desc}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {activeServiceCard === 'sequence' && (
+                <MasterCongregationSheet users={localUsers} services={services} serviceGroups={serviceGroups} currentUser={priest} onUpdateUser={handleUpdateUserFromSheet} onRefresh={loadPriestData} />
+              )}
+              {activeServiceCard === 'commitment' && renderCommitmentRewardsContent()}
+              {activeServiceCard === 'schedule' && renderServiceScheduleContent()}
             </div>
+          );
+        })()}
 
-            {showAddConfessor && (
-              <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-                <div className="bg-white rounded-3xl w-full max-w-xl p-6 space-y-3 font-bold max-h-[92vh] overflow-y-auto">
-                  <div className="flex justify-between items-center border-b pb-2"><h3 className="text-base font-black text-[#7a1c24]">إضافة معترف جديد</h3><button type="button" onClick={() => setShowAddConfessor(false)} className="p-1.5 bg-gray-100 rounded-lg"><X size={18} /></button></div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button type="button" onClick={() => { setAddConfOrigin('inside'); setNewConfessor({ ...emptyNewConf, is_church_member: true }); }} className={`p-3 rounded-2xl border-2 text-xs md:text-sm font-black cursor-pointer ${addConfOrigin === 'inside' ? 'bg-blue-50 border-blue-600 text-blue-950' : 'bg-white border-gray-200 text-gray-700'}`}>🏠 من داخل الكنيسة (بحث بالداتابيز)</button>
-                    <button type="button" onClick={() => { setAddConfOrigin('outside'); setNewConfessor({ ...emptyNewConf, is_church_member: false }); }} className={`p-3 rounded-2xl border-2 text-xs md:text-sm font-black cursor-pointer ${addConfOrigin === 'outside' ? 'bg-purple-50 border-purple-600 text-purple-950' : 'bg-white border-gray-200 text-gray-700'}`}>🌐 من خارج الكنيسة (إدخال جديد)</button>
-                  </div>
+        {activeCard === 'confessions' && (() => {
+          const y = calMonth.getFullYear(), m = calMonth.getMonth();
+          const daysInM = new Date(y, m + 1, 0).getDate();
+          const startOff = (new Date(y, m, 1).getDay() + 1) % 7;
+          const confVisitations = visitations.filter(v => v.category === 'افتقاد معترفين');
+          const filteredConfessors = myConfessors.filter(mObj => {
+            if (confessorOriginFilter === 'inside' && mObj.is_church_member === false) return false;
+            if (confessorOriginFilter === 'outside' && mObj.is_church_member !== false) return false;
+            if (!confessorSearchFilter.trim()) return true;
+            return ((mObj.full_name || '') + ' ' + (mObj.phone || '') + ' ' + (mObj.address || '')).toLowerCase().includes(confessorSearchFilter.toLowerCase());
+          });
+          const insideSearchMatches = insideConfSearch.trim().length < 1 ? [] : localUsers.filter(u =>
+            u.role !== 'admin' && u.is_church_member !== false && ((u.full_name || '') + ' ' + (u.phone || '')).toLowerCase().includes(insideConfSearch.toLowerCase())
+          ).slice(0, 10);
 
-                  {addConfOrigin === 'inside' && (
-                    <div className="bg-blue-50/70 p-3.5 rounded-2xl border border-blue-200 space-y-2.5 text-sm">
-                      <label className="block text-xs text-blue-950 font-black">🔍 ابحث بالاسم أو رقم التليفون لإظهار بياناته من قاعدة بيانات الكنيسة:</label>
-                      <input autoFocus type="text" placeholder="اكتب اسم الشخص أو رقم الموبايل..." className="w-full p-2.5 border rounded-xl bg-white" value={insideConfSearch} onChange={e => setInsideConfSearch(e.target.value)} />
-                      {insideConfSearch.trim().length > 0 && (
-                        <div className="space-y-2 max-h-56 overflow-y-auto">
-                          {insideSearchMatches.length === 0 ? (
-                            <p className="text-xs text-gray-600 p-2 bg-white rounded-xl">لا توجد نتائج مطابقة.</p>
-                          ) : insideSearchMatches.map(u => {
-                            const alreadyMine = u.confession_father_id === priest.id;
-                            return (
-                              <div key={u.id} className="bg-white p-3 rounded-xl border border-blue-200 flex flex-wrap justify-between items-center gap-2">
-                                <div className="text-xs space-y-0.5">
-                                  <strong className="text-sm text-gray-900 block">{u.full_name}</strong>
-                                  <span className="text-gray-600 block">📞 {u.phone || '—'} • 🎂 {u.dob || '—'} ({calcAge(u.dob)}) • 🎓 {u.detailed_stage || u.service_stage || '—'}</span>
-                                  <span className="text-gray-500 block">📍 {u.address || '—'} • 💍 {u.marital_status || '—'}</span>
-                                </div>
-                                {alreadyMine ? <span className="px-3 py-1.5 bg-green-100 text-green-800 rounded-xl text-xs font-black">مضاف عندك ✅</span> : <button type="button" onClick={() => handleLinkExistingConfessor(u)} className="px-3.5 py-2 bg-[#7a1c24] text-white rounded-xl text-xs font-black cursor-pointer">ربط كمعترف +</button>}
-                              </div>
-                            );
-                          })}
+          return (
+            <div className="space-y-4">
+              {renderTopBar('🙏 الاعترافات والمتابعة الروحية')}
+              {confSubView === 'menu' && (
+                <div className="grid sm:grid-cols-3 gap-4">
+                  <button type="button" onClick={() => setConfSubView('slots')} className="bg-white border-2 border-blue-200 hover:border-[#7a1c24] p-6 rounded-3xl text-right shadow-sm space-y-2 transition cursor-pointer"><span className="text-4xl block">📅</span><h3 className="text-lg font-black text-gray-900">إضافة مواعيد الاعتراف</h3><p className="text-sm text-gray-600">تحديد المدة (أسبوع/شهر/3 شهور)، صباحي/مسائي ({confessionSlots.length})</p></button>
+                  <button type="button" onClick={() => setConfSubView('confessors')} className="bg-white border-2 border-red-200 hover:border-[#7a1c24] p-6 rounded-3xl text-right shadow-sm space-y-2 transition cursor-pointer"><span className="text-4xl block">🙏</span><h3 className="text-lg font-black text-gray-900">المعترفون ({myConfessors.length})</h3><p className="text-sm text-gray-600">الملف الروحي، الثغرات والإجراءات، والقانون الروحي</p></button>
+                  <button type="button" onClick={() => setConfSubView('visitations')} className="bg-white border-2 border-amber-200 hover:border-[#7a1c24] p-6 rounded-3xl text-right shadow-sm space-y-2 transition cursor-pointer"><span className="text-4xl block">🕊️</span><h3 className="text-lg font-black text-gray-900">افتقاد المعترفين ({confVisitations.length})</h3><p className="text-sm text-gray-600">افتقاد بزيارة، رسالة واتساب ممنهجة قابلة للتعديل، أو اتصال</p></button>
+                </div>
+              )}
+
+              {confSubView === 'slots' && (
+                <div className="space-y-4">
+                  <button type="button" onClick={() => setConfSubView('menu')} className="px-4 py-2 bg-white border rounded-xl font-bold text-sm">← رجوع لكروت الاعترافات</button>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    <div className="bg-white p-4 rounded-3xl border shadow-sm">
+                      <div className="flex justify-between items-center mb-3 font-bold">
+                        <button type="button" onClick={() => setCalMonth(new Date(y, m - 1, 1))} className="px-3 py-1.5 border rounded-lg">▶</button>
+                        <span className="text-base font-black">{MONTHS_AR[m]} {y}</span>
+                        <button type="button" onClick={() => setCalMonth(new Date(y, m + 1, 1))} className="px-3 py-1.5 border rounded-lg">◀</button>
+                      </div>
+                      <div className="grid grid-cols-7 gap-1 text-center font-bold text-gray-600 mb-1">{['س', 'ح', 'ن', 'ث', 'ر', 'خ', 'ج'].map(w => <div key={w}>{w}</div>)}</div>
+                      <div className="grid grid-cols-7 gap-1">
+                        {Array.from({ length: startOff }).map((_, i) => <div key={'e' + i} />)}
+                        {Array.from({ length: daysInM }).map((_, idx) => {
+                          const day = idx + 1;
+                          const iso = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                          const daySlots = confessionSlots.filter(s => s.slot_date === iso);
+                          return <button key={day} type="button" onClick={() => setSlotForm({ ...slotForm, slot_date: iso })} className={`p-2.5 rounded-xl border text-center font-bold ${slotForm.slot_date === iso ? 'border-2 border-[#7a1c24] bg-[#f9ecee]' : daySlots.some(s => s.is_cancelled) ? 'bg-red-50 border-red-300 text-red-700' : daySlots.length > 0 ? 'bg-green-50 border-green-300 text-green-800' : 'bg-white'}`}>{day}</button>;
+                        })}
+                      </div>
+                    </div>
+
+                    <form onSubmit={handleSaveSlot} className="bg-white p-5 rounded-3xl border space-y-3 font-bold shadow-sm">
+                      <h3 className="text-base font-black text-[#7a1c24]">{editingSlotId ? 'تعديل جلسة الاعتراف' : 'إضافة مواعيد اعتراف'}</h3>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button type="button" onClick={() => selectPeriod('صباحية')} className={`p-3 rounded-xl border-2 flex items-center justify-center gap-1 cursor-pointer ${slotForm.period === 'صباحية' ? 'bg-amber-50 border-amber-500 text-amber-950' : 'bg-white border-gray-200'}`}><Sun size={16} /> صباحية (7-12)</button>
+                        <button type="button" onClick={() => selectPeriod('مسائية')} className={`p-3 rounded-xl border-2 flex items-center justify-center gap-1 cursor-pointer ${slotForm.period === 'مسائية' ? 'bg-indigo-50 border-indigo-500 text-indigo-950' : 'bg-white border-gray-200'}`}><Moon size={16} /> مسائية (12-10)</button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input required placeholder="عنوان الجلسة *" className="p-2.5 border rounded-xl" value={slotForm.confession_title} onChange={e => setSlotForm({ ...slotForm, confession_title: e.target.value })} />
+                        <input required placeholder="المكان *" className="p-2.5 border rounded-xl" value={slotForm.location} onChange={e => setSlotForm({ ...slotForm, location: e.target.value })} />
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <input type="date" className="p-2 border rounded-xl" value={slotForm.slot_date} onChange={e => setSlotForm({ ...slotForm, slot_date: e.target.value })} />
+                        <input required type="time" className="p-2 border rounded-xl" value={slotForm.start_time} onChange={e => setSlotForm({ ...slotForm, start_time: e.target.value })} />
+                        <input required type="time" className="p-2 border rounded-xl" value={slotForm.end_time} onChange={e => setSlotForm({ ...slotForm, end_time: e.target.value })} />
+                        <input required type="number" min="1" className="p-2 border rounded-xl" value={slotForm.max_confessors} onChange={e => setSlotForm({ ...slotForm, max_confessors: e.target.value })} />
+                      </div>
+                      {!editingSlotId && (
+                        <div className="bg-amber-50 p-3 rounded-2xl border border-amber-200 space-y-2">
+                          <select className="w-full p-2.5 border border-amber-300 rounded-xl bg-white" value={durationMode} onChange={e => setDurationMode(e.target.value)}>
+                            <option value="once">يوم واحد فقط</option><option value="week">لمدة أسبوع (7 أيام)</option><option value="month">لمدة شهر (30 يوم)</option><option value="two_months">لمدة شهرين (60 يوم)</option><option value="three_months">لمدة 3 شهور (90 يوم)</option>
+                          </select>
+                          <div className="flex flex-wrap gap-1.5">
+                            {WEEK_DAYS.map(wd => (
+                              <button key={wd.id} type="button" onClick={() => { const next = selectedDaysOfWeek.includes(wd.id) ? selectedDaysOfWeek.filter(x => x !== wd.id) : [...selectedDaysOfWeek, wd.id]; setSelectedDaysOfWeek(next); if (next.length > 0 && durationMode === 'once') setDurationMode('month'); }} className={`px-2.5 py-1.5 rounded-lg border text-xs cursor-pointer ${selectedDaysOfWeek.includes(wd.id) ? 'bg-[#7a1c24] text-white' : 'bg-white'}`}>{wd.label}</button>
+                            ))}
+                          </div>
                         </div>
                       )}
+                      <div className="flex gap-2">
+                        <button type="submit" className="flex-1 py-3 bg-[#7a1c24] text-white rounded-xl cursor-pointer">{editingSlotId ? 'حفظ التعديل' : 'نشر الموعد'}</button>
+                        {editingSlotId && <button type="button" onClick={() => { setEditingSlotId(null); setSlotForm(emptySlot); }} className="px-4 border rounded-xl">إلغاء</button>}
+                      </div>
+                    </form>
+                  </div>
+
+                  <div className="grid gap-2.5">
+                    {confessionSlots.map(s => (
+                      <div key={s.id} className={`p-4 rounded-2xl border flex flex-wrap justify-between items-center gap-2 ${s.is_cancelled ? 'bg-red-50 border-red-300' : 'bg-white'}`}>
+                        <div>
+                          <strong className="text-base">{s.confession_title}</strong>
+                          <span className="mr-2 px-2.5 py-0.5 rounded bg-amber-100 text-xs font-bold">{s.period}</span>
+                          <span className="mr-2 px-2.5 py-0.5 rounded bg-blue-50 text-xs font-bold">العدد: {s.booked_count || 0}/{s.max_confessors}</span>
+                          <p className="text-gray-600 mt-1">📅 {s.slot_date} • ⏰ {s.start_time} - {s.end_time} • 📍 {s.location}</p>
+                        </div>
+                        <div className="flex gap-1.5">
+                          <button type="button" onClick={() => { setEditingSlotId(s.id); setSlotForm({ ...s }); scrollPanelTop(); }} className="px-3 py-2 bg-gray-100 rounded-xl font-bold flex items-center gap-1 text-xs"><Edit3 size={14} /> تعديل</button>
+                          <button type="button" onClick={() => toggleCancelSlot(s)} className={`px-3 py-2 rounded-xl font-bold text-xs ${s.is_cancelled ? 'bg-green-600 text-white' : 'bg-amber-100'}`}>{s.is_cancelled ? 'تفعيل' : 'اعتذار'}</button>
+                          <button type="button" onClick={() => deleteSlot(s.id)} className="p-2.5 bg-red-100 text-red-700 rounded-xl"><Trash2 size={15} /></button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {confSubView === 'confessors' && (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap justify-between items-center gap-2">
+                    <button type="button" onClick={() => setConfSubView('menu')} className="px-4 py-2 bg-white border rounded-xl font-bold text-sm">← رجوع لكروت الاعترافات</button>
+                    <button type="button" onClick={() => { setAddConfOrigin('inside'); setInsideConfSearch(''); setNewConfessor(emptyNewConf); setShowAddConfessor(true); }} className="px-4 py-2.5 bg-[#7a1c24] text-white rounded-xl font-bold flex items-center gap-1.5 shadow text-sm cursor-pointer"><UserPlus size={16} /> إضافة معترف</button>
+                  </div>
+
+                  {confBirthdays.length > 0 && (
+                    <div className="bg-amber-50 border border-amber-300 p-4 rounded-3xl space-y-2">
+                      <strong className="text-amber-950 block">🎂 أعياد ميلاد المعترفين هذا الأسبوع ({confBirthdays.length}):</strong>
+                      <div className="flex flex-wrap gap-2">
+                        {confBirthdays.map(b => (
+                          <div key={b.id} className="bg-white p-3 rounded-2xl border flex items-center gap-3">
+                            <div><strong>{b.full_name}</strong><span className="block text-xs text-gray-500">{b.dob}</span></div>
+                            {b.phone && <button type="button" onClick={() => openWhatsAppComposer({ name: b.full_name, phone: b.phone, targetId: b.id, defaultCategory: 'معايدة' })} className="px-3 py-1.5 bg-green-600 text-white rounded-xl font-bold text-xs cursor-pointer">تهنئة واتس</button>}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 
-                  <form onSubmit={handleAddConfessor} className="space-y-3 text-sm">
-                    {addConfOrigin === 'outside' ? (
-                      <div className="p-2.5 bg-purple-50 border border-purple-200 text-purple-950 rounded-xl text-xs">🌐 سيتم تسجيل هذا الشخص كمعترف <strong>من خارج الكنيسة</strong> وإضافته للداتابيز مع شارة مميزة.</div>
-                    ) : <div className="text-xs text-gray-500 pt-1">أو أضف شخصاً جديداً من داخل الكنيسة:</div>}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      <input required placeholder="الأول *" className="p-2.5 border rounded-xl" value={newConfessor.first_name} onChange={e => setNewConfessor({ ...newConfessor, first_name: e.target.value })} />
-                      <input required placeholder="الثاني *" className="p-2.5 border rounded-xl" value={newConfessor.second_name} onChange={e => setNewConfessor({ ...newConfessor, second_name: e.target.value })} />
-                      <input placeholder="الثالث" className="p-2.5 border rounded-xl" value={newConfessor.third_name} onChange={e => setNewConfessor({ ...newConfessor, third_name: e.target.value })} />
-                      <input placeholder="الرابع" className="p-2.5 border rounded-xl" value={newConfessor.fourth_name} onChange={e => setNewConfessor({ ...newConfessor, fourth_name: e.target.value })} />
+                  <div className="bg-white p-3 rounded-2xl border flex flex-wrap gap-2 items-center justify-between">
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { id: 'all', label: `الكل (${myConfessors.length})` },
+                        { id: 'inside', label: `🏠 داخل الكنيسة (${myConfessors.filter(m => m.is_church_member !== false).length})` },
+                        { id: 'outside', label: `🌐 خارج الكنيسة (${myConfessors.filter(m => m.is_church_member === false).length})` }
+                      ].map(f => (
+                        <button key={f.id} type="button" onClick={() => setConfessorOriginFilter(f.id)} className={`px-3 py-1.5 rounded-xl text-xs font-bold border cursor-pointer ${confessorOriginFilter === f.id ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-gray-50 text-gray-700'}`}>{f.label}</button>
+                      ))}
                     </div>
-                    {detectedFather && <div className="p-2.5 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-xl text-xs flex items-center gap-1.5"><Link2 size={15} /> قرابة مكتشفة: ابن/ابنة (<strong>{detectedFather.full_name}</strong>)</div>}
-                    <div className="grid grid-cols-2 gap-2">
-                      <input required type="date" className="p-2.5 border rounded-xl" value={newConfessor.dob} onChange={e => setNewConfessor({ ...newConfessor, dob: e.target.value })} />
-                      <input required type="tel" placeholder="رقم الواتساب *" className="p-2.5 border rounded-xl" value={newConfessor.phone} onChange={e => setNewConfessor({ ...newConfessor, phone: e.target.value })} />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <input placeholder="الوظيفة" className="p-2.5 border rounded-xl" value={newConfessor.job_title} onChange={e => setNewConfessor({ ...newConfessor, job_title: e.target.value })} />
-                      <div className="flex gap-1">
-                        <select className="p-2.5 border rounded-xl bg-white" value={newConfessor.is_studying ? 'yes' : 'no'} onChange={e => setNewConfessor({ ...newConfessor, is_studying: e.target.value === 'yes' })}><option value="no">لا يدرس</option><option value="yes">يدرس</option></select>
-                        {newConfessor.is_studying && <input placeholder="بيدرس إيه؟" className="flex-1 p-2.5 border rounded-xl" value={newConfessor.detailed_stage} onChange={e => setNewConfessor({ ...newConfessor, detailed_stage: e.target.value })} />}
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <select className="p-2.5 border rounded-xl" value={newConfessor.marital_status} onChange={e => setNewConfessor({ ...newConfessor, marital_status: e.target.value })}><option value="أعزب">أعزب</option><option value="متزوج">متزوج</option><option value="أرمل">أرمل</option></select>
-                      <select className="p-2.5 border rounded-xl" value={newConfessor.housing_type} onChange={e => setNewConfessor({ ...newConfessor, housing_type: e.target.value })}><option value="تمليك">تمليك</option><option value="إيجار جديد">إيجار جديد</option><option value="إيجار قديم">إيجار قديم</option></select>
-                      <input required placeholder="العنوان *" className="p-2.5 border rounded-xl" value={newConfessor.address} onChange={e => setNewConfessor({ ...newConfessor, address: e.target.value })} />
-                    </div>
-                    {newConfessor.marital_status !== 'أعزب' && (
-                      <div className="bg-pink-50/40 p-3 rounded-2xl border border-pink-200 space-y-2">
-                        <div className="grid grid-cols-2 gap-2">
-                          <input placeholder="اسم الزوج/الزوجة" className="p-2 border rounded-xl bg-white" value={newConfessor.spouse_name} onChange={e => setNewConfessor({ ...newConfessor, spouse_name: e.target.value })} />
-                          <input type="tel" placeholder="تليفون الزوج/الزوجة" className="p-2 border rounded-xl bg-white" value={newConfessor.spouse_phone} onChange={e => setNewConfessor({ ...newConfessor, spouse_phone: e.target.value })} />
-                        </div>
-                        <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={newConfessor.has_children} onChange={e => setNewConfessor({ ...newConfessor, has_children: e.target.checked })} /> هل عنده أولاد؟</label>
-                        {newConfessor.has_children && (
-                          <div className="bg-white p-2 rounded-xl border space-y-2">
-                            <div className="grid grid-cols-3 gap-1">
-                              <input placeholder="اسم الابن" className="p-2 border rounded-lg" value={tempConfChild.child_name} onChange={e => setTempConfChild({ ...tempConfChild, child_name: e.target.value })} />
-                              <input type="date" className="p-2 border rounded-lg" value={tempConfChild.dob} onChange={e => setTempConfChild({ ...tempConfChild, dob: e.target.value })} />
-                              <input placeholder="بيدرس إيه" className="p-2 border rounded-lg" value={tempConfChild.stage} onChange={e => setTempConfChild({ ...tempConfChild, stage: e.target.value })} />
+                    <input placeholder="بحث بالاسم أو التليفون..." className="flex-1 min-w-[200px] p-2 border rounded-xl text-xs" value={confessorSearchFilter} onChange={e => setConfessorSearchFilter(e.target.value)} />
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {filteredConfessors.map(m => {
+                      const note = spiritualNotes.find(n => n.member_id === m.id);
+                      const kids = userChildren.filter(k => k.parent_user_id === m.id);
+                      const linkedFather = m.father_id ? localUsers.find(u => u.id === m.father_id) : null;
+                      const isOutside = m.is_church_member === false;
+                      const nextBooking = confessionBookings
+                        .filter(b => b.member_id === m.id && b.booking_date >= todayISO && b.status === 'محجوز')
+                        .sort((a, b) => (a.booking_date || '').localeCompare(b.booking_date || ''))[0];
+
+                      return (
+                        <div key={m.id} onClick={() => setSelectedConfessor(m)} className="bg-white p-4 rounded-3xl border-2 border-gray-200 hover:border-[#7a1c24] shadow-sm space-y-2 transition cursor-pointer">
+                          <div className="flex justify-between items-start gap-2">
+                            <div>
+                              <strong className="text-base text-gray-900 block">{m.full_name}</strong>
+                              <span className={`inline-block mt-1 px-2 py-0.5 rounded text-[11px] font-bold ${isOutside ? 'bg-purple-100 text-purple-900' : 'bg-blue-100 text-blue-900'}`}>
+                                {isOutside ? '🌐 من خارج الكنيسة' : '🏠 من داخل الكنيسة'}
+                              </span>
                             </div>
-                            <button type="button" onClick={() => { if (tempConfChild.child_name) { setNewConfessor({ ...newConfessor, children_list: [...newConfessor.children_list, tempConfChild] }); setTempConfChild({ child_name: '', dob: '', stage: '' }); } }} className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs">+ إضافة الابن</button>
-                            {newConfessor.children_list.map((c, i) => <div key={i} className="text-xs bg-gray-50 px-2 py-1 rounded flex justify-between"><span>• {c.child_name} ({c.stage})</span><button type="button" onClick={() => setNewConfessor({ ...newConfessor, children_list: newConfessor.children_list.filter((_, idx) => idx !== i) })} className="text-red-600">حذف</button></div>)}
+                            <span className={`px-2.5 py-0.5 rounded text-xs font-bold ${note?.confession_status === 'منتظم' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-900'}`}>{note?.confession_status || 'جديد'}</span>
+                          </div>
+                          {nextBooking && (
+                            <div className="px-2.5 py-1 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-xl text-xs font-black">
+                              📅 حجز قادم: {nextBooking.booking_date === todayISO ? 'اليوم' : nextBooking.booking_date} {nextBooking.booking_time ? `(${nextBooking.booking_time})` : ''}
+                            </div>
+                          )}
+                          <p className="text-sm text-gray-600">🎂 {m.dob || '—'} ({calcAge(m.dob)}) • 💼 {m.job_title || '—'}</p>
+                          {linkedFather && <p className="text-blue-800 text-xs font-bold flex items-center gap-1"><Link2 size={13} /> والده: {linkedFather.full_name}</p>}
+                          {m.is_studying && <p className="text-blue-700 text-xs">🎓 يدرس: {m.detailed_stage}</p>}
+                          {m.marital_status !== 'أعزب' && <p className="text-gray-700 text-xs">💍 {m.spouse_name || m.marital_status} {kids.length > 0 ? `• 👶 ${kids.length} أولاد` : ''}</p>}
+                          {note?.spiritual_rule && <p className="text-[#7a1c24] bg-red-50 p-2 rounded-xl text-xs truncate">📜 {note.spiritual_rule}</p>}
+                          <div className="flex justify-between items-center pt-1 text-xs">
+                            <span className="text-[#7a1c24] font-bold flex items-center gap-1"><Edit3 size={13} /> فتح الملف الروحي</span>
+                            {m.phone && (
+                              <button type="button" onClick={e => { e.stopPropagation(); openWhatsAppComposer({ name: m.full_name, phone: m.phone, targetId: m.id, defaultCategory: 'متابعة اعتراف' }); }} className="px-3 py-1.5 bg-green-600 text-white rounded-xl font-bold flex items-center gap-1 cursor-pointer">
+                                <MessageCircle size={13} /> واتس
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {showAddConfessor && (
+                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                      <div className="bg-white rounded-3xl w-full max-w-xl p-6 space-y-3 font-bold max-h-[92vh] overflow-y-auto">
+                        <div className="flex justify-between items-center border-b pb-2"><h3 className="text-base font-black text-[#7a1c24]">إضافة معترف جديد</h3><button type="button" onClick={() => setShowAddConfessor(false)} className="p-1.5 bg-gray-100 rounded-lg"><X size={18} /></button></div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button type="button" onClick={() => { setAddConfOrigin('inside'); setNewConfessor({ ...emptyNewConf, is_church_member: true }); }} className={`p-3 rounded-2xl border-2 text-xs md:text-sm font-black cursor-pointer ${addConfOrigin === 'inside' ? 'bg-blue-50 border-blue-600 text-blue-950' : 'bg-white border-gray-200 text-gray-700'}`}>🏠 من داخل الكنيسة (بحث بالداتابيز)</button>
+                          <button type="button" onClick={() => { setAddConfOrigin('outside'); setNewConfessor({ ...emptyNewConf, is_church_member: false }); }} className={`p-3 rounded-2xl border-2 text-xs md:text-sm font-black cursor-pointer ${addConfOrigin === 'outside' ? 'bg-purple-50 border-purple-600 text-purple-950' : 'bg-white border-gray-200 text-gray-700'}`}>🌐 من خارج الكنيسة (إدخال جديد)</button>
+                        </div>
+
+                        {addConfOrigin === 'inside' && (
+                          <div className="bg-blue-50/70 p-3.5 rounded-2xl border border-blue-200 space-y-2.5 text-sm">
+                            <label className="block text-xs text-blue-950 font-black">🔍 ابحث بالاسم أو رقم التليفون لإظهار بياناته من قاعدة بيانات الكنيسة:</label>
+                            <input autoFocus type="text" placeholder="اكتب اسم الشخص أو رقم الموبايل..." className="w-full p-2.5 border rounded-xl bg-white" value={insideConfSearch} onChange={e => setInsideConfSearch(e.target.value)} />
+                            {insideConfSearch.trim().length > 0 && (
+                              <div className="space-y-2 max-h-56 overflow-y-auto">
+                                {insideSearchMatches.length === 0 ? (
+                                  <p className="text-xs text-gray-600 p-2 bg-white rounded-xl">لا توجد نتائج مطابقة.</p>
+                                ) : insideSearchMatches.map(u => {
+                                  const alreadyMine = u.confession_father_id === priest.id;
+                                  return (
+                                    <div key={u.id} className="bg-white p-3 rounded-xl border border-blue-200 flex flex-wrap justify-between items-center gap-2">
+                                      <div className="text-xs space-y-0.5">
+                                        <strong className="text-sm text-gray-900 block">{u.full_name}</strong>
+                                        <span className="text-gray-600 block">📞 {u.phone || '—'} • 🎂 {u.dob || '—'} ({calcAge(u.dob)}) • 🎓 {u.detailed_stage || u.service_stage || '—'}</span>
+                                        <span className="text-gray-500 block">📍 {u.address || '—'} • 💍 {u.marital_status || '—'}</span>
+                                      </div>
+                                      {alreadyMine ? <span className="px-3 py-1.5 bg-green-100 text-green-800 rounded-xl text-xs font-black">مضاف عندك ✅</span> : <button type="button" onClick={() => handleLinkExistingConfessor(u)} className="px-3.5 py-2 bg-[#7a1c24] text-white rounded-xl text-xs font-black cursor-pointer">ربط كمعترف +</button>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         )}
+
+                        <form onSubmit={handleAddConfessor} className="space-y-3 text-sm">
+                          {addConfOrigin === 'outside' ? (
+                            <div className="p-2.5 bg-purple-50 border border-purple-200 text-purple-950 rounded-xl text-xs">🌐 سيتم تسجيل هذا الشخص كمعترف <strong>من خارج الكنيسة</strong> وإضافته للداتابيز مع شارة مميزة.</div>
+                          ) : <div className="text-xs text-gray-500 pt-1">أو أضف شخصاً جديداً من داخل الكنيسة:</div>}
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                            <input required placeholder="الأول *" className="p-2.5 border rounded-xl" value={newConfessor.first_name} onChange={e => setNewConfessor({ ...newConfessor, first_name: e.target.value })} />
+                            <input required placeholder="الثاني *" className="p-2.5 border rounded-xl" value={newConfessor.second_name} onChange={e => setNewConfessor({ ...newConfessor, second_name: e.target.value })} />
+                            <input placeholder="الثالث" className="p-2.5 border rounded-xl" value={newConfessor.third_name} onChange={e => setNewConfessor({ ...newConfessor, third_name: e.target.value })} />
+                            <input placeholder="الرابع" className="p-2.5 border rounded-xl" value={newConfessor.fourth_name} onChange={e => setNewConfessor({ ...newConfessor, fourth_name: e.target.value })} />
+                          </div>
+                          {detectedFather && <div className="p-2.5 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-xl text-xs flex items-center gap-1.5"><Link2 size={15} /> قرابة مكتشفة: ابن/ابنة (<strong>{detectedFather.full_name}</strong>)</div>}
+                          <div className="grid grid-cols-2 gap-2">
+                            <input required type="date" className="p-2.5 border rounded-xl" value={newConfessor.dob} onChange={e => setNewConfessor({ ...newConfessor, dob: e.target.value })} />
+                            <input required type="tel" placeholder="رقم الواتساب *" className="p-2.5 border rounded-xl" value={newConfessor.phone} onChange={e => setNewConfessor({ ...newConfessor, phone: e.target.value })} />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input placeholder="الوظيفة" className="p-2.5 border rounded-xl" value={newConfessor.job_title} onChange={e => setNewConfessor({ ...newConfessor, job_title: e.target.value })} />
+                            <div className="flex gap-1">
+                              <select className="p-2.5 border rounded-xl bg-white" value={newConfessor.is_studying ? 'yes' : 'no'} onChange={e => setNewConfessor({ ...newConfessor, is_studying: e.target.value === 'yes' })}><option value="no">لا يدرس</option><option value="yes">يدرس</option></select>
+                              {newConfessor.is_studying && <input placeholder="بيدرس إيه؟" className="flex-1 p-2.5 border rounded-xl" value={newConfessor.detailed_stage} onChange={e => setNewConfessor({ ...newConfessor, detailed_stage: e.target.value })} />}
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <select className="p-2.5 border rounded-xl" value={newConfessor.marital_status} onChange={e => setNewConfessor({ ...newConfessor, marital_status: e.target.value })}><option value="أعزب">أعزب</option><option value="متزوج">متزوج</option><option value="أرمل">أرمل</option></select>
+                            <select className="p-2.5 border rounded-xl" value={newConfessor.housing_type} onChange={e => setNewConfessor({ ...newConfessor, housing_type: e.target.value })}><option value="تمليك">تمليك</option><option value="إيجار جديد">إيجار جديد</option><option value="إيجار قديم">إيجار قديم</option></select>
+                            <input required placeholder="العنوان *" className="p-2.5 border rounded-xl" value={newConfessor.address} onChange={e => setNewConfessor({ ...newConfessor, address: e.target.value })} />
+                          </div>
+                          {newConfessor.marital_status !== 'أعزب' && (
+                            <div className="bg-pink-50/40 p-3 rounded-2xl border border-pink-200 space-y-2">
+                              <div className="grid grid-cols-2 gap-2">
+                                <input placeholder="اسم الزوج/الزوجة" className="p-2 border rounded-xl bg-white" value={newConfessor.spouse_name} onChange={e => setNewConfessor({ ...newConfessor, spouse_name: e.target.value })} />
+                                <input type="tel" placeholder="تليفون الزوج/الزوجة" className="p-2 border rounded-xl bg-white" value={newConfessor.spouse_phone} onChange={e => setNewConfessor({ ...newConfessor, spouse_phone: e.target.value })} />
+                              </div>
+                              <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={newConfessor.has_children} onChange={e => setNewConfessor({ ...newConfessor, has_children: e.target.checked })} /> هل عنده أولاد؟</label>
+                              {newConfessor.has_children && (
+                                <div className="bg-white p-2 rounded-xl border space-y-2">
+                                  <div className="grid grid-cols-3 gap-1">
+                                    <input placeholder="اسم الابن" className="p-2 border rounded-lg" value={tempConfChild.child_name} onChange={e => setTempConfChild({ ...tempConfChild, child_name: e.target.value })} />
+                                    <input type="date" className="p-2 border rounded-lg" value={tempConfChild.dob} onChange={e => setTempConfChild({ ...tempConfChild, dob: e.target.value })} />
+                                    <input placeholder="بيدرس إيه" className="p-2 border rounded-lg" value={tempConfChild.stage} onChange={e => setTempConfChild({ ...tempConfChild, stage: e.target.value })} />
+                                  </div>
+                                  <button type="button" onClick={() => { if (tempConfChild.child_name) { setNewConfessor({ ...newConfessor, children_list: [...newConfessor.children_list, tempConfChild] }); setTempConfChild({ child_name: '', dob: '', stage: '' }); } }} className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs">+ إضافة الابن</button>
+                                  {newConfessor.children_list.map((c, i) => <div key={i} className="text-xs bg-gray-50 px-2 py-1 rounded flex justify-between"><span>• {c.child_name} ({c.stage})</span><button type="button" onClick={() => setNewConfessor({ ...newConfessor, children_list: newConfessor.children_list.filter((_, idx) => idx !== i) })} className="text-red-600">حذف</button></div>)}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          <button type="submit" className="w-full py-3 bg-[#7a1c24] text-white rounded-xl cursor-pointer">
+                            {addConfOrigin === 'outside' ? 'حفظ كمعترف من خارج الكنيسة' : 'حفظ كمعترف من داخل الكنيسة'}
+                          </button>
+                        </form>
                       </div>
-                    )}
-                    <button type="submit" className="w-full py-3 bg-[#7a1c24] text-white rounded-xl cursor-pointer">
-                      {addConfOrigin === 'outside' ? 'حفظ كمعترف من خارج الكنيسة' : 'حفظ كمعترف من داخل الكنيسة'}
-                    </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {confSubView === 'visitations' && (
+                <div className="space-y-4">
+                  <button type="button" onClick={() => setConfSubView('menu')} className="px-4 py-2 bg-white border rounded-xl font-bold text-sm">← رجوع لكروت الاعترافات</button>
+                  <form onSubmit={e => handleSaveVisitation(e, 'افتقاد معترفين')} className="bg-white p-4 rounded-3xl border space-y-3 font-bold">
+                    <div className="grid md:grid-cols-4 gap-2">
+                      <select className="p-2.5 border rounded-xl" value={visitForm.target_user_id} onChange={e => { const u = myConfessors.find(x => x.id === e.target.value); setVisitForm({ ...visitForm, target_user_id: e.target.value, target_name: u?.full_name || '' }); }}><option value="">-- اختر --</option>{myConfessors.map(m => <option key={m.id} value={m.id}>{m.full_name}</option>)}</select>
+                      <input required placeholder="الاسم *" className="p-2.5 border rounded-xl" value={visitForm.target_name} onChange={e => setVisitForm({ ...visitForm, target_name: e.target.value })} />
+                      <select className="p-2.5 border rounded-xl" value={visitForm.visit_method} onChange={e => setVisitForm({ ...visitForm, visit_method: e.target.value })}><option>زيارة منزلية</option><option>رسالة واتساب</option><option>اتصال هاتفي</option></select>
+                      <input type="date" className="p-2.5 border rounded-xl" value={visitForm.visit_date} onChange={e => setVisitForm({ ...visitForm, visit_date: e.target.value })} />
+                    </div>
+                    <input placeholder="تفاصيل / ملاحظات..." className="w-full p-2.5 border rounded-xl" value={visitForm.notes} onChange={e => setVisitForm({ ...visitForm, notes: e.target.value })} />
+                    <button type="submit" className="px-6 py-2.5 bg-[#7a1c24] text-white rounded-xl cursor-pointer">حفظ</button>
                   </form>
+                  <div className="grid gap-2.5">
+                    {confVisitations.map(v => {
+                      const targetObj = myConfessors.find(m => m.id === v.target_user_id);
+                      return (
+                        <div key={v.id} className="bg-white p-4 rounded-2xl border flex flex-wrap justify-between items-center gap-2">
+                          <div>
+                            <strong className="text-base">{v.target_name}</strong>
+                            <span className="mr-2 px-2.5 py-0.5 rounded bg-blue-50 text-blue-800 text-xs font-bold">{v.visit_method || 'زيارة'}</span>
+                            <span className="mr-2 px-2.5 py-0.5 rounded bg-green-50 text-green-800 text-xs">{v.visit_status}</span>
+                            <p className="text-gray-600 mt-1">📅 {v.visit_date} {targetObj?.dob && `• 🎂 ${targetObj.dob}`} {v.notes && `• ${v.notes}`}</p>
+                          </div>
+                          <div className="flex gap-1.5">
+                            <button type="button" onClick={() => openWhatsAppComposer({ name: v.target_name, phone: targetObj?.phone || '', targetId: v.target_user_id, defaultCategory: 'افتقاد' })} className="px-3 py-2 bg-green-600 text-white rounded-xl font-bold flex items-center gap-1 text-xs cursor-pointer"><MessageCircle size={14} /> رسالة واتس</button>
+                            <button type="button" onClick={() => deleteVisitation(v.id)} className="p-2.5 bg-red-50 text-red-700 rounded-xl"><Trash2 size={15} /></button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {activeCard === 'masses' && (
+          <div className="space-y-4">
+            {renderTopBar('⛪ جدول قداسات أبونا')}
+            <form onSubmit={handleSaveMass} className="bg-white p-4 rounded-3xl border space-y-3 font-bold">
+              <div className="grid md:grid-cols-4 gap-2">
+                <input required placeholder="اسم القداس *" className="p-2.5 border rounded-xl" value={massForm.mass_name} onChange={e => setMassForm({ ...massForm, mass_name: e.target.value })} />
+                <select className="p-2.5 border rounded-xl bg-amber-50" value={massForm.priest_role} onChange={e => setMassForm({ ...massForm, priest_role: e.target.value })}><option value="كاهن خادم">✝ كاهن خادم</option><option value="كاهن شريك">🕊️ كاهن شريك</option></select>
+                <input required type="date" className="p-2.5 border rounded-xl" value={massForm.mass_date} onChange={e => setMassForm({ ...massForm, mass_date: e.target.value })} />
+                <input required placeholder="الوقت *" className="p-2.5 border rounded-xl" value={massForm.mass_time} onChange={e => setMassForm({ ...massForm, mass_time: e.target.value })} />
+              </div>
+              <div className="grid md:grid-cols-3 gap-2">
+                <input required placeholder="الكنيسة *" className="p-2.5 border rounded-xl" value={massForm.church_name} onChange={e => setMassForm({ ...massForm, church_name: e.target.value })} />
+                <select className="p-2.5 border rounded-xl" value={massForm.target_audience} onChange={e => setMassForm({ ...massForm, target_audience: e.target.value })}>{MASS_AUDIENCES.map((a, i) => <option key={i} value={a}>{a}</option>)}</select>
+                <button type="submit" className="bg-[#7a1c24] text-white rounded-xl p-2.5">{editingMassId ? 'حفظ التعديل' : '+ إضافة قداس'}</button>
+              </div>
+            </form>
+            {masses.map(m => (
+              <div key={m.id} className="bg-white p-4 rounded-2xl border flex justify-between items-center gap-2">
+                <div><span className="px-2.5 py-0.5 bg-amber-100 rounded text-xs ml-2">{m.priest_role}</span><span className="px-2.5 py-0.5 bg-blue-100 rounded text-xs ml-2">{m.target_audience}</span><strong className="text-base">{m.mass_name} — {m.church_name}</strong><p className="text-sm text-gray-600 mt-1">📅 {m.mass_date} • ⏰ {m.mass_time}</p></div>
+                <div className="flex gap-1.5">
+                  <button type="button" onClick={() => { setEditingMassId(m.id); setMassForm({ ...m }); scrollPanelTop(); }} className="p-2.5 bg-gray-100 rounded-xl"><Edit3 size={15} /></button>
+                  <button type="button" onClick={() => toggleMassAvailability(m)} className={`px-3 py-1.5 rounded-xl font-bold text-xs ${m.is_available ? 'bg-green-100' : 'bg-red-100'}`}>{m.is_available ? 'متاح' : 'معتذر'}</button>
+                  <button type="button" onClick={() => deleteMass(m.id)} className="p-2.5 bg-red-50 text-red-700 rounded-xl"><Trash2 size={15} /></button>
                 </div>
               </div>
-            )}
+            ))}
           </div>
         )}
 
-        {confSubView === 'visitations' && (
+        {activeCard === 'personal' && (
           <div className="space-y-4">
-            <button type="button" onClick={() => setConfSubView('menu')} className="px-4 py-2 bg-white border rounded-xl font-bold text-sm">← رجوع لكروت الاعترافات</button>
-            <form onSubmit={e => handleSaveVisitation(e, 'افتقاد معترفين')} className="bg-white p-4 rounded-3xl border space-y-3 font-bold">
-              <div className="grid md:grid-cols-4 gap-2">
-                <select className="p-2.5 border rounded-xl" value={visitForm.target_user_id} onChange={e => { const u = myConfessors.find(x => x.id === e.target.value); setVisitForm({ ...visitForm, target_user_id: e.target.value, target_name: u?.full_name || '' }); }}><option value="">-- اختر --</option>{myConfessors.map(m => <option key={m.id} value={m.id}>{m.full_name}</option>)}</select>
-                <input required placeholder="الاسم *" className="p-2.5 border rounded-xl" value={visitForm.target_name} onChange={e => setVisitForm({ ...visitForm, target_name: e.target.value })} />
-                <select className="p-2.5 border rounded-xl" value={visitForm.visit_method} onChange={e => setVisitForm({ ...visitForm, visit_method: e.target.value })}><option>زيارة منزلية</option><option>رسالة واتساب</option><option>اتصال هاتفي</option></select>
-                <input type="date" className="p-2.5 border rounded-xl" value={visitForm.visit_date} onChange={e => setVisitForm({ ...visitForm, visit_date: e.target.value })} />
-              </div>
-              <input placeholder="تفاصيل / ملاحظات..." className="w-full p-2.5 border rounded-xl" value={visitForm.notes} onChange={e => setVisitForm({ ...visitForm, notes: e.target.value })} />
-              <button type="submit" className="px-6 py-2.5 bg-[#7a1c24] text-white rounded-xl cursor-pointer">حفظ</button>
-            </form>
-            <div className="grid gap-2.5">
-              {confVisitations.map(v => {
-                const targetObj = myConfessors.find(m => m.id === v.target_user_id);
-                return (
-                  <div key={v.id} className="bg-white p-4 rounded-2xl border flex flex-wrap justify-between items-center gap-2">
-                    <div>
-                      <strong className="text-base">{v.target_name}</strong>
-                      <span className="mr-2 px-2.5 py-0.5 rounded bg-blue-50 text-blue-800 text-xs font-bold">{v.visit_method || 'زيارة'}</span>
-                      <span className="mr-2 px-2.5 py-0.5 rounded bg-green-50 text-green-800 text-xs">{v.visit_status}</span>
-                      <p className="text-gray-600 mt-1">📅 {v.visit_date} {targetObj?.dob && `• 🎂 ${targetObj.dob}`} {v.notes && `• ${v.notes}`}</p>
+            <div className={printBusState ? 'print:hidden space-y-4' : 'space-y-4'}>
+              {renderTopBar('📅 الجدول الخاص بالكاهن (صلاة طشت / خطوبة / إكليل / رحلات ومؤتمرات)')}
+
+              <form onSubmit={handleSavePersonal} className="bg-white p-5 rounded-3xl border space-y-3 font-bold">
+                <div className="grid md:grid-cols-3 gap-2.5">
+                  <div>
+                    <label className="block text-xs text-gray-700 mb-1">نوع المناسبة / النشاط *</label>
+                    <select className="w-full p-2.5 border rounded-xl" value={formatEventTypeDisplay(persForm.event_type)} onChange={e => { const val = e.target.value; setPersForm({ ...persForm, event_type: val, activity_kind: val === 'مؤتمر روحي 🏕️' ? 'مؤتمر' : val === 'رحلة كنسية 🚌' ? 'رحلة' : persForm.activity_kind }); }}>
+                      <option value="خطوبة 💍">خطوبة 💍</option>
+                      <option value="إكليل (فرح) 👑">إكليل (فرح) 👑</option>
+                      <option value="صلاة طشت 💧">صلاة طشت 💧</option>
+                      <option value="معمودية ✝">معمودية ✝</option>
+                      <option value="صلاة أربعين 🕯️">صلاة أربعين 🕯️</option>
+                      <option value="الذكرى السنوية 🕊️">الذكرى السنوية 🕊️</option>
+                      <option value="رحلة كنسية 🚌">رحلة كنسية 🚌</option>
+                      <option value="مؤتمر روحي 🏕️">مؤتمر روحي 🏕️</option>
+                      <option value="ظرف خاص 📅">ظرف خاص 📅</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-700 mb-1">{isConference ? 'اسم المؤتمر *' : 'اسم الرحلة / التفاصيل *'}</label>
+                    <input required placeholder="التفاصيل..." className="w-full p-2.5 border rounded-xl" value={persForm.title} onChange={e => setPersForm({ ...persForm, title: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-700 mb-1">نقطة التجمع / الكنيسة</label>
+                    <input placeholder="المكان / الكنيسة" className="w-full p-2.5 border rounded-xl" value={persForm.location} onChange={e => setPersForm({ ...persForm, location: e.target.value })} />
+                  </div>
+                </div>
+
+                {isTripOrConf && (
+                  <div className="bg-purple-50/60 p-4 rounded-2xl border-2 border-purple-200 space-y-3">
+                    <h4 className="text-base font-black text-purple-950 flex items-center gap-1.5"><Bus size={18} /> {isConference ? 'تفاصيل المؤتمر والبرنامج والأتوبيسات' : 'تفاصيل الرحلة وحجز الأتوبيسات'}</h4>
+                    <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-2.5">
+                      <div>
+                        <label className="block text-xs text-purple-950 mb-1">النوع</label>
+                        <select className="w-full p-2.5 border rounded-xl bg-white" value={persForm.activity_kind} onChange={e => { const kind = e.target.value; setPersForm({ ...persForm, activity_kind: kind, event_type: kind === 'مؤتمر' ? 'مؤتمر روحي 🏕️' : 'رحلة كنسية 🚌' }); }}>
+                          <option value="رحلة">🚌 رحلة</option>
+                          <option value="مؤتمر">🏕️ مؤتمر</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-purple-950 mb-1">الخدمة التابعة لها</label>
+                        <select className="w-full p-2.5 border rounded-xl bg-white" value={persForm.target_service} onChange={e => setPersForm({ ...persForm, target_service: e.target.value })}><option value="">-- عام لكل الخدمات --</option>{stagesMap.map(st => <option key={st} value={st}>{st}</option>)}</select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-purple-950 mb-1">سعر الفرد (ج.م) *</label>
+                        <input type="number" min="0" className="w-full p-2.5 border rounded-xl bg-white" value={persForm.trip_cost || ''} onChange={e => setPersForm({ ...persForm, trip_cost: e.target.value })} />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-purple-950 mb-1">عدد الأيام</label>
+                        <input type="number" min="1" className="w-full p-2.5 border rounded-xl bg-white" value={persForm.days_count} onChange={e => setPersForm({ ...persForm, days_count: e.target.value })} />
+                      </div>
                     </div>
-                    <div className="flex gap-1.5">
-                      <button type="button" onClick={() => openWhatsAppComposer({ name: v.target_name, phone: targetObj?.phone || '', targetId: v.target_user_id, defaultCategory: 'افتقاد' })} className="px-3 py-2 bg-green-600 text-white rounded-xl font-bold flex items-center gap-1 text-xs cursor-pointer"><MessageCircle size={14} /> رسالة واتس</button>
-                      <button type="button" onClick={() => deleteVisitation(v.id)} className="p-2.5 bg-red-50 text-red-700 rounded-xl"><Trash2 size={15} /></button>
+                    <div className="grid md:grid-cols-2 gap-2.5">
+                      <textarea rows="3" placeholder={isConference ? 'بيت المؤتمر والمنطقة...' : 'الأماكن والمزارات...'} className="w-full p-2.5 border rounded-xl bg-white font-normal" value={persForm.destinations} onChange={e => setPersForm({ ...persForm, destinations: e.target.value })} />
+                      <div className="space-y-1">
+                        {isConference && <button type="button" onClick={generateConferenceProgramTemplate} className="px-2.5 py-1 bg-purple-700 text-white rounded-lg text-xs cursor-pointer">+ توليد قالب ({persForm.days_count || 1} يوم)</button>}
+                        <textarea rows="3" placeholder="البرنامج اليومي..." className="w-full p-2.5 border rounded-xl bg-white font-normal" value={persForm.daily_program} onChange={e => setPersForm({ ...persForm, daily_program: e.target.value })} />
+                      </div>
+                    </div>
+
+                    <BusVisualizerSection
+                      rawBusesData={persForm.bus_seats}
+                      tripCost={persForm.trip_cost}
+                      isViewMode={false}
+                      localUsers={localUsers}
+                      priest={priest}
+                      todayISO={todayISO}
+                      onSaveBuses={async (updated) => setPersForm(prev => ({ ...prev, bus_seats: updated }))}
+                      onLocalRenameBuses={(updated) => setPersForm(prev => ({ ...prev, bus_seats: updated }))}
+                      onOpenWhatsApp={openWhatsAppComposer}
+                    />
+                  </div>
+                )}
+
+                <div className="grid md:grid-cols-3 gap-2.5 items-end">
+                  <div><label className="block text-xs text-gray-700 mb-1">التاريخ *</label><input required type="date" className="w-full p-2.5 border rounded-xl" value={persForm.event_date} onChange={e => setPersForm({ ...persForm, event_date: e.target.value })} /></div>
+                  <div><label className="block text-xs text-gray-700 mb-1">ميعاد التحرك / الساعة</label><input placeholder="6:00 ص" className="w-full p-2.5 border rounded-xl" value={persForm.event_time} onChange={e => setPersForm({ ...persForm, event_time: e.target.value })} /></div>
+                  <label className="flex items-center gap-2 p-3 bg-gray-50 rounded-xl border cursor-pointer text-sm"><input type="checkbox" checked={persForm.is_public} onChange={e => setPersForm({ ...persForm, is_public: e.target.checked })} /> {persForm.is_public ? '📢 يظهر للشعب' : '🔒 سري لأبونا'}</label>
+                </div>
+                <div className="flex gap-2">
+                  <button type="submit" className="px-6 py-3 bg-[#7a1c24] text-white rounded-xl cursor-pointer">{editingPersId ? 'حفظ التعديل' : 'حفظ الموعد'}</button>
+                  {editingPersId && <button type="button" onClick={() => { setEditingPersId(null); setPersForm({ ...emptyPers, bus_seats: [createNewBus(1, 'الأتوبيس الأول')] }); }} className="px-4 border rounded-xl">إلغاء التعديل</button>}
+                </div>
+              </form>
+
+              {personalItems.map(p => {
+                const isTripItem = p.event_type === 'رحلة كنسية 🚌' || p.event_type === 'مؤتمر روحي 🏕️';
+                const busesList = normalizeBuses(p.bus_seats);
+                const bookedSeats = busesList.reduce((acc, b) => acc + (b.seats || []).filter(s => !s.isDoor && s.occupant).length, 0);
+                const totalSeats = busesList.reduce((acc, b) => acc + (b.seats || []).filter(s => !s.isDoor).length, 0);
+                const peopleSum = isTripItem ? buildGroupedPeopleSummary(busesList, Number(p.trip_cost || 0), localUsers) : [];
+                const collectedSum = peopleSum.reduce((sum, x) => sum + x.totalPaid, 0);
+                const remainingSum = peopleSum.reduce((sum, x) => sum + x.totalRemaining, 0);
+
+                return (
+                  <div key={p.id} className="bg-white p-5 rounded-2xl border space-y-2.5 shadow-2xs">
+                    <div className="flex flex-wrap justify-between items-start gap-2">
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-2.5 py-0.5 bg-purple-100 text-purple-950 rounded text-xs font-bold">{formatEventTypeDisplay(p.event_type)}</span>
+                          <strong className="text-base md:text-lg">{p.title}</strong>
+                          <span className="px-2.5 py-0.5 bg-blue-50 text-blue-900 rounded text-xs font-bold">{p.target_service ? `خدمة: ${p.target_service}` : 'عام'}</span>
+                          {isTripItem && <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-900 rounded text-xs font-black">💰 {p.trip_cost || 0} ج.م</span>}
+                        </div>
+                        <p className="text-sm text-gray-600">📅 {p.event_date} {p.event_time && `• ⏰ ${p.event_time}`} {p.location && `• 📍 ${p.location}`}</p>
+                        {isTripItem && (
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            {busesList.map((b, bi) => <span key={b.id || bi} className="px-2.5 py-1 bg-slate-100 border rounded-lg text-xs font-bold">🚌 {b.name}: {(b.seats || []).filter(s => !s.isDoor && s.occupant).length}/{(b.seats || []).filter(s => !s.isDoor).length}</span>)}
+                            <span className="px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-black text-emerald-800">محصل: {collectedSum} ج.م</span>
+                            {remainingSum > 0 && <span className="px-2.5 py-1 bg-red-50 border border-red-200 rounded-lg text-xs font-black text-red-700">متبقي: {remainingSum} ج.م</span>}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {isTripItem && (
+                          <>
+                            <button type="button" onClick={() => setViewBusItem(p)} className="px-3.5 py-2 bg-amber-500 text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer text-xs"><Bus size={16} /> الأتوبيسات ({busesList.length}) • {bookedSeats}/{totalSeats}</button>
+                            <button type="button" onClick={() => setPrintBusState({ trip: p, buses: busesList })} className="px-3.5 py-2 bg-slate-800 text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer text-xs"><Printer size={16} /> طباعة الكشوفات</button>
+                          </>
+                        )}
+                        <button type="button" onClick={() => { setEditingPersId(p.id); setPersForm({ ...emptyPers, ...p, event_type: formatEventTypeDisplay(p.event_type), bus_seats: normalizeBuses(p.bus_seats) }); scrollPanelTop(); }} className="p-2.5 bg-gray-100 rounded-xl"><Edit3 size={15} /></button>
+                        <button type="button" onClick={() => togglePersonalVisibility(p)} className="p-2.5 bg-blue-50 rounded-xl">{p.is_public ? <Globe size={15} /> : <Lock size={15} />}</button>
+                        <button type="button" onClick={() => deletePersonal(p.id)} className="p-2.5 bg-red-50 text-red-700 rounded-xl"><Trash2 size={15} /></button>
+                      </div>
                     </div>
                   </div>
                 );
               })}
-            </div>
-          </div>
-        )}
-        {renderGlobalModals()}
-      </div>
-    );
-  }
 
-  if (activeCard === 'masses') {
-    return (
-      <div className="space-y-4 text-sm md:text-base">
-        {renderTopBar('⛪ جدول قداسات أبونا')}
-        <form onSubmit={handleSaveMass} className="bg-white p-4 rounded-3xl border space-y-3 font-bold">
-          <div className="grid md:grid-cols-4 gap-2">
-            <input required placeholder="اسم القداس *" className="p-2.5 border rounded-xl" value={massForm.mass_name} onChange={e => setMassForm({ ...massForm, mass_name: e.target.value })} />
-            <select className="p-2.5 border rounded-xl bg-amber-50" value={massForm.priest_role} onChange={e => setMassForm({ ...massForm, priest_role: e.target.value })}><option value="كاهن خادم">✝ كاهن خادم</option><option value="كاهن شريك">🕊️ كاهن شريك</option></select>
-            <input required type="date" className="p-2.5 border rounded-xl" value={massForm.mass_date} onChange={e => setMassForm({ ...massForm, mass_date: e.target.value })} />
-            <input required placeholder="الوقت *" className="p-2.5 border rounded-xl" value={massForm.mass_time} onChange={e => setMassForm({ ...massForm, mass_time: e.target.value })} />
-          </div>
-          <div className="grid md:grid-cols-3 gap-2">
-            <input required placeholder="الكنيسة *" className="p-2.5 border rounded-xl" value={massForm.church_name} onChange={e => setMassForm({ ...massForm, church_name: e.target.value })} />
-            <select className="p-2.5 border rounded-xl" value={massForm.target_audience} onChange={e => setMassForm({ ...massForm, target_audience: e.target.value })}>{MASS_AUDIENCES.map((a, i) => <option key={i} value={a}>{a}</option>)}</select>
-            <button type="submit" className="bg-[#7a1c24] text-white rounded-xl p-2.5">{editingMassId ? 'حفظ التعديل' : '+ إضافة قداس'}</button>
-          </div>
-        </form>
-        {masses.map(m => (
-          <div key={m.id} className="bg-white p-4 rounded-2xl border flex justify-between items-center gap-2">
-            <div><span className="px-2.5 py-0.5 bg-amber-100 rounded text-xs ml-2">{m.priest_role}</span><span className="px-2.5 py-0.5 bg-blue-100 rounded text-xs ml-2">{m.target_audience}</span><strong className="text-base">{m.mass_name} — {m.church_name}</strong><p className="text-sm text-gray-600 mt-1">📅 {m.mass_date} • ⏰ {m.mass_time}</p></div>
-            <div className="flex gap-1.5">
-              <button type="button" onClick={() => { setEditingMassId(m.id); setMassForm({ ...m }); }} className="p-2.5 bg-gray-100 rounded-xl"><Edit3 size={15} /></button>
-              <button type="button" onClick={() => toggleMassAvailability(m)} className={`px-3 py-1.5 rounded-xl font-bold text-xs ${m.is_available ? 'bg-green-100' : 'bg-red-100'}`}>{m.is_available ? 'متاح' : 'معتذر'}</button>
-              <button type="button" onClick={() => deleteMass(m.id)} className="p-2.5 bg-red-50 text-red-700 rounded-xl"><Trash2 size={15} /></button>
-            </div>
-          </div>
-        ))}
-        {renderGlobalModals()}
-      </div>
-    );
-  }
-
-  if (activeCard === 'personal') {
-    return (
-      <div className="space-y-4 text-sm md:text-base">
-        <div className={printBusState ? 'print:hidden space-y-4' : 'space-y-4'}>
-          {renderTopBar('📅 الجدول الخاص بالكاهن (طشت / خطوبة / إكليل / رحلات ومؤتمرات)')}
-
-          <form onSubmit={handleSavePersonal} className="bg-white p-5 rounded-3xl border space-y-3 font-bold">
-            <div className="grid md:grid-cols-3 gap-2.5">
-              <div>
-                <label className="block text-xs text-gray-700 mb-1">نوع المناسبة / النشاط *</label>
-                <select className="w-full p-2.5 border rounded-xl" value={persForm.event_type} onChange={e => { const val = e.target.value; setPersForm({ ...persForm, event_type: val, activity_kind: val === 'مؤتمر روحي 🏕️' ? 'مؤتمر' : val === 'رحلة كنسية 🚌' ? 'رحلة' : persForm.activity_kind }); }}>
-                  <option value="خطوبة 💍">خطوبة 💍</option>
-                  <option value="إكليل (فرح) 👑">إكليل (فرح) 👑</option>
-                  <option value="صلاة طشت (قبل المعمودية) 💧">صلاة طشت (قبل المعمودية) 💧</option>
-                  <option value="معمودية ✝">معمودية ✝</option>
-                  <option value="صلاة أربعين 🕯️">صلاة أربعين 🕯️</option>
-                  <option value="الذكرى السنوية 🕊️">الذكرى السنوية 🕊️</option>
-                  <option value="رحلة كنسية 🚌">رحلة كنسية 🚌</option>
-                  <option value="مؤتمر روحي 🏕️">مؤتمر روحي 🏕️</option>
-                  <option value="ظرف خاص 📅">ظرف خاص 📅</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-700 mb-1">{isConference ? 'اسم المؤتمر *' : 'اسم الرحلة / التفاصيل *'}</label>
-                <input required placeholder="التفاصيل..." className="w-full p-2.5 border rounded-xl" value={persForm.title} onChange={e => setPersForm({ ...persForm, title: e.target.value })} />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-700 mb-1">نقطة التجمع / الكنيسة</label>
-                <input placeholder="المكان / الكنيسة" className="w-full p-2.5 border rounded-xl" value={persForm.location} onChange={e => setPersForm({ ...persForm, location: e.target.value })} />
-              </div>
-            </div>
-
-            {isTripOrConf && (
-              <div className="bg-purple-50/60 p-4 rounded-2xl border-2 border-purple-200 space-y-3">
-                <h4 className="text-base font-black text-purple-950 flex items-center gap-1.5"><Bus size={18} /> {isConference ? 'تفاصيل المؤتمر والبرنامج والأتوبيسات' : 'تفاصيل الرحلة وحجز الأتوبيسات'}</h4>
-                <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-2.5">
-                  <div>
-                    <label className="block text-xs text-purple-950 mb-1">النوع</label>
-                    <select className="w-full p-2.5 border rounded-xl bg-white" value={persForm.activity_kind} onChange={e => { const kind = e.target.value; setPersForm({ ...persForm, activity_kind: kind, event_type: kind === 'مؤتمر' ? 'مؤتمر روحي 🏕️' : 'رحلة كنسية 🚌' }); }}>
-                      <option value="رحلة">🚌 رحلة</option>
-                      <option value="مؤتمر">🏕️ مؤتمر</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-purple-950 mb-1">الخدمة التابعة لها</label>
-                    <select className="w-full p-2.5 border rounded-xl bg-white" value={persForm.target_service} onChange={e => setPersForm({ ...persForm, target_service: e.target.value })}><option value="">-- عام لكل الخدمات --</option>{stagesMap.map(st => <option key={st} value={st}>{st}</option>)}</select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-purple-950 mb-1">سعر الفرد (ج.م) *</label>
-                    <input type="number" min="0" className="w-full p-2.5 border rounded-xl bg-white" value={persForm.trip_cost || ''} onChange={e => setPersForm({ ...persForm, trip_cost: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-purple-950 mb-1">عدد الأيام</label>
-                    <input type="number" min="1" className="w-full p-2.5 border rounded-xl bg-white" value={persForm.days_count} onChange={e => setPersForm({ ...persForm, days_count: e.target.value })} />
-                  </div>
-                </div>
-                <div className="grid md:grid-cols-2 gap-2.5">
-                  <textarea rows="3" placeholder={isConference ? 'بيت المؤتمر والمنطقة...' : 'الأماكن والمزارات...'} className="w-full p-2.5 border rounded-xl bg-white font-normal" value={persForm.destinations} onChange={e => setPersForm({ ...persForm, destinations: e.target.value })} />
-                  <div className="space-y-1">
-                    {isConference && <button type="button" onClick={generateConferenceProgramTemplate} className="px-2.5 py-1 bg-purple-700 text-white rounded-lg text-xs cursor-pointer">+ توليد قالب ({persForm.days_count || 1} يوم)</button>}
-                    <textarea rows="3" placeholder="البرنامج اليومي..." className="w-full p-2.5 border rounded-xl bg-white font-normal" value={persForm.daily_program} onChange={e => setPersForm({ ...persForm, daily_program: e.target.value })} />
-                  </div>
-                </div>
-
-                <BusVisualizerSection
-                  rawBusesData={persForm.bus_seats}
-                  tripCost={persForm.trip_cost}
-                  isViewMode={false}
-                  localUsers={localUsers}
-                  priest={priest}
-                  todayISO={todayISO}
-                  onSaveBuses={async (updated) => setPersForm(prev => ({ ...prev, bus_seats: updated }))}
-                  onLocalRenameBuses={(updated) => setPersForm(prev => ({ ...prev, bus_seats: updated }))}
-                  onOpenWhatsApp={openWhatsAppComposer}
-                />
-              </div>
-            )}
-
-            <div className="grid md:grid-cols-3 gap-2.5 items-end">
-              <div><label className="block text-xs text-gray-700 mb-1">التاريخ *</label><input required type="date" className="w-full p-2.5 border rounded-xl" value={persForm.event_date} onChange={e => setPersForm({ ...persForm, event_date: e.target.value })} /></div>
-              <div><label className="block text-xs text-gray-700 mb-1">ميعاد التحرك / الساعة</label><input placeholder="6:00 ص" className="w-full p-2.5 border rounded-xl" value={persForm.event_time} onChange={e => setPersForm({ ...persForm, event_time: e.target.value })} /></div>
-              <label className="flex items-center gap-2 p-3 bg-gray-50 rounded-xl border cursor-pointer text-sm"><input type="checkbox" checked={persForm.is_public} onChange={e => setPersForm({ ...persForm, is_public: e.target.checked })} /> {persForm.is_public ? '📢 يظهر للشعب' : '🔒 سري لأبونا'}</label>
-            </div>
-            <div className="flex gap-2">
-              <button type="submit" className="px-6 py-3 bg-[#7a1c24] text-white rounded-xl cursor-pointer">{editingPersId ? 'حفظ التعديل' : 'حفظ الموعد'}</button>
-              {editingPersId && <button type="button" onClick={() => { setEditingPersId(null); setPersForm({ ...emptyPers, bus_seats: [createNewBus(1, 'الأتوبيس الأول')] }); }} className="px-4 border rounded-xl">إلغاء التعديل</button>}
-            </div>
-          </form>
-
-          {personalItems.map(p => {
-            const isTripItem = p.event_type === 'رحلة كنسية 🚌' || p.event_type === 'مؤتمر روحي 🏕️';
-            const busesList = normalizeBuses(p.bus_seats);
-            const bookedSeats = busesList.reduce((acc, b) => acc + (b.seats || []).filter(s => !s.isDoor && s.occupant).length, 0);
-            const totalSeats = busesList.reduce((acc, b) => acc + (b.seats || []).filter(s => !s.isDoor).length, 0);
-            const peopleSum = isTripItem ? buildGroupedPeopleSummary(busesList, Number(p.trip_cost || 0), localUsers) : [];
-            const collectedSum = peopleSum.reduce((sum, x) => sum + x.totalPaid, 0);
-            const remainingSum = peopleSum.reduce((sum, x) => sum + x.totalRemaining, 0);
-
-            return (
-              <div key={p.id} className="bg-white p-5 rounded-2xl border space-y-2.5 shadow-2xs">
-                <div className="flex flex-wrap justify-between items-start gap-2">
-                  <div className="space-y-1.5">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="px-2.5 py-0.5 bg-purple-100 text-purple-950 rounded text-xs font-bold">{p.event_type}</span>
-                      <strong className="text-base md:text-lg">{p.title}</strong>
-                      <span className="px-2.5 py-0.5 bg-blue-50 text-blue-900 rounded text-xs font-bold">{p.target_service ? `خدمة: ${p.target_service}` : 'عام'}</span>
-                      {isTripItem && <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-900 rounded text-xs font-black">💰 {p.trip_cost || 0} ج.م</span>}
-                    </div>
-                    <p className="text-sm text-gray-600">📅 {p.event_date} {p.event_time && `• ⏰ ${p.event_time}`} {p.location && `• 📍 ${p.location}`}</p>
-                    {isTripItem && (
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        {busesList.map((b, bi) => <span key={b.id || bi} className="px-2.5 py-1 bg-slate-100 border rounded-lg text-xs font-bold">🚌 {b.name}: {(b.seats || []).filter(s => !s.isDoor && s.occupant).length}/{(b.seats || []).filter(s => !s.isDoor).length}</span>)}
-                        <span className="px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-black text-emerald-800">محصل: {collectedSum} ج.م</span>
-                        {remainingSum > 0 && <span className="px-2.5 py-1 bg-red-50 border border-red-200 rounded-lg text-xs font-black text-red-700">متبقي: {remainingSum} ج.م</span>}
+              {viewBusItem && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                  <div className="bg-white rounded-3xl w-full max-w-3xl p-5 space-y-3 max-h-[92vh] overflow-y-auto">
+                    <div className="flex justify-between items-center border-b pb-3">
+                      <div>
+                        <h3 className="text-lg font-black text-[#7a1c24]">🚌 إدارة الأتوبيسات والمقاعد — {viewBusItem.title}</h3>
+                        <p className="text-xs md:text-sm text-gray-600">التاريخ: {viewBusItem.event_date} • السعر للفرد: {viewBusItem.trip_cost} ج.م</p>
                       </div>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {isTripItem && (
-                      <>
-                        <button type="button" onClick={() => setViewBusItem(p)} className="px-3.5 py-2 bg-amber-500 text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer text-xs"><Bus size={16} /> الأتوبيسات ({busesList.length}) • {bookedSeats}/{totalSeats}</button>
-                        <button type="button" onClick={() => setPrintBusState({ trip: p, buses: busesList })} className="px-3.5 py-2 bg-slate-800 text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer text-xs"><Printer size={16} /> طباعة الكشوفات</button>
-                      </>
-                    )}
-                    <button type="button" onClick={() => { setEditingPersId(p.id); setPersForm({ ...emptyPers, ...p, bus_seats: normalizeBuses(p.bus_seats) }); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="p-2.5 bg-gray-100 rounded-xl"><Edit3 size={15} /></button>
-                    <button type="button" onClick={() => togglePersonalVisibility(p)} className="p-2.5 bg-blue-50 rounded-xl">{p.is_public ? <Globe size={15} /> : <Lock size={15} />}</button>
-                    <button type="button" onClick={() => deletePersonal(p.id)} className="p-2.5 bg-red-50 text-red-700 rounded-xl"><Trash2 size={15} /></button>
+                      <button type="button" onClick={() => setViewBusItem(null)} className="p-2 bg-gray-100 rounded-xl"><X size={18} /></button>
+                    </div>
+                    <BusVisualizerSection
+                      rawBusesData={viewBusItem.bus_seats}
+                      tripCost={viewBusItem.trip_cost}
+                      isViewMode={true}
+                      tripObj={viewBusItem}
+                      localUsers={localUsers}
+                      priest={priest}
+                      todayISO={todayISO}
+                      onSaveBuses={persistViewBuses}
+                      onLocalRenameBuses={(updated) => setViewBusItem(prev => ({ ...prev, bus_seats: updated }))}
+                      onOpenPrint={setPrintBusState}
+                      onOpenWhatsApp={openWhatsAppComposer}
+                    />
                   </div>
                 </div>
-              </div>
-            );
-          })}
-
-          {viewBusItem && (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-3xl w-full max-w-3xl p-5 space-y-3 max-h-[92vh] overflow-y-auto">
-                <div className="flex justify-between items-center border-b pb-3">
-                  <div>
-                    <h3 className="text-lg font-black text-[#7a1c24]">🚌 إدارة الأتوبيسات والمقاعد — {viewBusItem.title}</h3>
-                    <p className="text-xs md:text-sm text-gray-600">التاريخ: {viewBusItem.event_date} • السعر للفرد: {viewBusItem.trip_cost} ج.م</p>
-                  </div>
-                  <button type="button" onClick={() => setViewBusItem(null)} className="p-2 bg-gray-100 rounded-xl"><X size={18} /></button>
-                </div>
-                <BusVisualizerSection
-                  rawBusesData={viewBusItem.bus_seats}
-                  tripCost={viewBusItem.trip_cost}
-                  isViewMode={true}
-                  tripObj={viewBusItem}
-                  localUsers={localUsers}
-                  priest={priest}
-                  todayISO={todayISO}
-                  onSaveBuses={persistViewBuses}
-                  onLocalRenameBuses={(updated) => setViewBusItem(prev => ({ ...prev, bus_seats: updated }))}
-                  onOpenPrint={setPrintBusState}
-                  onOpenWhatsApp={openWhatsAppComposer}
-                />
-              </div>
+              )}
             </div>
-          )}
-        </div>
 
-        <PrintBusModal printBusState={printBusState} setPrintBusState={setPrintBusState} priest={priest} todayISO={todayISO} />
-        {renderGlobalModals()}
-      </div>
-    );
-  }
-
-  if (activeCard === 'cases') {
-    const displayedFamilies = families.filter(f => {
-      if (casesSubView === 'categories' && selectedCategoryName) return f.poverty_level === selectedCategoryName;
-      if (casesSubView === 'search' && searchCatFilter !== 'all' && f.poverty_level !== searchCatFilter) return false;
-      const numMatch = String(f.case_number || '') === caseSearch.trim();
-      return numMatch || (f.head_name + ' ' + f.phone + ' ' + f.area + ' ' + f.job + ' ' + (f.spouse_full_name || '')).toLowerCase().includes(caseSearch.toLowerCase());
-    });
-
-    const currentFormAttachments = editingFamId ? familyAttachments.filter(a => a.family_id === editingFamId) : (famForm.pendingAttachments || []);
-
-    const FamilyList = ({ list }) => (
-      <div className="space-y-3">
-        <div className="flex justify-end print:hidden">
-          <button type="button" onClick={() => { logActivity({ user: priest, actionType: 'طباعة_شيت_حالات', targetTable: 'pastoral_families', description: `طبع شيت بحث الحالة (${list.length} أسرة)` }); window.print(); }} className="px-4 py-2.5 bg-[#7a1c24] text-white rounded-xl font-bold flex items-center gap-1.5 shadow text-sm cursor-pointer"><Printer size={16} /> طباعة / حفظ شيت PDF رسمي ({list.length})</button>
-        </div>
-
-        <div className="hidden print:block space-y-3">
-          <div className="text-center border-b-2 border-[#7a1c24] pb-3">
-            <h1 className="text-xl font-black text-[#7a1c24]">تقرير وشيت بحث الحالة الرعوي</h1>
-            <p className="text-sm text-gray-700">الأب الكاهن: {priest.full_name} • التاريخ: {todayISO} • الإجمالي: {list.length} أسرة</p>
+            <PrintBusModal printBusState={printBusState} setPrintBusState={setPrintBusState} priest={priest} todayISO={todayISO} />
           </div>
-          <table className="w-full border-collapse border border-gray-400 text-xs text-right">
-            <thead>
-              <tr className="bg-gray-100">
-                <th className="border border-gray-400 p-1.5">#</th><th className="border border-gray-400 p-1.5">رب الأسرة</th>
-                <th className="border border-gray-400 p-1.5">التليفون والعمل</th><th className="border border-gray-400 p-1.5">الزوج/الزوجة</th>
-                <th className="border border-gray-400 p-1.5">العنوان والتصنيف</th><th className="border border-gray-400 p-1.5">المصاريف/الدعم</th><th className="border border-gray-400 p-1.5">الأولاد</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.map(f => (
-                <tr key={f.id}>
-                  <td className="border border-gray-400 p-1.5 font-bold">{f.case_number}</td>
-                  <td className="border border-gray-400 p-1.5 font-bold">{f.head_name}</td>
-                  <td className="border border-gray-400 p-1.5">{f.phone} • {f.job}</td>
-                  <td className="border border-gray-400 p-1.5">{f.spouse_full_name || '—'}</td>
-                  <td className="border border-gray-400 p-1.5">{f.area} ({f.poverty_level})</td>
-                  <td className="border border-gray-400 p-1.5">{f.monthly_expenses || 0} / {f.monthly_aid_amount || 0} ج.م</td>
-                  <td className="border border-gray-400 p-1.5">{(f.children || []).map(c => `${c.child_name} (${c.stage})`).join('، ') || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        )}
 
-        <div className="grid gap-3 print:hidden">
-          {list.map(f => {
-            const famAtts = familyAttachments.filter(a => a.family_id === f.id);
-            return (
-              <div key={f.id} className="bg-white p-4 rounded-2xl border space-y-2.5">
-                <div className="flex flex-wrap justify-between items-start gap-2">
-                  <div>
-                    <span className="px-2.5 py-0.5 bg-gray-900 text-white rounded text-xs ml-2">#{f.case_number}</span>
-                    <strong className="text-base">{f.head_name}</strong>
-                    <span className="mr-2 px-2.5 py-0.5 bg-red-100 text-red-800 rounded text-xs">{f.poverty_level}</span>
-                    <p className="text-sm text-gray-600 mt-1">📞 {f.phone} • 📍 {f.area} • 💼 {f.job}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    <button type="button" onClick={() => setInspectFamilyAttachments(f)} className="px-3 py-2 bg-indigo-50 text-indigo-900 rounded-xl font-bold text-xs flex items-center gap-1 cursor-pointer"><Paperclip size={14} /> المرفقات ({famAtts.length})</button>
-                    {f.phone && <button type="button" onClick={() => openWhatsAppComposer({ name: f.head_name, phone: f.phone, defaultCategory: 'افتقاد' })} className="p-2.5 bg-green-600 text-white rounded-xl cursor-pointer"><MessageCircle size={15} /></button>}
-                    <button type="button" onClick={() => openEditFamily(f)} className="p-2.5 bg-gray-100 rounded-xl"><Edit3 size={15} /></button>
-                    <button type="button" onClick={() => deleteFamily(f.id)} className="p-2.5 bg-red-50 text-red-700 rounded-xl"><Trash2 size={15} /></button>
-                  </div>
+        {activeCard === 'cases' && (() => {
+          const displayedFamilies = families.filter(f => {
+            if (casesSubView === 'categories' && selectedCategoryName) return f.poverty_level === selectedCategoryName;
+            if (casesSubView === 'search' && searchCatFilter !== 'all' && f.poverty_level !== searchCatFilter) return false;
+            const numMatch = String(f.case_number || '') === caseSearch.trim();
+            return numMatch || (f.head_name + ' ' + f.phone + ' ' + f.area + ' ' + f.job + ' ' + (f.spouse_full_name || '')).toLowerCase().includes(caseSearch.toLowerCase());
+          });
+
+          const currentFormAttachments = editingFamId ? familyAttachments.filter(a => a.family_id === editingFamId) : (famForm.pendingAttachments || []);
+
+          const FamilyList = ({ list }) => (
+            <div className="space-y-3">
+              <div className="flex justify-end print:hidden">
+                <button type="button" onClick={() => { logActivity({ user: priest, actionType: 'طباعة_شيت_حالات', targetTable: 'pastoral_families', description: `طبع شيت بحث الحالة (${list.length} أسرة)` }); window.print(); }} className="px-4 py-2.5 bg-[#7a1c24] text-white rounded-xl font-bold flex items-center gap-1.5 shadow text-sm cursor-pointer"><Printer size={16} /> طباعة / حفظ شيت PDF رسمي ({list.length})</button>
+              </div>
+
+              <div className="hidden print:block space-y-3">
+                <div className="text-center border-b-2 border-[#7a1c24] pb-3">
+                  <h1 className="text-xl font-black text-[#7a1c24]">تقرير وشيت بحث الحالة الرعوي</h1>
+                  <p className="text-sm text-gray-700">الأب الكاهن: {priest.full_name} • التاريخ: {todayISO} • الإجمالي: {list.length} أسرة</p>
                 </div>
-                {famAtts.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {famAtts.map(att => (
-                      <a key={att.id} href={att.file_url} target="_blank" rel="noreferrer" className="px-2.5 py-1 bg-blue-50 border border-blue-200 text-blue-900 rounded-lg text-xs font-bold flex items-center gap-1"><Eye size={12} /> {att.attachment_type}</a>
+                <table className="w-full border-collapse border border-gray-400 text-xs text-right">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      <th className="border border-gray-400 p-1.5">#</th><th className="border border-gray-400 p-1.5">رب الأسرة</th>
+                      <th className="border border-gray-400 p-1.5">التليفون والعمل</th><th className="border border-gray-400 p-1.5">الزوج/الزوجة</th>
+                      <th className="border border-gray-400 p-1.5">العنوان والتصنيف</th><th className="border border-gray-400 p-1.5">المصاريف/الدعم</th><th className="border border-gray-400 p-1.5">الأولاد</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {list.map(f => (
+                      <tr key={f.id}>
+                        <td className="border border-gray-400 p-1.5 font-bold">{f.case_number}</td>
+                        <td className="border border-gray-400 p-1.5 font-bold">{f.head_name}</td>
+                        <td className="border border-gray-400 p-1.5">{f.phone} • {f.job}</td>
+                        <td className="border border-gray-400 p-1.5">{f.spouse_full_name || '—'}</td>
+                        <td className="border border-gray-400 p-1.5">{f.area} ({f.poverty_level})</td>
+                        <td className="border border-gray-400 p-1.5">{f.monthly_expenses || 0} / {f.monthly_aid_amount || 0} ج.م</td>
+                        <td className="border border-gray-400 p-1.5">{(f.children || []).map(c => `${c.child_name} (${c.stage})`).join('، ') || '—'}</td>
+                      </tr>
                     ))}
-                  </div>
-                )}
-                <div className="grid grid-cols-3 gap-2 bg-[#fbfaf7] p-3 rounded-xl border text-xs md:text-sm">
-                  <div><span className="text-gray-500 block">مصاريف البيت الشهرية:</span><strong>{f.monthly_expenses || 0} ج.م</strong></div>
-                  <div><span className="text-gray-500 block">الدعم الشهري المطلوب:</span><strong className="text-red-700">{f.monthly_aid_amount || 0} ج.م</strong></div>
-                  <div><span className="text-gray-500 block">احتياجات البيت:</span><strong>{f.house_needs || f.case_notes || '—'}</strong></div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-
-    return (
-      <div className="space-y-4 text-sm md:text-base">
-        {renderTopBar('🔍 بحث الحالة والأسر والمرفقات (PDF منظم)')}
-        {casesSubView === 'menu' && (
-          <div className="grid sm:grid-cols-3 gap-4">
-            <button type="button" onClick={() => setCasesSubView('search')} className="bg-white border-2 p-6 rounded-3xl text-right space-y-2 cursor-pointer"><span className="text-4xl block">🔍</span><h3 className="text-lg font-black">بحث في الأسر</h3></button>
-            <button type="button" onClick={() => { setEditingFamId(null); setFamForm(emptyFam); setCasesSubView('add'); }} className="bg-white border-2 p-6 rounded-3xl text-right space-y-2 cursor-pointer"><span className="text-4xl block">➕</span><h3 className="text-lg font-black">إضافة أسرة جديدة</h3></button>
-            <button type="button" onClick={() => { setSelectedCategoryName(null); setCasesSubView('categories'); }} className="bg-white border-2 p-6 rounded-3xl text-right space-y-2 cursor-pointer"><span className="text-4xl block">📂</span><h3 className="text-lg font-black">تصنيفات الأسر ({families.length})</h3></button>
-          </div>
-        )}
-        {casesSubView === 'search' && (
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-2 print:hidden">
-              <button type="button" onClick={() => setCasesSubView('menu')} className="px-4 py-2 bg-white border rounded-xl font-bold text-sm">← رجوع</button>
-              <button type="button" onClick={() => setSearchCatFilter('all')} className={`px-3.5 py-2 rounded-xl font-bold border text-sm ${searchCatFilter === 'all' ? 'bg-[#7a1c24] text-white' : 'bg-white'}`}>الكل ({families.length})</button>
-              {categoryNames.map(cat => <button key={cat.id} type="button" onClick={() => setSearchCatFilter(cat.name)} className={`px-3.5 py-2 rounded-xl font-bold border text-sm ${searchCatFilter === cat.name ? 'bg-[#7a1c24] text-white' : 'bg-white'}`}>{cat.icon} {cat.name} ({families.filter(f => f.poverty_level === cat.name).length})</button>)}
-            </div>
-            <input autoFocus placeholder="ابحث برقم الحالة أو الاسم أو المنطقة..." className="w-full p-3.5 bg-white border-2 rounded-2xl print:hidden" value={caseSearch} onChange={e => setCaseSearch(e.target.value)} />
-            <FamilyList list={displayedFamilies} />
-          </div>
-        )}
-        {casesSubView === 'add' && (
-          <div className="space-y-3">
-            <button type="button" onClick={() => setCasesSubView('menu')} className="px-4 py-2 bg-white border rounded-xl font-bold text-sm">← رجوع</button>
-            <form onSubmit={handleSaveFamily} className="bg-white p-5 rounded-3xl border space-y-3 font-bold">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                <input required placeholder="الاسم الأول *" className="p-2.5 border rounded-xl" value={famForm.head_first} onChange={e => setFamForm({ ...famForm, head_first: e.target.value })} />
-                <input required placeholder="الثاني *" className="p-2.5 border rounded-xl" value={famForm.head_second} onChange={e => setFamForm({ ...famForm, head_second: e.target.value })} />
-                <input placeholder="الثالث" className="p-2.5 border rounded-xl" value={famForm.head_third} onChange={e => setFamForm({ ...famForm, head_third: e.target.value })} />
-                <input placeholder="الرابع" className="p-2.5 border rounded-xl" value={famForm.head_fourth} onChange={e => setFamForm({ ...famForm, head_fourth: e.target.value })} />
-              </div>
-              <div className="grid md:grid-cols-4 gap-2">
-                <input required placeholder="تليفون الزوج *" className="p-2.5 border rounded-xl" value={famForm.phone} onChange={e => setFamForm({ ...famForm, phone: e.target.value })} />
-                <input type="date" className="p-2.5 border rounded-xl" value={famForm.dob} onChange={e => setFamForm({ ...famForm, dob: e.target.value })} />
-                <input placeholder="المؤهل" className="p-2.5 border rounded-xl" value={famForm.head_qualification} onChange={e => setFamForm({ ...famForm, head_qualification: e.target.value })} />
-                <input placeholder="العمل" className="p-2.5 border rounded-xl" value={famForm.job} onChange={e => setFamForm({ ...famForm, job: e.target.value })} />
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 bg-pink-50/40 p-3 rounded-2xl border border-pink-100">
-                <input placeholder="اسم الزوجة الأول" className="p-2.5 border rounded-xl bg-white" value={famForm.spouse_first} onChange={e => setFamForm({ ...famForm, spouse_first: e.target.value })} />
-                <input placeholder="اسم الزوجة الثاني" className="p-2.5 border rounded-xl bg-white" value={famForm.spouse_second} onChange={e => setFamForm({ ...famForm, spouse_second: e.target.value })} />
-                <input placeholder="تليفون الزوجة" className="p-2.5 border rounded-xl bg-white" value={famForm.spouse_phone} onChange={e => setFamForm({ ...famForm, spouse_phone: e.target.value })} />
-                <input placeholder="عمل الزوجة" className="p-2.5 border rounded-xl bg-white" value={famForm.spouse_job} onChange={e => setFamForm({ ...famForm, spouse_job: e.target.value })} />
-              </div>
-              <div className="bg-amber-50 p-3 rounded-2xl border space-y-2">
-                <div className="grid md:grid-cols-4 gap-2">
-                  <input placeholder="اسم الابن" className="p-2 border rounded-xl bg-white" value={tempChild.child_name} onChange={e => setTempChild({ ...tempChild, child_name: e.target.value })} />
-                  <input type="date" className="p-2 border rounded-xl bg-white" value={tempChild.dob} onChange={e => setTempChild({ ...tempChild, dob: e.target.value })} />
-                  <input placeholder="المرحلة" className="p-2 border rounded-xl bg-white" value={tempChild.stage} onChange={e => setTempChild({ ...tempChild, stage: e.target.value })} />
-                  <select className="p-2 border rounded-xl bg-white" value={tempChild.marital_status} onChange={e => setTempChild({ ...tempChild, marital_status: e.target.value })}><option value="أعزب">أعزب</option><option value="متزوج">متزوج</option></select>
-                </div>
-                <div className="flex gap-2 items-center">
-                  <label className="flex items-center gap-1"><input type="checkbox" checked={tempChild.has_disability} onChange={e => setTempChild({ ...tempChild, has_disability: e.target.checked })} /> إعاقة/مرض؟</label>
-                  {tempChild.has_disability && <input placeholder="التفاصيل" className="flex-1 p-2 border rounded-xl bg-white" value={tempChild.disability_details} onChange={e => setTempChild({ ...tempChild, disability_details: e.target.value })} />}
-                  <button type="button" onClick={() => { if (tempChild.child_name) { setFamForm({ ...famForm, children: [...famForm.children, tempChild] }); setTempChild({ child_name: '', dob: '', stage: '', marital_status: 'أعزب', has_disability: false, disability_details: '' }); } }} className="px-3.5 py-1.5 bg-amber-600 text-white rounded-xl">+ ابن</button>
-                </div>
-                {famForm.children.map((c, idx) => <div key={idx} className="text-xs bg-white px-2.5 py-1.5 rounded">• {c.child_name} ({c.stage})</div>)}
-              </div>
-              <div className="grid md:grid-cols-4 gap-2.5 bg-emerald-50/40 p-3 rounded-2xl border border-emerald-200">
-                <input required placeholder="المنطقة / الشارع *" className="p-2.5 border rounded-xl bg-white" value={famForm.area} onChange={e => setFamForm({ ...famForm, area: e.target.value })} />
-                <select className="p-2.5 border rounded-xl bg-white" value={famForm.poverty_level} onChange={e => setFamForm({ ...famForm, poverty_level: e.target.value })}>{categoryNames.map(cat => <option key={cat.id} value={cat.name}>{cat.name}</option>)}</select>
-                <input type="number" min="0" placeholder="المصاريف الشهرية" className="p-2.5 border rounded-xl bg-white" value={famForm.monthly_expenses || ''} onChange={e => setFamForm({ ...famForm, monthly_expenses: e.target.value })} />
-                <input type="number" min="0" placeholder="الدعم الشهري المطلوب" className="p-2.5 border rounded-xl bg-white" value={famForm.monthly_aid_amount || ''} onChange={e => setFamForm({ ...famForm, monthly_aid_amount: e.target.value, needs_monthly_aid: Number(e.target.value) > 0 })} />
+                  </tbody>
+                </table>
               </div>
 
-              <div className="bg-indigo-50/50 p-4 rounded-2xl border-2 border-indigo-200 space-y-3">
-                <strong className="text-indigo-950 flex items-center gap-1.5 text-sm"><Paperclip size={16} /> مرفقات الأسرة (صورة بطاقة / عقد إيجار / تحاليل وأشعة / إيصال كهرباء ومرافق)</strong>
-                <div className="flex flex-wrap gap-2 items-center">
-                  <select className="p-2.5 border rounded-xl bg-white text-xs" value={selectedUploadType} onChange={e => setSelectedUploadType(e.target.value)}>
-                    {ATTACHMENT_TYPES.map(at => <option key={at} value={at}>{at}</option>)}
-                  </select>
-                  <label className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer ${uploadingAttach ? 'bg-gray-300 text-gray-600' : 'bg-indigo-700 hover:bg-indigo-800 text-white'}`}>
-                    <Upload size={15} /> {uploadingAttach ? 'جاري الرفع...' : `رفع (${selectedUploadType})`}
-                    <input type="file" accept="image/*,.pdf" className="hidden" disabled={uploadingAttach} onChange={e => { const f = e.target.files?.[0]; if (f) handleUploadFamilyAttachment(f, selectedUploadType, editingFamId || null); e.target.value = ''; }} />
-                  </label>
-                </div>
-                {currentFormAttachments.length > 0 && (
-                  <div className="grid sm:grid-cols-2 gap-2">
-                    {currentFormAttachments.map((att, idx) => (
-                      <div key={att.id || att.tempId || idx} className="bg-white p-2.5 rounded-xl border flex justify-between items-center gap-2 text-xs">
-                        <div className="truncate"><span className="px-2 py-0.5 bg-indigo-100 text-indigo-900 rounded ml-1.5">{att.attachment_type}</span><span>{att.file_name || 'مرفق'}</span></div>
-                        <div className="flex gap-1 shrink-0">
-                          <a href={att.file_url} target="_blank" rel="noreferrer" className="p-1.5 bg-blue-50 text-blue-700 rounded-lg"><ExternalLink size={14} /></a>
-                          <button type="button" onClick={() => handleDeleteAttachment(att)} className="p-1.5 bg-red-50 text-red-700 rounded-lg"><Trash2 size={14} /></button>
+              <div className="grid gap-3 print:hidden">
+                {list.map(f => {
+                  const famAtts = familyAttachments.filter(a => a.family_id === f.id);
+                  return (
+                    <div key={f.id} className="bg-white p-4 rounded-2xl border space-y-2.5">
+                      <div className="flex flex-wrap justify-between items-start gap-2">
+                        <div>
+                          <span className="px-2.5 py-0.5 bg-gray-900 text-white rounded text-xs ml-2">#{f.case_number}</span>
+                          <strong className="text-base">{f.head_name}</strong>
+                          <span className="mr-2 px-2.5 py-0.5 bg-red-100 text-red-800 rounded text-xs">{f.poverty_level}</span>
+                          <p className="text-sm text-gray-600 mt-1">📞 {f.phone} • 📍 {f.area} • 💼 {f.job}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          <button type="button" onClick={() => setInspectFamilyAttachments(f)} className="px-3 py-2 bg-indigo-50 text-indigo-900 rounded-xl font-bold text-xs flex items-center gap-1 cursor-pointer"><Paperclip size={14} /> المرفقات ({famAtts.length})</button>
+                          {f.phone && <button type="button" onClick={() => openWhatsAppComposer({ name: f.head_name, phone: f.phone, defaultCategory: 'افتقاد' })} className="p-2.5 bg-green-600 text-white rounded-xl cursor-pointer"><MessageCircle size={15} /></button>}
+                          <button type="button" onClick={() => openEditFamily(f)} className="p-2.5 bg-gray-100 rounded-xl"><Edit3 size={15} /></button>
+                          <button type="button" onClick={() => deleteFamily(f.id)} className="p-2.5 bg-red-50 text-red-700 rounded-xl"><Trash2 size={15} /></button>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <input placeholder="احتياجات البيت / ملاحظات الحالة..." className="w-full p-2.5 border rounded-xl" value={famForm.house_needs} onChange={e => setFamForm({ ...famForm, house_needs: e.target.value })} />
-              <button type="submit" className="px-6 py-3 bg-[#7a1c24] text-white rounded-xl cursor-pointer">حفظ بيانات الأسرة والمرفقات</button>
-            </form>
-          </div>
-        )}
-        {casesSubView === 'categories' && (
-          <div className="space-y-4">
-            <button type="button" onClick={() => { setSelectedCategoryName(null); setCasesSubView('menu'); }} className="px-4 py-2 bg-white border rounded-xl font-bold print:hidden text-sm">← رجوع</button>
-            {!selectedCategoryName ? (
-              <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-3">
-                {categoryNames.map(cat => (
-                  <button type="button" key={cat.id} onClick={() => setSelectedCategoryName(cat.name)} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer">
-                    <span className="text-4xl block">{cat.icon || '📂'}</span><strong className="text-base block">{cat.name}</strong>
-                    <span className="px-3 py-1 bg-[#f9ecee] text-[#7a1c24] rounded-full font-black text-xs">{families.filter(f => f.poverty_level === cat.name).length} أسرة</span>
-                  </button>
-                ))}
-              </div>
-            ) : <FamilyList list={displayedFamilies} />}
-          </div>
-        )}
-
-        {inspectFamilyAttachments && (
-          <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4 z-70">
-            <div className="bg-white rounded-3xl w-full max-w-xl p-6 space-y-4 font-bold max-h-[90vh] overflow-y-auto text-sm">
-              <div className="flex justify-between items-center border-b pb-3">
-                <h3 className="text-base font-black text-[#7a1c24]">📎 مرفقات أسرة: {inspectFamilyAttachments.head_name}</h3>
-                <button type="button" onClick={() => setInspectFamilyAttachments(null)} className="p-1.5 bg-gray-100 rounded-xl"><X size={18} /></button>
-              </div>
-              <div className="bg-indigo-50 p-3 rounded-2xl border border-indigo-200 flex flex-wrap gap-2 items-center">
-                <select className="p-2 border rounded-xl bg-white text-xs" value={selectedUploadType} onChange={e => setSelectedUploadType(e.target.value)}>{ATTACHMENT_TYPES.map(at => <option key={at} value={at}>{at}</option>)}</select>
-                <label className="px-4 py-2 bg-indigo-700 text-white rounded-xl text-xs cursor-pointer flex items-center gap-1">
-                  <Upload size={14} /> {uploadingAttach ? 'جاري الرفع...' : 'إضافة مرفق جديد'}
-                  <input type="file" accept="image/*,.pdf" className="hidden" disabled={uploadingAttach} onChange={e => { const f = e.target.files?.[0]; if (f) handleUploadFamilyAttachment(f, selectedUploadType, inspectFamilyAttachments.id); e.target.value = ''; }} />
-                </label>
-              </div>
-              <div className="space-y-2">
-                {familyAttachments.filter(a => a.family_id === inspectFamilyAttachments.id).length === 0 ? (
-                  <p className="text-center text-gray-500 py-4 text-xs">لا توجد مرفقات مرفوعة لهذه الأسرة حتى الآن.</p>
-                ) : familyAttachments.filter(a => a.family_id === inspectFamilyAttachments.id).map(att => (
-                  <div key={att.id} className="p-3 bg-gray-50 border rounded-2xl flex justify-between items-center gap-2">
-                    <div><span className="px-2 py-0.5 bg-indigo-100 text-indigo-900 rounded text-xs ml-2">{att.attachment_type}</span><span className="text-xs text-gray-700">{att.file_name}</span></div>
-                    <div className="flex gap-1.5">
-                      <a href={att.file_url} target="_blank" rel="noreferrer" className="px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs flex items-center gap-1"><Eye size={13} /> معاينة</a>
-                      <button type="button" onClick={() => handleDeleteAttachment(att)} className="p-1.5 bg-red-50 text-red-700 rounded-xl"><Trash2 size={14} /></button>
+                      {famAtts.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {famAtts.map(att => (
+                            <a key={att.id} href={att.file_url} target="_blank" rel="noreferrer" className="px-2.5 py-1 bg-blue-50 border border-blue-200 text-blue-900 rounded-lg text-xs font-bold flex items-center gap-1"><Eye size={12} /> {att.attachment_type}</a>
+                          ))}
+                        </div>
+                      )}
+                      <div className="grid grid-cols-3 gap-2 bg-[#fbfaf7] p-3 rounded-xl border text-xs md:text-sm">
+                        <div><span className="text-gray-500 block">مصاريف البيت الشهرية:</span><strong>{f.monthly_expenses || 0} ج.م</strong></div>
+                        <div><span className="text-gray-500 block">الدعم الشهري المطلوب:</span><strong className="text-red-700">{f.monthly_aid_amount || 0} ج.م</strong></div>
+                        <div><span className="text-gray-500 block">احتياجات البيت:</span><strong>{f.house_needs || f.case_notes || '—'}</strong></div>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
+          );
+
+          return (
+            <div className="space-y-4">
+              {renderTopBar('🔍 بحث الحالة والأسر والمرفقات (PDF منظم)')}
+
+              {casesSubView === 'menu' && (
+                <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <button type="button" onClick={() => setCasesSubView('search')} className="bg-white border-2 p-6 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-4xl block">🔍</span><h3 className="text-lg font-black">بحث في الأسر</h3></button>
+                  <button type="button" onClick={() => { setEditingFamId(null); setFamForm(emptyFam); setCasesSubView('add'); }} className="bg-white border-2 p-6 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-4xl block">➕</span><h3 className="text-lg font-black">إضافة أسرة جديدة</h3></button>
+                  <button type="button" onClick={() => { setSelectedCategoryName(null); setCasesSubView('categories'); }} className="bg-white border-2 p-6 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-4xl block">📂</span><h3 className="text-lg font-black">تصنيفات الأسر ({families.length})</h3></button>
+                  <button type="button" onClick={() => setCasesSubView('hidden_requests')} className={`border-2 p-6 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer ${pendingHiddenReqsCount > 0 ? 'bg-amber-50 border-amber-300' : 'bg-white'}`}>
+                    <span className="text-4xl block">📩</span>
+                    <h3 className="text-lg font-black">طلبات خدام المستترة ({pendingHiddenReqsCount})</h3>
+                  </button>
+                </div>
+              )}
+
+              {casesSubView === 'hidden_requests' && (
+                <div className="space-y-3">
+                  <button type="button" onClick={() => setCasesSubView('menu')} className="px-4 py-2 bg-white border rounded-xl font-bold text-sm">← رجوع</button>
+                  {hiddenEditRequests.length === 0 ? (
+                    <div className="bg-white p-8 rounded-3xl border text-center text-gray-400 font-bold">لا توجد طلبات تعديل أو حذف مرسلة من خدام الأسر المستترة</div>
+                  ) : (
+                    hiddenEditRequests.map(req => {
+                      const targetFam = families.find(f => f.id === req.family_id);
+                      const isDone = req.status === 'done';
+                      return (
+                        <div key={req.id} className={`p-4 rounded-2xl border flex flex-wrap justify-between items-start gap-3 ${isDone ? 'bg-gray-50 opacity-75' : 'bg-white border-amber-300'}`}>
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-black ${req.request_type === 'delete' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-950'}`}>
+                                {req.request_type === 'delete' ? '🗑️ طلب حذف' : '✏️ طلب تعديل'}
+                              </span>
+                              <strong className="text-sm text-gray-900">{req.family_name} {req.case_number ? `(#${req.case_number})` : ''}</strong>
+                              {isDone && <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded-full text-[10px] font-black">✓ تم التنفيذ</span>}
+                            </div>
+                            <p className="text-xs text-gray-700">{req.details}</p>
+                            <span className="text-[11px] text-gray-500 block">مُرسل من: {req.requested_by_name}</span>
+                          </div>
+                          {!isDone && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {targetFam && req.request_type === 'edit' && (
+                                <button type="button" onClick={() => openEditFamily(targetFam)} className="px-3 py-1.5 bg-[#7a1c24] text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Edit3 size={12} /> فتح وتعديل الأسرة</button>
+                              )}
+                              {targetFam && req.request_type === 'delete' && (
+                                <button type="button" onClick={async () => { await deleteFamily(targetFam.id); await handleMarkHiddenRequestDone(req); }} className="px-3 py-1.5 bg-red-600 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><Trash2 size={12} /> حذف الأسرة</button>
+                              )}
+                              <button type="button" onClick={() => handleMarkHiddenRequestDone(req)} className="px-3 py-1.5 bg-emerald-100 text-emerald-900 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"><CheckCircle2 size={12} /> تم المراجعة</button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+
+              {casesSubView === 'search' && (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2 print:hidden">
+                    <button type="button" onClick={() => setCasesSubView('menu')} className="px-4 py-2 bg-white border rounded-xl font-bold text-sm">← رجوع</button>
+                    <button type="button" onClick={() => setSearchCatFilter('all')} className={`px-3.5 py-2 rounded-xl font-bold border text-sm ${searchCatFilter === 'all' ? 'bg-[#7a1c24] text-white' : 'bg-white'}`}>الكل ({families.length})</button>
+                    {categoryNames.map(cat => <button key={cat.id} type="button" onClick={() => setSearchCatFilter(cat.name)} className={`px-3.5 py-2 rounded-xl font-bold border text-sm ${searchCatFilter === cat.name ? 'bg-[#7a1c24] text-white' : 'bg-white'}`}>{cat.icon} {cat.name} ({families.filter(f => f.poverty_level === cat.name).length})</button>)}
+                  </div>
+                  <input autoFocus placeholder="ابحث برقم الحالة أو الاسم أو المنطقة..." className="w-full p-3.5 bg-white border-2 rounded-2xl print:hidden" value={caseSearch} onChange={e => setCaseSearch(e.target.value)} />
+                  <FamilyList list={displayedFamilies} />
+                </div>
+              )}
+
+              {casesSubView === 'add' && (
+                <div className="space-y-3">
+                  <button type="button" onClick={() => setCasesSubView('menu')} className="px-4 py-2 bg-white border rounded-xl font-bold text-sm">← رجوع</button>
+                  <form onSubmit={handleSaveFamily} className="bg-white p-5 rounded-3xl border space-y-3 font-bold">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      <input required placeholder="الاسم الأول *" className="p-2.5 border rounded-xl" value={famForm.head_first} onChange={e => setFamForm({ ...famForm, head_first: e.target.value })} />
+                      <input required placeholder="الثاني *" className="p-2.5 border rounded-xl" value={famForm.head_second} onChange={e => setFamForm({ ...famForm, head_second: e.target.value })} />
+                      <input placeholder="الثالث" className="p-2.5 border rounded-xl" value={famForm.head_third} onChange={e => setFamForm({ ...famForm, head_third: e.target.value })} />
+                      <input placeholder="الرابع" className="p-2.5 border rounded-xl" value={famForm.head_fourth} onChange={e => setFamForm({ ...famForm, head_fourth: e.target.value })} />
+                    </div>
+                    <div className="grid md:grid-cols-4 gap-2">
+                      <input required placeholder="تليفون الزوج *" className="p-2.5 border rounded-xl" value={famForm.phone} onChange={e => setFamForm({ ...famForm, phone: e.target.value })} />
+                      <input type="date" className="p-2.5 border rounded-xl" value={famForm.dob} onChange={e => setFamForm({ ...famForm, dob: e.target.value })} />
+                      <input placeholder="المؤهل" className="p-2.5 border rounded-xl" value={famForm.head_qualification} onChange={e => setFamForm({ ...famForm, head_qualification: e.target.value })} />
+                      <input placeholder="العمل" className="p-2.5 border rounded-xl" value={famForm.job} onChange={e => setFamForm({ ...famForm, job: e.target.value })} />
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 bg-pink-50/40 p-3 rounded-2xl border border-pink-100">
+                      <input placeholder="اسم الزوجة الأول" className="p-2.5 border rounded-xl bg-white" value={famForm.spouse_first} onChange={e => setFamForm({ ...famForm, spouse_first: e.target.value })} />
+                      <input placeholder="اسم الزوجة الثاني" className="p-2.5 border rounded-xl bg-white" value={famForm.spouse_second} onChange={e => setFamForm({ ...famForm, spouse_second: e.target.value })} />
+                      <input placeholder="تليفون الزوجة" className="p-2.5 border rounded-xl bg-white" value={famForm.spouse_phone} onChange={e => setFamForm({ ...famForm, spouse_phone: e.target.value })} />
+                      <input placeholder="عمل الزوجة" className="p-2.5 border rounded-xl bg-white" value={famForm.spouse_job} onChange={e => setFamForm({ ...famForm, spouse_job: e.target.value })} />
+                    </div>
+                    <div className="bg-amber-50 p-3 rounded-2xl border space-y-2">
+                      <div className="grid md:grid-cols-4 gap-2">
+                        <input placeholder="اسم الابن" className="p-2 border rounded-xl bg-white" value={tempChild.child_name} onChange={e => setTempChild({ ...tempChild, child_name: e.target.value })} />
+                        <input type="date" className="p-2 border rounded-xl bg-white" value={tempChild.dob} onChange={e => setTempChild({ ...tempChild, dob: e.target.value })} />
+                        <input placeholder="المرحلة" className="p-2 border rounded-xl bg-white" value={tempChild.stage} onChange={e => setTempChild({ ...tempChild, stage: e.target.value })} />
+                        <select className="p-2 border rounded-xl bg-white" value={tempChild.marital_status} onChange={e => setTempChild({ ...tempChild, marital_status: e.target.value })}><option value="أعزب">أعزب</option><option value="متزوج">متزوج</option></select>
+                      </div>
+                      <div className="flex gap-2 items-center">
+                        <label className="flex items-center gap-1"><input type="checkbox" checked={tempChild.has_disability} onChange={e => setTempChild({ ...tempChild, has_disability: e.target.checked })} /> إعاقة/مرض؟</label>
+                        {tempChild.has_disability && <input placeholder="التفاصيل" className="flex-1 p-2 border rounded-xl bg-white" value={tempChild.disability_details} onChange={e => setTempChild({ ...tempChild, disability_details: e.target.value })} />}
+                        <button type="button" onClick={() => { if (tempChild.child_name) { setFamForm({ ...famForm, children: [...famForm.children, tempChild] }); setTempChild({ child_name: '', dob: '', stage: '', marital_status: 'أعزب', has_disability: false, disability_details: '' }); } }} className="px-3.5 py-1.5 bg-amber-600 text-white rounded-xl">+ ابن</button>
+                      </div>
+                      {famForm.children.map((c, idx) => <div key={idx} className="text-xs bg-white px-2.5 py-1.5 rounded">• {c.child_name} ({c.stage})</div>)}
+                    </div>
+                    <div className="grid md:grid-cols-4 gap-2.5 bg-emerald-50/40 p-3 rounded-2xl border border-emerald-200">
+                      <input required placeholder="المنطقة / الشارع *" className="p-2.5 border rounded-xl bg-white" value={famForm.area} onChange={e => setFamForm({ ...famForm, area: e.target.value })} />
+                      <select className="p-2.5 border rounded-xl bg-white" value={famForm.poverty_level} onChange={e => setFamForm({ ...famForm, poverty_level: e.target.value })}>{categoryNames.map(cat => <option key={cat.id} value={cat.name}>{cat.name}</option>)}</select>
+                      <input type="number" min="0" placeholder="المصاريف الشهرية" className="p-2.5 border rounded-xl bg-white" value={famForm.monthly_expenses || ''} onChange={e => setFamForm({ ...famForm, monthly_expenses: e.target.value })} />
+                      <input type="number" min="0" placeholder="الدعم الشهري المطلوب" className="p-2.5 border rounded-xl bg-white" value={famForm.monthly_aid_amount || ''} onChange={e => setFamForm({ ...famForm, monthly_aid_amount: e.target.value, needs_monthly_aid: Number(e.target.value) > 0 })} />
+                    </div>
+
+                    <div className="bg-indigo-50/50 p-4 rounded-2xl border-2 border-indigo-200 space-y-3">
+                      <strong className="text-indigo-950 flex items-center gap-1.5 text-sm"><Paperclip size={16} /> مرفقات الأسرة (صورة بطاقة / عقد إيجار / تحاليل وأشعة / إيصال كهرباء ومرافق)</strong>
+                      <div className="flex flex-wrap gap-2 items-center">
+                        <select className="p-2.5 border rounded-xl bg-white text-xs" value={selectedUploadType} onChange={e => setSelectedUploadType(e.target.value)}>
+                          {ATTACHMENT_TYPES.map(at => <option key={at} value={at}>{at}</option>)}
+                        </select>
+                        <label className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer ${uploadingAttach ? 'bg-gray-300 text-gray-600' : 'bg-indigo-700 hover:bg-indigo-800 text-white'}`}>
+                          <Upload size={15} /> {uploadingAttach ? 'جاري الرفع...' : `رفع (${selectedUploadType})`}
+                          <input type="file" accept="image/*,.pdf" className="hidden" disabled={uploadingAttach} onChange={e => { const f = e.target.files?.[0]; if (f) handleUploadFamilyAttachment(f, selectedUploadType, editingFamId || null); e.target.value = ''; }} />
+                        </label>
+                      </div>
+                      {currentFormAttachments.length > 0 && (
+                        <div className="grid sm:grid-cols-2 gap-2">
+                          {currentFormAttachments.map((att, idx) => (
+                            <div key={att.id || att.tempId || idx} className="bg-white p-2.5 rounded-xl border flex justify-between items-center gap-2 text-xs">
+                              <div className="truncate"><span className="px-2 py-0.5 bg-indigo-100 text-indigo-900 rounded ml-1.5">{att.attachment_type}</span><span>{att.file_name || 'مرفق'}</span></div>
+                              <div className="flex gap-1 shrink-0">
+                                <a href={att.file_url} target="_blank" rel="noreferrer" className="p-1.5 bg-blue-50 text-blue-700 rounded-lg"><ExternalLink size={14} /></a>
+                                <button type="button" onClick={() => handleDeleteAttachment(att)} className="p-1.5 bg-red-50 text-red-700 rounded-lg"><Trash2 size={14} /></button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <input placeholder="احتياجات البيت / ملاحظات الحالة..." className="w-full p-2.5 border rounded-xl" value={famForm.house_needs} onChange={e => setFamForm({ ...famForm, house_needs: e.target.value })} />
+                    <button type="submit" className="px-6 py-3 bg-[#7a1c24] text-white rounded-xl cursor-pointer">حفظ بيانات الأسرة والمرفقات</button>
+                  </form>
+                </div>
+              )}
+
+              {casesSubView === 'categories' && (
+                <div className="space-y-4">
+                  <button type="button" onClick={() => { setSelectedCategoryName(null); setCasesSubView('menu'); }} className="px-4 py-2 bg-white border rounded-xl font-bold print:hidden text-sm">← رجوع</button>
+                  {!selectedCategoryName ? (
+                    <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-3">
+                      {categoryNames.map(cat => (
+                        <button type="button" key={cat.id} onClick={() => setSelectedCategoryName(cat.name)} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer">
+                          <span className="text-4xl block">{cat.icon || '📂'}</span><strong className="text-base block">{cat.name}</strong>
+                          <span className="px-3 py-1 bg-[#f9ecee] text-[#7a1c24] rounded-full font-black text-xs">{families.filter(f => f.poverty_level === cat.name).length} أسرة</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : <FamilyList list={displayedFamilies} />}
+                </div>
+              )}
+
+              {inspectFamilyAttachments && (
+                <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4 z-70">
+                  <div className="bg-white rounded-3xl w-full max-w-xl p-6 space-y-4 font-bold max-h-[90vh] overflow-y-auto text-sm">
+                    <div className="flex justify-between items-center border-b pb-3">
+                      <h3 className="text-base font-black text-[#7a1c24]">📎 مرفقات أسرة: {inspectFamilyAttachments.head_name}</h3>
+                      <button type="button" onClick={() => setInspectFamilyAttachments(null)} className="p-1.5 bg-gray-100 rounded-xl"><X size={18} /></button>
+                    </div>
+                    <div className="bg-indigo-50 p-3 rounded-2xl border border-indigo-200 flex flex-wrap gap-2 items-center">
+                      <select className="p-2 border rounded-xl bg-white text-xs" value={selectedUploadType} onChange={e => setSelectedUploadType(e.target.value)}>{ATTACHMENT_TYPES.map(at => <option key={at} value={at}>{at}</option>)}</select>
+                      <label className="px-4 py-2 bg-indigo-700 text-white rounded-xl text-xs cursor-pointer flex items-center gap-1">
+                        <Upload size={14} /> {uploadingAttach ? 'جاري الرفع...' : 'إضافة مرفق جديد'}
+                        <input type="file" accept="image/*,.pdf" className="hidden" disabled={uploadingAttach} onChange={e => { const f = e.target.files?.[0]; if (f) handleUploadFamilyAttachment(f, selectedUploadType, inspectFamilyAttachments.id); e.target.value = ''; }} />
+                      </label>
+                    </div>
+                    <div className="space-y-2">
+                      {familyAttachments.filter(a => a.family_id === inspectFamilyAttachments.id).length === 0 ? (
+                        <p className="text-center text-gray-500 py-4 text-xs">لا توجد مرفقات مرفوعة لهذه الأسرة حتى الآن.</p>
+                      ) : familyAttachments.filter(a => a.family_id === inspectFamilyAttachments.id).map(att => (
+                        <div key={att.id} className="p-3 bg-gray-50 border rounded-2xl flex justify-between items-center gap-2">
+                          <div><span className="px-2 py-0.5 bg-indigo-100 text-indigo-900 rounded text-xs ml-2">{att.attachment_type}</span><span className="text-xs text-gray-700">{att.file_name}</span></div>
+                          <div className="flex gap-1.5">
+                            <a href={att.file_url} target="_blank" rel="noreferrer" className="px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs flex items-center gap-1"><Eye size={13} /> معاينة</a>
+                            <button type="button" onClick={() => handleDeleteAttachment(att)} className="p-1.5 bg-red-50 text-red-700 rounded-xl"><Trash2 size={14} /></button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {activeCard === 'edu_center' && (
+          <div className="space-y-4">
+            {renderTopBar('🎓 المركز التعليمي الكنسي')}
+            <EducationalCenterManager currentUser={priest} todayISO={todayISO} />
           </div>
         )}
-        {renderGlobalModals()}
-      </div>
-    );
-  }
 
-  if (activeCard === 'edu_center') {
-    return (
-      <div className="space-y-4 text-sm md:text-base">
-        {renderTopBar('🎓 المركز التعليمي الكنسي')}
-        <EducationalCenterManager currentUser={priest} todayISO={todayISO} />
-        {renderGlobalModals()}
-      </div>
-    );
-  }
-
-  if (activeCard === 'joseph_arimathea') {
-    return (
-      <div className="space-y-4 text-sm md:text-base">
-        {renderTopBar('🕊️ خدمة يوسف الرامي')}
-        <JosephArimatheaManager currentUser={priest} todayISO={todayISO} onOpenWhatsApp={openWhatsAppComposer} />
-        {renderGlobalModals()}
-      </div>
-    );
-  }
-
-  if (activeCard.startsWith('custom:')) {
-    const cardId = activeCard.split(':')[1], cardObj = customCards.find(c => c.id === cardId), entries = customEntries.filter(e => e.card_id === cardId);
-    return (
-      <div className="space-y-4 text-sm md:text-base">
-        {renderTopBar(`${cardObj?.card_icon || '📌'} ${cardObj?.card_title || 'كارت مخصص'}`)}
-        <form onSubmit={async e => { e.preventDefault(); const { data } = await supabase.from('priest_custom_entries').insert([{ ...customEntryForm, card_id: cardId, priest_id: priest.id, entry_date: customEntryForm.entry_date || null }]).select().single(); if (data) { setCustomEntries([data, ...customEntries]); logActivity({ user: priest, actionType: 'إضافة_كارت_مخصص', targetTable: 'priest_custom_entries', targetId: data.id, description: `أضاف في كارت (${cardObj?.card_title}): ${data.title}` }); setCustomEntryForm({ title: '', entry_date: '', details: '' }); } }} className="bg-white p-4 rounded-3xl border space-y-2 font-bold">
-          <div className="grid md:grid-cols-2 gap-2"><input required placeholder="العنوان *" className="p-2.5 border rounded-xl" value={customEntryForm.title} onChange={e => setCustomEntryForm({ ...customEntryForm, title: e.target.value })} /><input type="date" className="p-2.5 border rounded-xl" value={customEntryForm.entry_date} onChange={e => setCustomEntryForm({ ...customEntryForm, entry_date: e.target.value })} /></div>
-          <textarea placeholder="التفاصيل..." className="w-full p-2.5 border rounded-xl" rows="2" value={customEntryForm.details} onChange={e => setCustomEntryForm({ ...customEntryForm, details: e.target.value })} />
-          <button type="submit" className="px-5 py-2.5 bg-[#7a1c24] text-white rounded-xl">+ إضافة</button>
-        </form>
-        {entries.map(en => (
-          <div key={en.id} className="bg-white p-4 rounded-2xl border flex justify-between items-start">
-            <div><strong className="text-base">{en.title}</strong> {en.entry_date && <span className="text-gray-500">({en.entry_date})</span>}{en.details && <p className="text-gray-700 mt-1">{en.details}</p>}</div>
-            <button type="button" onClick={async () => { await supabase.from('priest_custom_entries').delete().eq('id', en.id); setCustomEntries(customEntries.filter(x => x.id !== en.id)); }} className="p-2 bg-red-50 text-red-700 rounded-lg"><Trash2 size={15} /></button>
+        {activeCard === 'joseph_arimathea' && (
+          <div className="space-y-4">
+            {renderTopBar('🕊️ خدمة يوسف الرامي')}
+            <JosephArimatheaManager currentUser={priest} todayISO={todayISO} onOpenWhatsApp={openWhatsAppComposer} />
           </div>
-        ))}
-        {renderGlobalModals()}
-      </div>
-    );
-  }
+        )}
 
-  return null;
+        {activeCard.startsWith('custom:') && (() => {
+          const cardId = activeCard.split(':')[1], cardObj = customCards.find(c => c.id === cardId), entries = customEntries.filter(e => e.card_id === cardId);
+          return (
+            <div className="space-y-4">
+              {renderTopBar(`${cardObj?.card_icon || '📌'} ${cardObj?.card_title || 'كارت مخصص'}`)}
+              <form onSubmit={async e => { e.preventDefault(); const { data } = await supabase.from('priest_custom_entries').insert([{ ...customEntryForm, card_id: cardId, priest_id: priest.id, entry_date: customEntryForm.entry_date || null }]).select().single(); if (data) { setCustomEntries([data, ...customEntries]); logActivity({ user: priest, actionType: 'إضافة_كارت_مخصص', targetTable: 'priest_custom_entries', targetId: data.id, description: `أضاف في كارت (${cardObj?.card_title}): ${data.title}` }); setCustomEntryForm({ title: '', entry_date: '', details: '' }); } }} className="bg-white p-4 rounded-3xl border space-y-2 font-bold">
+                <div className="grid md:grid-cols-2 gap-2"><input required placeholder="العنوان *" className="p-2.5 border rounded-xl" value={customEntryForm.title} onChange={e => setCustomEntryForm({ ...customEntryForm, title: e.target.value })} /><input type="date" className="p-2.5 border rounded-xl" value={customEntryForm.entry_date} onChange={e => setCustomEntryForm({ ...customEntryForm, entry_date: e.target.value })} /></div>
+                <textarea placeholder="التفاصيل..." className="w-full p-2.5 border rounded-xl" rows="2" value={customEntryForm.details} onChange={e => setCustomEntryForm({ ...customEntryForm, details: e.target.value })} />
+                <button type="submit" className="px-5 py-2.5 bg-[#7a1c24] text-white rounded-xl">+ إضافة</button>
+              </form>
+              {entries.map(en => (
+                <div key={en.id} className="bg-white p-4 rounded-2xl border flex justify-between items-start">
+                  <div><strong className="text-base">{en.title}</strong> {en.entry_date && <span className="text-gray-500">({en.entry_date})</span>}{en.details && <p className="text-gray-700 mt-1">{en.details}</p>}</div>
+                  <button type="button" onClick={async () => { await supabase.from('priest_custom_entries').delete().eq('id', en.id); setCustomEntries(customEntries.filter(x => x.id !== en.id)); }} className="p-2 bg-red-50 text-red-700 rounded-lg"><Trash2 size={15} /></button>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+      </div>
+
+      {renderGlobalModals()}
+    </div>
+  );
 }

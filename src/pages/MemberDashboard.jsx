@@ -15,17 +15,25 @@ const normalizeText = (val = '') =>
     .replace(/ة/g, 'ه')
     .replace(/\s+/g, ' ');
 
+const splitList = (val) =>
+  String(val || '')
+    .split(/[,،]/)
+    .map(s => s.trim())
+    .filter(Boolean);
+
 export default function MemberDashboard({
   member,
   servants = [],
   events = [],
   services = [],
+  serviceGroups = [],
   attendance = [],
   confessionSlots = [],
   priestMasses = [],
   priests = [],
   onMemberUpdated
 }) {
+  const [activeTab, setActiveTab] = useState('services'); // 'services' | 'confessions' | 'masses' | 'trips'
   const [selectedPriestId, setSelectedPriestId] = useState(member?.confession_father_id || '');
   const [savingFather, setSavingFather] = useState(false);
   const [filterPriestId, setFilterPriestId] = useState(member?.confession_father_id || 'all');
@@ -89,200 +97,156 @@ export default function MemberDashboard({
     };
   }, [member?.id]);
 
-  const memberClass = (member?.assigned_class || '').trim();
-  const memberGeneralService = (member?.general_service_name || '').trim();
-  const memberStage = (member?.detailed_stage || member?.service_stage || '').trim();
-  const memberSector = (member?.sector || '').trim();
-  const memberServiceId = member?.service_id || null;
+  // بناء كارت مستقل لكل خدمة أو فصل مشترك فيه المخدوم
+  const myServiceCards = useMemo(() => {
+    if (!member) return [];
 
-  const extraServices = useMemo(
-    () => (Array.isArray(member?.permissions?.extra_services) ? member.permissions.extra_services : []),
-    [member?.permissions?.extra_services]
-  );
+    const assignedClasses = splitList(member.assigned_class);
+    const generalNames = splitList(member.general_service_name);
+    const detailedStages = splitList(member.detailed_stage || member.service_stage);
+    const extraServices = Array.isArray(member?.permissions?.extra_services)
+      ? member.permissions.extra_services.map(s => String(s || '').trim()).filter(Boolean)
+      : [];
 
-  const normMemberClass = normalizeText(memberClass);
-  const normMemberGeneral = normalizeText(memberGeneralService);
-  const normMemberStage = normalizeText(memberStage);
-  const normMemberSector = normalizeText(memberSector);
-  const normExtraServices = useMemo(
-    () => extraServices.map(ex => normalizeText(ex)).filter(Boolean),
-    [extraServices]
-  );
+    const matchedMap = new Map();
 
-  const hasSpecificClass = Boolean(normMemberClass);
-  const isGeneralServiceMember =
-    !hasSpecificClass &&
-    Boolean(
-      normMemberGeneral ||
-      normMemberStage.includes('عام') ||
-      normMemberSector.includes('عام') ||
-      (memberServiceId &&
-        services.some(
-          s =>
-            s.id === memberServiceId &&
-            (s.is_general_service === true || s.has_classes === false || s.service_type === 'general')
-        ))
-    );
+    const getServantsForTarget = (targetTokens = [], targetServiceId = null) => {
+      const normTokens = targetTokens.map(t => normalizeText(t)).filter(Boolean);
+      return servants.filter(sv => {
+        if (targetServiceId && sv.service_id === targetServiceId) return true;
+        const svTokens = [
+          ...splitList(sv.assigned_class),
+          ...splitList(sv.detailed_stage || sv.service_stage),
+          ...splitList(sv.general_service_name),
+          ...splitList(sv.sector),
+          ...(Array.isArray(sv.permissions?.extra_services) ? sv.permissions.extra_services : [])
+        ].map(t => normalizeText(t)).filter(Boolean);
 
-  // تحديد الفصل الخاص فقط أو الخدمة العامة الكاملة للمخدوم
-  const myServices = useMemo(() => {
-    const classNamesInStage = new Set(
-      services
-        .filter(s => {
-          const isGeneral =
-            s.is_general_service === true ||
-            s.has_classes === false ||
-            s.service_type === 'general';
-          if (isGeneral) return false;
-          const st = normalizeText(s.stage_name);
-          const cl = normalizeText(s.class_name);
-          return (normMemberStage && st === normMemberStage) || (normMemberSector && cl === normMemberSector);
-        })
-        .map(s => normalizeText(s.class_name))
-        .filter(Boolean)
-    );
+        return normTokens.some(tk => svTokens.includes(tk));
+      });
+    };
 
-    return services.filter(srv => {
-      const srvClassNorm = normalizeText(srv.class_name);
-      const srvStageNorm = normalizeText(srv.stage_name);
+    const addCard = ({ key, title, stageLabel, kindLabel, meetingTime, roomName, headServant, serviceId, matchTokens }) => {
+      const normKey = normalizeText(key || title);
+      if (!normKey || matchedMap.has(normKey)) return;
+      matchedMap.set(normKey, {
+        id: normKey,
+        title,
+        stageLabel,
+        kindLabel,
+        meetingTime,
+        roomName,
+        headServant,
+        servants: getServantsForTarget(matchTokens, serviceId)
+      });
+    };
 
-      // خدمات إضافية مفعلة صراحةً للمخدوم
-      if (
-        normExtraServices.some(
-          ex =>
-            (srvClassNorm && srvClassNorm === ex) ||
-            (srvStageNorm && srvStageNorm === ex)
-        )
-      ) {
-        return true;
+    // 1) إذا كان للمخدوم service_id محدد
+    if (member.service_id) {
+      const exactSrv = services.find(s => s.id === member.service_id);
+      if (exactSrv) {
+        addCard({
+          key: `srv-${exactSrv.id}`,
+          title: exactSrv.class_name || exactSrv.stage_name,
+          stageLabel: exactSrv.stage_name || 'خدمة',
+          kindLabel: exactSrv.has_classes === false ? 'خدمة عامة' : 'فصلك',
+          meetingTime: exactSrv.meeting_time,
+          roomName: exactSrv.room_name,
+          headServant: exactSrv.head_servant_name,
+          serviceId: exactSrv.id,
+          matchTokens: [exactSrv.class_name, exactSrv.stage_name]
+        });
       }
+    }
 
-      // لو المخدوم مسكن في فصل محدد: يظهر فصله فقط
-      if (hasSpecificClass) {
-        if (memberServiceId && srv.id === memberServiceId) return true;
-        return srvClassNorm === normMemberClass;
+    // 2) كل فصل مسجل فيه المخدوم في assigned_class
+    assignedClasses.forEach(clsName => {
+      const normCls = normalizeText(clsName);
+      const foundSrv = services.find(s => normalizeText(s.class_name) === normCls);
+      if (foundSrv) {
+        addCard({
+          key: `cls-${normCls}`,
+          title: foundSrv.class_name,
+          stageLabel: foundSrv.stage_name || 'فصل',
+          kindLabel: 'فصلك',
+          meetingTime: foundSrv.meeting_time,
+          roomName: foundSrv.room_name,
+          headServant: foundSrv.head_servant_name,
+          serviceId: foundSrv.id,
+          matchTokens: [foundSrv.class_name, foundSrv.stage_name]
+        });
+      } else {
+        addCard({
+          key: `cls-${normCls}`,
+          title: clsName,
+          stageLabel: detailedStages[0] || 'فصل',
+          kindLabel: 'فصلك',
+          meetingTime: '',
+          roomName: '',
+          headServant: '',
+          serviceId: null,
+          matchTokens: [clsName]
+        });
       }
-
-      // لو المخدوم في خدمة عامة بدون فصول: تظهر الخدمة العامة الخاصة به كاملة
-      const isGeneralServiceItem =
-        srv.is_general_service === true ||
-        srv.has_classes === false ||
-        srv.service_type === 'general' ||
-        normMemberGeneral ||
-        normMemberStage.includes('عام') ||
-        normMemberSector.includes('عام') ||
-        (srvClassNorm && srvClassNorm.includes('عام')) ||
-        (srvStageNorm && srvStageNorm.includes('عام')) ||
-        (!srvClassNorm && normMemberStage && srvStageNorm === normMemberStage);
-
-      if (!isGeneralServiceItem) return false;
-
-      if (memberServiceId && srv.id === memberServiceId) return true;
-
-      const targetGeneralNames = [normMemberGeneral, normMemberStage, normMemberSector].filter(Boolean);
-      if (targetGeneralNames.length > 0) {
-        if (
-          targetGeneralNames.includes(srvStageNorm) ||
-          targetGeneralNames.includes(srvClassNorm)
-        ) {
-          return true;
-        }
-        if (
-          normMemberStage &&
-          srvClassNorm &&
-          !classNamesInStage.has(srvClassNorm) &&
-          srvClassNorm.includes(normMemberStage)
-        ) {
-          return true;
-        }
-      }
-
-      return false;
     });
-  }, [
-    services,
-    normExtraServices,
-    hasSpecificClass,
-    memberServiceId,
-    normMemberClass,
-    normMemberGeneral,
-    normMemberStage,
-    normMemberSector
-  ]);
 
-  // خدام الفصل فقط، أو خدام الخدمة العامة الكاملة إذا كان المخدوم في خدمة عامة بلا فصول
-  const myClassServants = useMemo(() => {
-    const allowedServiceNames = new Set(
-      myServices
-        .flatMap(s => [normalizeText(s.class_name), normalizeText(s.stage_name)])
-        .filter(Boolean)
-    );
+    // 3) الخدمات الإضافية أو المراحل/الخدمات العامة المشترك بها
+    const otherNames = [...new Set([...generalNames, ...extraServices, ...(assignedClasses.length === 0 ? detailedStages : [])])]
+      .filter(n => n && normalizeText(n) !== 'شعب عام');
 
-    const allowedServiceIds = new Set(
-      myServices.map(s => s.id).filter(Boolean)
-    );
+    otherNames.forEach(srvName => {
+      const normName = normalizeText(srvName);
+      // لو نفس الاسم مغطى بالفعل عبر فصل محدد بنفس المرحلة وكان المخدوم في فصل محدد فقط، ما نكرروش إلا لو مشترك في خدمة إضافية/عامة مستقلة
+      const isExplicitExtra = extraServices.some(ex => normalizeText(ex) === normName) || generalNames.some(gn => normalizeText(gn) === normName);
+      if (assignedClasses.length > 0 && !isExplicitExtra && detailedStages.length <= 1) return;
 
-    return servants.filter(s => {
-      const sClassNorm = normalizeText(s.assigned_class);
-      const sGeneralNorm = normalizeText(s.general_service_name);
-      const sStageNorm = normalizeText(s.detailed_stage || s.service_stage);
-      const sSectorNorm = normalizeText(s.sector);
+      const grp = serviceGroups.find(g => normalizeText(g.group_name) === normName);
+      const srvRow = services.find(s => normalizeText(s.stage_name) === normName || normalizeText(s.class_name) === normName);
 
-      if (
-        normExtraServices.some(
-          ex =>
-            (sClassNorm && sClassNorm === ex) ||
-            (sGeneralNorm && sGeneralNorm === ex) ||
-            (sStageNorm && sStageNorm === ex) ||
-            (sSectorNorm && sSectorNorm === ex)
-        )
-      ) {
-        return true;
+      if (grp) {
+        addCard({
+          key: `grp-${normName}`,
+          title: grp.group_name,
+          stageLabel: grp.gender_target || 'خدمة',
+          kindLabel: grp.has_classes === false ? 'اجتماع / خدمة عامة' : 'خدمة مشترك بها',
+          meetingTime: grp.service_day ? `${grp.service_day} ${grp.start_time || ''}` : (srvRow?.meeting_time || ''),
+          roomName: srvRow?.room_name || '',
+          headServant: grp.head_servant_name || srvRow?.head_servant_name || '',
+          serviceId: srvRow?.id || null,
+          matchTokens: [grp.group_name]
+        });
+      } else if (srvRow) {
+        addCard({
+          key: `srvname-${normName}`,
+          title: srvRow.stage_name || srvRow.class_name,
+          stageLabel: srvRow.stage_name || 'خدمة',
+          kindLabel: 'خدمة مشترك بها',
+          meetingTime: srvRow.meeting_time || '',
+          roomName: srvRow.room_name || '',
+          headServant: srvRow.head_servant_name || '',
+          serviceId: srvRow.id,
+          matchTokens: [srvName, srvRow.class_name, srvRow.stage_name]
+        });
+      } else {
+        addCard({
+          key: `custom-${normName}`,
+          title: srvName,
+          stageLabel: 'خدمة',
+          kindLabel: 'خدمة مشترك بها',
+          meetingTime: '',
+          roomName: '',
+          headServant: '',
+          serviceId: null,
+          matchTokens: [srvName]
+        });
       }
-
-      if (hasSpecificClass) {
-        if (s.service_id && allowedServiceIds.has(s.service_id)) return true;
-        return sClassNorm === normMemberClass;
-      }
-
-      if (s.service_id && allowedServiceIds.has(s.service_id)) return true;
-      if (
-        allowedServiceNames.has(sClassNorm) ||
-        allowedServiceNames.has(sGeneralNorm) ||
-        allowedServiceNames.has(sStageNorm) ||
-        allowedServiceNames.has(sSectorNorm)
-      ) {
-        return true;
-      }
-
-      const targetGeneralNames = [normMemberGeneral, normMemberStage, normMemberSector].filter(Boolean);
-      if (
-        targetGeneralNames.some(
-          tg =>
-            (sGeneralNorm && sGeneralNorm === tg) ||
-            (sStageNorm && sStageNorm === tg) ||
-            (sClassNorm && sClassNorm === tg) ||
-            (sSectorNorm && sSectorNorm === tg)
-        )
-      ) {
-        return true;
-      }
-
-      return false;
     });
-  }, [
-    servants,
-    myServices,
-    normExtraServices,
-    hasSpecificClass,
-    normMemberClass,
-    normMemberGeneral,
-    normMemberStage,
-    normMemberSector
-  ]);
+
+    return Array.from(matchedMap.values());
+  }, [member, services, serviceGroups, servants]);
 
   const onlyMassEvents = useMemo(
-    () => events.filter(ev => (ev.event_type || '').includes('قداس')),
+    () => events.filter(ev => (ev.event_type || '').includes('قداس') || (ev.event_type || '').includes('عشية')),
     [events]
   );
 
@@ -464,15 +428,9 @@ export default function MemberDashboard({
     [myBookings]
   );
 
-  const scopeBadgeText = hasSpecificClass
-    ? `🏫 فصلك الخاص: ${memberClass}`
-    : isGeneralServiceMember || memberStage || memberSector
-      ? `🌐 خدمتك العامة: ${memberGeneralService || memberStage || memberSector}`
-      : 'غير مسكن بعد';
-
   return (
-    <div className="space-y-4 text-xs" dir="rtl">
-      {/* كارت الترحيب الاحترافي */}
+    <div className="space-y-3 text-xs" dir="rtl">
+      {/* كارت الترحيب */}
       <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-4">
         <div className="space-y-2">
           <h2 className="text-base sm:text-xl font-black text-amber-300">أهلاً بك، {member?.full_name}</h2>
@@ -481,17 +439,21 @@ export default function MemberDashboard({
               {myConfFather ? `✝ أب الاعتراف: ${myConfFather.full_name}` : 'لم يتم تحديد أب الاعتراف بعد'}
             </span>
             <span className="px-2.5 py-1 bg-amber-400/20 text-amber-200 rounded-xl font-bold">
-              {scopeBadgeText}
+              {myServiceCards.length > 1
+                ? `📚 مشترك في ${myServiceCards.length} خدمات`
+                : myServiceCards.length === 1
+                  ? `🏫 خدمتك: ${myServiceCards[0].title}`
+                  : 'غير مسكن في خدمة بعد'}
             </span>
           </div>
         </div>
 
         <div className="grid grid-cols-2 sm:flex items-center gap-2.5 shrink-0">
-          <div className="bg-white/15 border border-white/15 px-3.5 py-2.5 rounded-2xl text-center">
+          <div className="bg-white/15 border border-white/15 px-3.5 py-2 rounded-2xl text-center">
             <span className="text-[10px] opacity-85 font-bold block">حجوزات الاعتراف</span>
             <strong className="text-sm sm:text-base text-white font-black">{activeBookingsCount}</strong>
           </div>
-          <div className="bg-white/15 border border-white/15 px-4 py-2.5 rounded-2xl text-center">
+          <div className="bg-white/15 border border-white/15 px-4 py-2 rounded-2xl text-center">
             <span className="text-[10px] opacity-85 font-bold block">نسبة حضورك</span>
             <strong className="text-base sm:text-lg text-amber-200 font-black">
               {myAtt.length > 0 ? `${Math.round((presentCount / myAtt.length) * 100)}%` : 'جديد'}
@@ -502,11 +464,11 @@ export default function MemberDashboard({
 
       {/* اختيار أب الاعتراف لأول مرة */}
       {!member?.confession_father_id && (
-        <form onSubmit={handleChooseConfessionFather} className="bg-amber-50 border-2 border-amber-300 p-4 rounded-3xl space-y-3 shadow-sm">
+        <form onSubmit={handleChooseConfessionFather} className="bg-amber-50 border-2 border-amber-300 p-4 rounded-3xl space-y-2.5 shadow-sm">
           <strong className="text-sm text-amber-950 flex items-center gap-1.5">
             <UserCheck size={17} className="text-[#7a1c24]" /> تحديد أب الاعتراف لأول مرة:
           </strong>
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             <select
               required
               className="w-full sm:max-w-md p-2.5 border border-amber-300 rounded-xl bg-white font-bold outline-none focus:border-[#7a1c24]"
@@ -529,330 +491,368 @@ export default function MemberDashboard({
         </form>
       )}
 
-      {/* فصله الخاص فقط أو خدمته العامة الكاملة وخدامه */}
-      <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3.5">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
-          <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5">
-            <BookOpen size={17} />
-            {hasSpecificClass ? 'فصلك الخاص وخدام فصلك فقط' : 'خدمتك العامة وخدام خدمتك'}
-          </h3>
-          <span className="px-2.5 py-1 rounded-xl bg-[#fbfaf7] border border-gray-200 text-[11px] font-bold text-gray-700 flex items-center gap-1">
-            <Layers size={13} className="text-[#7a1c24]" />
-            {hasSpecificClass
-              ? `نطاق محصور بالفصل: ${memberClass}`
-              : `نطاق الخدمة العامة: ${memberGeneralService || memberStage || memberSector || 'عام'}`}
-          </span>
-        </div>
+      {/* شريط التابات المنظم */}
+      <div className="bg-white p-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto font-black">
+        <button
+          type="button"
+          onClick={() => setActiveTab('services')}
+          className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'services' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+          }`}
+        >
+          <BookOpen size={14} /> خدماتي ({myServiceCards.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('confessions')}
+          className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'confessions' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+          }`}
+        >
+          <Clock size={14} /> مواعيد الاعتراف ({displayedSlots.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('masses')}
+          className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'masses' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+          }`}
+        >
+          <Calendar size={14} /> القداسات والصلوات
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('trips')}
+          className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'trips' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+          }`}
+        >
+          <Bus size={14} /> الرحلات ({publicTrips.length})
+        </button>
+      </div>
 
-        {myServices.length === 0 && myClassServants.length === 0 ? (
-          <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
-            لم يتم تسكينك في فصل أو خدمة عامة بعد. راجع خادمك أو أدمن الكنيسة.
-          </div>
-        ) : (
-          <div className="space-y-3.5">
-            {myServices.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                {myServices.map(srv => {
-                  const itemIsGeneral =
-                    srv.is_general_service === true ||
-                    srv.has_classes === false ||
-                    srv.service_type === 'general';
-                  return (
-                    <div key={srv.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl space-y-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="px-2 py-0.5 rounded-lg bg-blue-50 text-blue-800 font-bold text-[10px]">
-                          {srv.stage_name || 'خدمة'}
-                        </span>
-                        <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-950 font-black text-[10px]">
-                          {itemIsGeneral || !hasSpecificClass ? 'خدمة عامة كاملة' : 'فصلك فقط'}
-                        </span>
+      {/* محتوى التاب داخل حاوية Scroll */}
+      <div className="max-h-[calc(100vh-260px)] overflow-y-auto pr-1 space-y-3">
+        {activeTab === 'services' && (
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+              <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5">
+                <BookOpen size={17} />
+                {myServiceCards.length > 1 ? `الخدمات المشترك بها (${myServiceCards.length} كروت)` : 'خدمتك الخاصة وخدامك'}
+              </h3>
+              <span className="px-2.5 py-1 rounded-xl bg-[#fbfaf7] border border-gray-200 text-[11px] font-bold text-gray-700 flex items-center gap-1">
+                <Layers size={13} className="text-[#7a1c24]" />
+                {myServiceCards.length > 1 ? 'كارت مستقل لكل خدمة' : 'تظهر خدمتك فقط'}
+              </span>
+            </div>
+
+            {myServiceCards.length === 0 ? (
+              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+                لم يتم تسكينك في فصل أو خدمة بعد. راجع خادمك أو أدمن الكنيسة.
+              </div>
+            ) : (
+              <div className={`grid gap-3.5 ${myServiceCards.length > 1 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
+                {myServiceCards.map(card => (
+                  <div key={card.id} className="p-4 bg-[#fbfaf7] border-2 border-amber-200/80 rounded-3xl space-y-3 shadow-2xs">
+                    <div className="flex items-start justify-between gap-2 border-b border-amber-200/60 pb-2.5">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                          <span className="px-2 py-0.5 rounded-lg bg-blue-100 text-blue-900 font-bold text-[10px]">
+                            {card.stageLabel}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-950 font-black text-[10px]">
+                            {card.kindLabel}
+                          </span>
+                        </div>
+                        <strong className="text-base text-[#7a1c24] block">{card.title}</strong>
                       </div>
-                      <strong className="block text-sm text-gray-900 pt-0.5">
-                        {srv.class_name || srv.stage_name}
-                      </strong>
-                      <p className="text-gray-500">
-                        ⏰ {srv.meeting_time || '—'} {srv.room_name && `• 📍 ${srv.room_name}`}
-                      </p>
+                      <span className="text-2xl">🏫</span>
+                    </div>
+
+                    <div className="space-y-1 text-gray-700 font-bold">
+                      {card.meetingTime && <p>⏰ الميعاد: {card.meetingTime}</p>}
+                      {card.roomName && <p>📍 القاعة / المكان: {card.roomName}</p>}
+                      {card.headServant && <p>⭐ أمين الخدمة / الفصل: {card.headServant}</p>}
+                    </div>
+
+                    <div className="pt-2 border-t border-gray-200 space-y-2">
+                      <span className="text-[11px] font-black text-gray-700 block">
+                        👥 خدام هذه الخدمة ({card.servants.length}):
+                      </span>
+                      {card.servants.length === 0 ? (
+                        <p className="text-[11px] text-gray-400">لا يوجد خدام مسجلون لهذه الخدمة حالياً.</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {card.servants.map(s => (
+                            <div key={s.id} className="p-2.5 bg-white border border-gray-200 rounded-2xl flex flex-wrap justify-between items-center gap-2">
+                              <div>
+                                <strong className="block text-gray-900 text-xs">{s.full_name}</strong>
+                                {s.phone && <span className="text-[11px] text-gray-500">📞 {s.phone}</span>}
+                              </div>
+                              {s.phone && (
+                                <div className="flex gap-1.5 shrink-0">
+                                  <a
+                                    href={`https://wa.me/2${String(s.phone).replace(/\D/g, '')}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="px-2.5 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold flex items-center gap-1 text-[11px]"
+                                  >
+                                    <MessageCircle size={12} /> واتس
+                                  </a>
+                                  <a
+                                    href={`tel:${s.phone}`}
+                                    className="px-2.5 py-1.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-bold flex items-center gap-1 text-[11px]"
+                                  >
+                                    <Phone size={12} /> اتصال
+                                  </a>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'confessions' && (
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2.5 border-b border-gray-100 pb-3">
+              <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5">
+                <Clock size={17} /> مواعيد الاعتراف للآباء الكهنة
+              </h3>
+              <select
+                className="w-full sm:w-64 p-2.5 border border-gray-200 rounded-xl bg-[#fbfaf7] font-bold text-xs outline-none focus:border-[#7a1c24]"
+                value={filterPriestId}
+                onChange={e => setFilterPriestId(e.target.value)}
+              >
+                <option value="all">كل آباء الكنيسة</option>
+                {priests.map(p => (
+                  <option key={p.id} value={p.id}>{p.full_name}</option>
+                ))}
+              </select>
+            </div>
+
+            {displayedSlots.length === 0 ? (
+              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+                لا توجد مواعيد اعتراف قادمة منشورة حالياً.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {displayedSlots.map(s => {
+                  const slotPriest = priests.find(p => p.id === s.priest_id);
+                  const activeBooking = myBookings.find(b => b.slot_id === s.id && b.status === 'محجوز');
+
+                  return (
+                    <div
+                      key={s.id}
+                      className={`p-4 rounded-2xl border flex flex-col justify-between gap-3 ${
+                        s.is_cancelled ? 'bg-red-50/70 border-red-200' : 'bg-[#fbfaf7] border-gray-200'
+                      }`}
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-start gap-2">
+                          <strong className="text-sm text-gray-900">{s.confession_title} ({s.period})</strong>
+                          <span
+                            className={`px-2.5 py-1 rounded-full font-bold text-[10px] flex items-center gap-1 shrink-0 ${
+                              s.is_cancelled ? 'bg-red-600 text-white' : 'bg-green-100 text-green-800'
+                            }`}
+                          >
+                            {s.is_cancelled ? (
+                              <><AlertCircle size={12} /> معتذر</>
+                            ) : (
+                              <><CheckCircle2 size={12} /> متاح</>
+                            )}
+                          </span>
+                        </div>
+
+                        {slotPriest && <span className="text-[#7a1c24] font-black block">✝ {slotPriest.full_name}</span>}
+                        <div className="flex flex-wrap gap-x-3 gap-y-1 text-gray-600">
+                          <span>📅 {s.slot_date}</span>
+                          <span>⏰ {s.start_time} - {s.end_time}</span>
+                        </div>
+                        {s.location && (
+                          <span className="text-gray-500 flex items-center gap-1">
+                            <MapPin size={12} className="text-[#7a1c24]" /> {s.location}
+                          </span>
+                        )}
+                        {s.is_cancelled && <p className="text-red-700 font-bold pt-1">⚠️ اعتذر أبونا: {s.cancel_reason}</p>}
+                      </div>
+
+                      {!s.is_cancelled && (
+                        <div className="pt-2 border-t border-gray-200/70">
+                          {activeBooking ? (
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 py-2 bg-blue-100 text-blue-900 rounded-xl font-black text-center">
+                                محجوز ✅
+                              </div>
+                              <button
+                                type="button"
+                                disabled={bookingBusy === s.id}
+                                onClick={() => handleCancelBooking(activeBooking)}
+                                className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold flex items-center gap-1 cursor-pointer transition"
+                              >
+                                <XCircle size={14} /> إلغاء
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={bookingBusy === s.id}
+                              onClick={() => handleBookSlot(s)}
+                              className="w-full py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black cursor-pointer transition"
+                            >
+                              {bookingBusy === s.id ? 'جاري الحجز...' : 'حجز ميعاد'}
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
             )}
+          </div>
+        )}
 
-            {myClassServants.length > 0 && (
-              <div className="space-y-2">
-                <span className="text-[11px] font-black text-gray-700 block">
-                  {hasSpecificClass
-                    ? `خدام فصل (${memberClass}):`
-                    : `خدام خدمة (${memberGeneralService || memberStage || memberSector || 'عام'}):`}
-                </span>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                  {myClassServants.map(s => (
-                    <div key={s.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-2.5">
-                      <div>
-                        <strong className="block text-gray-900 text-sm">{s.full_name}</strong>
-                        <span className="text-gray-500">
-                          {s.assigned_class || s.general_service_name || s.detailed_stage || s.service_stage || s.sector}
-                          {s.phone ? ` • 📞 ${s.phone}` : ''}
-                        </span>
+        {activeTab === 'masses' && (
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
+            <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
+              <Calendar size={17} /> مواعيد القداسات الإلهية والصلوات
+            </h3>
+            {priestMasses.filter(m => m.is_available).length === 0 && onlyMassEvents.length === 0 ? (
+              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+                لا توجد مواعيد قداسات أو صلوات منشورة حالياً.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {priestMasses.filter(m => m.is_available).map(m => (
+                  <div key={m.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded-lg bg-blue-100 text-blue-900 font-bold text-[10px]">{m.target_audience}</span>
+                        <strong className="text-sm text-gray-900">{m.mass_name}</strong>
                       </div>
-                      {s.phone && (
-                        <div className="grid grid-cols-2 sm:flex gap-1.5 shrink-0">
-                          <a
-                            href={`https://wa.me/2${String(s.phone).replace(/\D/g, '')}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold flex items-center justify-center gap-1"
-                          >
-                            <MessageCircle size={13} /> واتس
-                          </a>
-                          <a
-                            href={`tel:${s.phone}`}
-                            className="px-3 py-2 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-bold flex items-center justify-center gap-1"
-                          >
-                            <Phone size={13} /> اتصال
-                          </a>
-                        </div>
-                      )}
+                      <p className="text-gray-500 flex items-center gap-1">
+                        <MapPin size={12} className="text-[#7a1c24]" /> {m.church_name}
+                      </p>
                     </div>
-                  ))}
-                </div>
+                    <span className="self-start sm:self-center px-3 py-1 bg-red-50 text-[#7a1c24] rounded-xl font-black text-[11px] shrink-0">
+                      {m.mass_date} ({m.mass_time})
+                    </span>
+                  </div>
+                ))}
+                {onlyMassEvents.map(ev => (
+                  <div key={ev.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900 font-bold text-[10px]">{ev.event_type}</span>
+                        <strong className="text-sm text-gray-900">{ev.title}</strong>
+                      </div>
+                      <p className="text-gray-500 flex items-center gap-1">
+                        <MapPin size={12} className="text-[#7a1c24]" /> {ev.place}
+                      </p>
+                    </div>
+                    <span className="self-start sm:self-center px-3 py-1 bg-red-50 text-[#7a1c24] rounded-xl font-black text-[11px] shrink-0">
+                      {ev.event_time}
+                    </span>
+                  </div>
+                ))}
               </div>
             )}
           </div>
         )}
-      </div>
 
-      {/* مواعيد الاعتراف */}
-      <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
-        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2.5 border-b border-gray-100 pb-3">
-          <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5">
-            <Clock size={17} /> مواعيد الاعتراف للآباء الكهنة
-          </h3>
-          <select
-            className="w-full sm:w-64 p-2.5 border border-gray-200 rounded-xl bg-[#fbfaf7] font-bold text-xs outline-none focus:border-[#7a1c24]"
-            value={filterPriestId}
-            onChange={e => setFilterPriestId(e.target.value)}
-          >
-            <option value="all">كل آباء الكنيسة</option>
-            {priests.map(p => (
-              <option key={p.id} value={p.id}>{p.full_name}</option>
-            ))}
-          </select>
-        </div>
-
-        {displayedSlots.length === 0 ? (
-          <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
-            لا توجد مواعيد اعتراف قادمة منشورة حالياً.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {displayedSlots.map(s => {
-              const slotPriest = priests.find(p => p.id === s.priest_id);
-              const activeBooking = myBookings.find(b => b.slot_id === s.id && b.status === 'محجوز');
-
-              return (
-                <div
-                  key={s.id}
-                  className={`p-4 rounded-2xl border flex flex-col justify-between gap-3 ${
-                    s.is_cancelled ? 'bg-red-50/70 border-red-200' : 'bg-[#fbfaf7] border-gray-200'
-                  }`}
-                >
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between items-start gap-2">
-                      <strong className="text-sm text-gray-900">{s.confession_title} ({s.period})</strong>
-                      <span
-                        className={`px-2.5 py-1 rounded-full font-bold text-[10px] flex items-center gap-1 shrink-0 ${
-                          s.is_cancelled ? 'bg-red-600 text-white' : 'bg-green-100 text-green-800'
-                        }`}
-                      >
-                        {s.is_cancelled ? (
-                          <><AlertCircle size={12} /> معتذر</>
-                        ) : (
-                          <><CheckCircle2 size={12} /> متاح</>
-                        )}
-                      </span>
-                    </div>
-
-                    {slotPriest && <span className="text-[#7a1c24] font-black block">✝ {slotPriest.full_name}</span>}
-                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-gray-600">
-                      <span>📅 {s.slot_date}</span>
-                      <span>⏰ {s.start_time} - {s.end_time}</span>
-                    </div>
-                    {s.location && (
-                      <span className="text-gray-500 flex items-center gap-1">
-                        <MapPin size={12} className="text-[#7a1c24]" /> {s.location}
-                      </span>
-                    )}
-                    {s.is_cancelled && <p className="text-red-700 font-bold pt-1">⚠️ اعتذر أبونا: {s.cancel_reason}</p>}
-                  </div>
-
-                  {!s.is_cancelled && (
-                    <div className="pt-2 border-t border-gray-200/70">
-                      {activeBooking ? (
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 py-2 bg-blue-100 text-blue-900 rounded-xl font-black text-center">
-                            محجوز ✅
+        {activeTab === 'trips' && (
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
+            <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
+              <Bus size={17} /> رحلات الكنيسة المتاحة (للعرض والاشتراك)
+            </h3>
+            {publicTrips.length === 0 ? (
+              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+                لا توجد رحلات عامة معلنة حالياً.
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {publicTrips.map(tr => {
+                  const myReg = myTripRegs.find(r => r.trip_id === tr.id);
+                  const isOvernight = Number(tr.days_count || 1) > 1 || (Array.isArray(tr.rooms) && tr.rooms.length > 0);
+                  return (
+                    <div key={tr.id} className="p-4 bg-purple-50/40 border border-purple-200 rounded-2xl space-y-2.5">
+                      <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-3">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="px-2 py-0.5 bg-purple-100 text-purple-950 rounded-lg text-[10px] font-black">
+                              {tr.trip_category || 'رحلة عامة'}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${
+                                isOvernight ? 'bg-indigo-100 text-indigo-950' : 'bg-amber-100 text-amber-950'
+                              }`}
+                            >
+                              {isOvernight ? `🌙 ${tr.days_count} أيام` : '☀️ يوم واحد (داي يوز)'}
+                            </span>
+                            {Number(tr.cost_per_person) > 0 && (
+                              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded-lg text-[10px] font-black">
+                                💰 {tr.cost_per_person} ج.م
+                              </span>
+                            )}
                           </div>
+                          <strong className="text-sm sm:text-base text-gray-900 block">{tr.title}</strong>
+                          <p className="text-gray-600">
+                            📅 {tr.trip_date || 'قريباً'}
+                            {tr.gathering_time && ` • تجمع: ${tr.gathering_time}`}
+                            {tr.departure_time && ` • تحرك: ${tr.departure_time}`}
+                            {tr.return_time && ` • عودة: ${tr.return_time}`}
+                          </p>
+                        </div>
+
+                        {myReg ? (
+                          <div className="flex flex-wrap items-center gap-2 shrink-0">
+                            <span className="px-3.5 py-2 bg-green-100 text-green-900 rounded-xl font-black text-xs">
+                              ✅ تم تسجيل اشتراكك ({myReg.seats_count} فرد)
+                            </span>
+                            <button
+                              type="button"
+                              disabled={tripBusy === tr.id}
+                              onClick={() => handleCancelTripReg(myReg, tr.title)}
+                              className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold text-xs cursor-pointer transition"
+                            >
+                              إلغاء
+                            </button>
+                          </div>
+                        ) : (
                           <button
                             type="button"
-                            disabled={bookingBusy === s.id}
-                            onClick={() => handleCancelBooking(activeBooking)}
-                            className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold flex items-center gap-1 cursor-pointer transition"
+                            disabled={tripBusy === tr.id}
+                            onClick={() => handleJoinTrip(tr)}
+                            className="w-full sm:w-auto px-4 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black text-xs cursor-pointer shrink-0 transition"
                           >
-                            <XCircle size={14} /> إلغاء
+                            {tripBusy === tr.id ? 'جاري التسجيل...' : '✋ اشتراك في الرحلة'}
                           </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={bookingBusy === s.id}
-                          onClick={() => handleBookSlot(s)}
-                          className="w-full py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black cursor-pointer transition"
-                        >
-                          {bookingBusy === s.id ? 'جاري الحجز...' : 'حجز ميعاد'}
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* مواعيد القداسات فقط */}
-      <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
-        <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
-          <Calendar size={17} /> مواعيد القداسات الإلهية
-        </h3>
-        {priestMasses.filter(m => m.is_available).length === 0 && onlyMassEvents.length === 0 ? (
-          <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
-            لا توجد مواعيد قداسات منشورة حالياً.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {priestMasses.filter(m => m.is_available).map(m => (
-              <div key={m.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-2">
-                <div className="space-y-1">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="px-2 py-0.5 rounded-lg bg-blue-100 text-blue-900 font-bold text-[10px]">{m.target_audience}</span>
-                    <strong className="text-sm text-gray-900">{m.mass_name}</strong>
-                  </div>
-                  <p className="text-gray-500 flex items-center gap-1">
-                    <MapPin size={12} className="text-[#7a1c24]" /> {m.church_name}
-                  </p>
-                </div>
-                <span className="self-start sm:self-center px-3 py-1 bg-red-50 text-[#7a1c24] rounded-xl font-black text-[11px] shrink-0">
-                  {m.mass_date} ({m.mass_time})
-                </span>
-              </div>
-            ))}
-            {onlyMassEvents.map(ev => (
-              <div key={ev.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-2">
-                <div className="space-y-1">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900 font-bold text-[10px]">{ev.event_type}</span>
-                    <strong className="text-sm text-gray-900">{ev.title}</strong>
-                  </div>
-                  <p className="text-gray-500 flex items-center gap-1">
-                    <MapPin size={12} className="text-[#7a1c24]" /> {ev.place}
-                  </p>
-                </div>
-                <span className="self-start sm:self-center px-3 py-1 bg-red-50 text-[#7a1c24] rounded-xl font-black text-[11px] shrink-0">
-                  {ev.event_time}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* رحلات مكتب الرحلات العامة */}
-      <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
-        <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
-          <Bus size={17} /> رحلات الكنيسة المتاحة (للعرض والاشتراك)
-        </h3>
-        {publicTrips.length === 0 ? (
-          <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
-            لا توجد رحلات عامة معلنة حالياً.
-          </div>
-        ) : (
-          <div className="grid gap-3">
-            {publicTrips.map(tr => {
-              const myReg = myTripRegs.find(r => r.trip_id === tr.id);
-              const isOvernight = Number(tr.days_count || 1) > 1 || (Array.isArray(tr.rooms) && tr.rooms.length > 0);
-              return (
-                <div key={tr.id} className="p-4 bg-purple-50/40 border border-purple-200 rounded-2xl space-y-2.5">
-                  <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-3">
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="px-2 py-0.5 bg-purple-100 text-purple-950 rounded-lg text-[10px] font-black">
-                          {tr.trip_category || 'رحلة عامة'}
-                        </span>
-                        <span
-                          className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${
-                            isOvernight ? 'bg-indigo-100 text-indigo-950' : 'bg-amber-100 text-amber-950'
-                          }`}
-                        >
-                          {isOvernight ? `🌙 ${tr.days_count} أيام` : '☀️ يوم واحد (داي يوز)'}
-                        </span>
-                        {Number(tr.cost_per_person) > 0 && (
-                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded-lg text-[10px] font-black">
-                            💰 {tr.cost_per_person} ج.م
-                          </span>
                         )}
                       </div>
-                      <strong className="text-sm sm:text-base text-gray-900 block">{tr.title}</strong>
-                      <p className="text-gray-600">
-                        📅 {tr.trip_date || 'قريباً'}
-                        {tr.gathering_time && ` • تجمع: ${tr.gathering_time}`}
-                        {tr.departure_time && ` • تحرك: ${tr.departure_time}`}
-                        {tr.return_time && ` • عودة: ${tr.return_time}`}
-                      </p>
-                    </div>
 
-                    {myReg ? (
-                      <div className="flex flex-wrap items-center gap-2 shrink-0">
-                        <span className="px-3.5 py-2 bg-green-100 text-green-900 rounded-xl font-black text-xs">
-                          ✅ تم تسجيل اشتراكك ({myReg.seats_count} فرد)
-                        </span>
-                        <button
-                          type="button"
-                          disabled={tripBusy === tr.id}
-                          onClick={() => handleCancelTripReg(myReg, tr.title)}
-                          className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold text-xs cursor-pointer transition"
-                        >
-                          إلغاء
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={tripBusy === tr.id}
-                        onClick={() => handleJoinTrip(tr)}
-                        className="w-full sm:w-auto px-4 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black text-xs cursor-pointer shrink-0 transition"
-                      >
-                        {tripBusy === tr.id ? 'جاري التسجيل...' : '✋ اشتراك في الرحلة'}
-                      </button>
-                    )}
-                  </div>
-
-                  {tr.monasteries && (
-                    <p className="text-gray-800">
-                      ⛪ <strong>الأماكن والزيارات:</strong> {tr.monasteries}
-                    </p>
-                  )}
-                  {tr.daily_program && (
-                    <div className="p-3 bg-white border border-purple-100 rounded-xl text-gray-700 whitespace-pre-line">
-                      <strong className="text-[#7a1c24] block mb-1">📋 برنامج الرحلة التفصيلي:</strong>
-                      {tr.daily_program}
+                      {tr.monasteries && (
+                        <p className="text-gray-800">
+                          ⛪ <strong>الأماكن والزيارات:</strong> {tr.monasteries}
+                        </p>
+                      )}
+                      {tr.daily_program && (
+                        <div className="p-3 bg-white border border-purple-100 rounded-xl text-gray-700 whitespace-pre-line">
+                          <strong className="text-[#7a1c24] block mb-1">📋 برنامج الرحلة التفصيلي:</strong>
+                          {tr.daily_program}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>

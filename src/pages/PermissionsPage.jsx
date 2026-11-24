@@ -26,6 +26,12 @@ import {
   Square
 } from 'lucide-react';
 
+const LOCAL_ALL_SCREENS = Array.from(new Set([...ALL_SCREENS, 'hidden_families']));
+const LOCAL_SCREEN_LABELS = {
+  ...SCREEN_LABELS,
+  hidden_families: '🕊️ خدمة الأسر المستترة'
+};
+
 const ROLE_LABELS = {
   admin: '🛡️ سوبر أدمن',
   priest: '✝ أب كاهن',
@@ -42,6 +48,27 @@ const ROLE_LABELS = {
 const EMPTY_PERM_ROW = { view: false, create: false, edit: false, delete: false };
 
 export const DEFAULT_ROLE_TEMPLATES = [
+  {
+    key: 'tpl_hidden_families',
+    label: 'خادم الأسر المستترة (إضافة فقط — التعديل والحذف للكاهن والأدمن)',
+    base_role: 'mercy_servant',
+    screens: ['hidden_families', 'public_page'],
+    actions: {
+      can_view: true,
+      can_create: true,
+      can_edit: false,
+      can_delete: false,
+      view_cases: true,
+      manage_edu_center: false,
+      manage_trips: false,
+      manage_joseph: false,
+      can_edit_public: false
+    },
+    screen_permissions: {
+      hidden_families: { view: true, create: true, edit: false, delete: false },
+      public_page: { view: true, create: false, edit: false, delete: false }
+    }
+  },
   {
     key: 'tpl_parent',
     label: 'ولي الأمر (أب / أم — متابعة الأبناء)',
@@ -115,6 +142,7 @@ export const DEFAULT_ROLE_TEMPLATES = [
     base_role: 'priest',
     screens: [
       'priest_panel',
+      'hidden_families',
       'servant_panel',
       'member_panel',
       'public_page',
@@ -142,6 +170,7 @@ export const DEFAULT_ROLE_TEMPLATES = [
     },
     screen_permissions: {
       priest_panel: { view: true, create: true, edit: true, delete: true },
+      hidden_families: { view: true, create: true, edit: true, delete: true },
       servant_panel: { view: true, create: true, edit: true, delete: false },
       member_panel: { view: true, create: false, edit: false, delete: false },
       public_page: { view: true, create: false, edit: false, delete: false },
@@ -232,7 +261,7 @@ function normalizeScreenPermRow(row = {}) {
 
 export const buildScreenPermissionsMap = (screens = [], actions = {}, existingMap = {}) => {
   const map = {};
-  ALL_SCREENS.forEach((scrKey) => {
+  LOCAL_ALL_SCREENS.forEach((scrKey) => {
     const prev = existingMap?.[scrKey];
     const hasExplicit = prev && typeof prev === 'object';
     const isVisible = hasExplicit ? Boolean(prev.view) : screens.includes(scrKey);
@@ -251,7 +280,7 @@ export const buildScreenPermissionsMap = (screens = [], actions = {}, existingMa
 };
 
 export const extractAllowedScreensFromMap = (screenPermMap = {}) =>
-  ALL_SCREENS.filter((scrKey) => Boolean(screenPermMap?.[scrKey]?.view));
+  LOCAL_ALL_SCREENS.filter((scrKey) => Boolean(screenPermMap?.[scrKey]?.view));
 
 const EMPTY_TPL_FORM = {
   id: null,
@@ -272,9 +301,6 @@ const EMPTY_TPL_FORM = {
   }
 };
 
-/**
- * دمج جروبات البوليسي المختارة لمستخدم مع الحفاظ على أي استثناءات/تخصيصات فردية
- */
 function buildMergedUserFromPolicies(user, selectedPolicyKeys, allPolicies, preserveCustom = true) {
   const prevPerms = user?.permissions || {};
   const policyKeys = Array.from(new Set(selectedPolicyKeys || []));
@@ -291,8 +317,24 @@ function buildMergedUserFromPolicies(user, selectedPolicyKeys, allPolicies, pres
   const { mergedScreens, mergedActions, matchedPolicies } = mergeUserPolicies(syntheticUser, allPolicies);
 
   const nextScreenPerms = {};
-  ALL_SCREENS.forEach((scrKey) => {
-    const fromPolicies = mergedScreens[scrKey] || { ...EMPTY_PERM_ROW };
+  LOCAL_ALL_SCREENS.forEach((scrKey) => {
+    const fromPolicies = mergedScreens[scrKey] || (() => {
+      const hasAnySelectedWithScreen = matchedPolicies.some(
+        p => (p.screens || []).includes(scrKey) || p.screen_permissions?.[scrKey]?.view
+      );
+      if (!hasAnySelectedWithScreen) return { ...EMPTY_PERM_ROW };
+      return matchedPolicies.reduce((acc, p) => {
+        const sp = p.screen_permissions?.[scrKey];
+        if (!sp) return acc;
+        return {
+          view: acc.view || Boolean(sp.view),
+          create: acc.create || Boolean(sp.create),
+          edit: acc.edit || Boolean(sp.edit),
+          delete: acc.delete || Boolean(sp.delete)
+        };
+      }, { ...EMPTY_PERM_ROW });
+    })();
+
     const manualOverride = preserveCustom ? prevPerms?.manual_overrides?.[scrKey] : null;
     if (manualOverride && typeof manualOverride === 'object') {
       nextScreenPerms[scrKey] = normalizeScreenPermRow(manualOverride);
@@ -356,7 +398,7 @@ export default function PermissionsPage({
   const [syncUsersOnTplSave, setSyncUsersOnTplSave] = useState(true);
 
   const [bulkPolicyKeys, setBulkPolicyKeys] = useState(['tpl_parent']);
-  const [bulkMode, setBulkMode] = useState('merge'); // 'merge' (إضافة ودمج) | 'replace' (استبدال)
+  const [bulkMode, setBulkMode] = useState('merge');
   const [bulkSearch, setBulkSearch] = useState('');
   const [bulkRoleFilter, setBulkRoleFilter] = useState('all');
   const [bulkSelectedIds, setBulkSelectedIds] = useState([]);
@@ -442,6 +484,9 @@ export default function PermissionsPage({
       : (rawPerms.template_key ? [rawPerms.template_key] : []);
 
     const effectiveSet = resolveScreens(u, roleScreens, roleTemplates).allowed;
+    if (rawPerms.screen_permissions?.hidden_families?.view || (Array.isArray(rawPerms.allowed_screens) && rawPerms.allowed_screens.includes('hidden_families'))) {
+      effectiveSet.add('hidden_families');
+    }
     const baseScreens = Array.from(effectiveSet);
     const normalizedMap = buildScreenPermissionsMap(baseScreens, rawPerms, rawPerms.screen_permissions);
 
@@ -683,7 +728,6 @@ export default function PermissionsPage({
     alert('تم حفظ جروب البوليسي بنجاح ✅');
   };
 
-  // حذف أي جروب (سواء له dbId أو قالب افتراضي)
   const handleDeleteRoleTemplate = async (tpl) => {
     if (!requireAdminGuard()) return;
     const isDefaultTpl = DEFAULT_ROLE_TEMPLATES.some((d) => d.key === tpl.key);
@@ -777,9 +821,9 @@ export default function PermissionsPage({
     const editable = [];
     const deletable = [];
 
-    ALL_SCREENS.forEach((scrKey) => {
+    LOCAL_ALL_SCREENS.forEach((scrKey) => {
       const row = normalizeScreenPermRow(spMap[scrKey]);
-      const name = SCREEN_LABELS[scrKey] || scrKey;
+      const name = LOCAL_SCREEN_LABELS[scrKey] || scrKey;
       if (row.view) viewable.push(name);
       if (row.create) creatable.push(name);
       if (row.edit) editable.push(name);
@@ -813,45 +857,21 @@ export default function PermissionsPage({
             <Shield size={20} /> المركز الموحد للصلاحيات والأدوار وتعدد الجروبات (Multi-Group Policy)
           </h2>
           <p className="text-xs text-gray-500">
-            إمكانية ربط الشخص بأكثر من جروب بوليسي في نفس الوقت (مثلاً: أب كاهن + ولي أمر، أو خادم + ولي أمر، أو مخدوم + ولي أمر) مع دمج الصلاحيات تلقائياً.
+            إمكانية ربط الشخص بأكثر من جروب بوليسي في نفس الوقت (بما فيها خادم الأسر المستترة) مع دمج الصلاحيات تلقائياً.
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setTab('users')}
-            className={`px-4 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer ${
-              tab === 'users' ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
+          <button type="button" onClick={() => setTab('users')} className={`px-4 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer ${tab === 'users' ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
             <Users size={15} /> 👤 صلاحيات فرد معين
           </button>
-          <button
-            type="button"
-            onClick={() => setTab('templates')}
-            className={`px-4 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer ${
-              tab === 'templates' ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
+          <button type="button" onClick={() => setTab('templates')} className={`px-4 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer ${tab === 'templates' ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
             <ShieldCheck size={15} /> 🧩 قوالب Group Policy
           </button>
-          <button
-            type="button"
-            onClick={() => setTab('roles')}
-            className={`px-4 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer ${
-              tab === 'roles' ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
+          <button type="button" onClick={() => setTab('roles')} className={`px-4 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer ${tab === 'roles' ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
             <Layers size={15} /> 📋 الأدوار الأساسية
           </button>
-          <button
-            type="button"
-            onClick={() => setTab('bulk')}
-            className={`px-4 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer ${
-              tab === 'bulk' ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
+          <button type="button" onClick={() => setTab('bulk')} className={`px-4 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer ${tab === 'bulk' ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
             ⚡ تعيين جماعي لعدة أفراد
           </button>
         </div>
@@ -864,18 +884,9 @@ export default function PermissionsPage({
             <strong className="text-[#7a1c24] block">1) اختر الشخص لتحديد جروباته وصلاحياته</strong>
             <div className="relative">
               <Search size={14} className="absolute right-3 top-3 text-gray-400" />
-              <input
-                placeholder="ابحث بالاسم أو اليوزر أو الجروب..."
-                className="w-full pr-8 pl-3 py-2 border rounded-xl text-xs"
-                value={userSearch}
-                onChange={(e) => setUserSearch(e.target.value)}
-              />
+              <input placeholder="ابحث بالاسم أو اليوزر أو الجروب..." className="w-full pr-8 pl-3 py-2 border rounded-xl text-xs" value={userSearch} onChange={(e) => setUserSearch(e.target.value)} />
             </div>
-            <select
-              className="w-full p-2 border rounded-xl text-xs bg-gray-50 font-bold"
-              value={userRoleFilter}
-              onChange={(e) => setUserRoleFilter(e.target.value)}
-            >
+            <select className="w-full p-2 border rounded-xl text-xs bg-gray-50 font-bold" value={userRoleFilter} onChange={(e) => setUserRoleFilter(e.target.value)}>
               <option value="all">كل الأدوار ({users.length})</option>
               {Object.entries(ROLE_LABELS).map(([k, v]) => (
                 <option key={k} value={k}>{v}</option>
@@ -927,24 +938,13 @@ export default function PermissionsPage({
                 <div className="flex flex-wrap justify-between items-center border-b pb-3 gap-2">
                   <div>
                     <h3 className="text-base font-black text-[#7a1c24]">صلاحيات {selectedUser.full_name}</h3>
-                    <span className="text-xs text-gray-500">
-                      الدور الأساسي: {ROLE_LABELS[selectedUser.role] || selectedUser.role}
-                    </span>
+                    <span className="text-xs text-gray-500">الدور الأساسي: {ROLE_LABELS[selectedUser.role] || selectedUser.role}</span>
                   </div>
                   <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={clearUserManualOverrides}
-                      className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-xs cursor-pointer"
-                    >
+                    <button type="button" onClick={clearUserManualOverrides} className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-xs cursor-pointer">
                       مطابقة الجروبات فقط
                     </button>
-                    <button
-                      type="button"
-                      disabled={saving}
-                      onClick={handleSaveUserPermissions}
-                      className="px-5 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
-                    >
+                    <button type="button" disabled={saving} onClick={handleSaveUserPermissions} className="px-5 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer">
                       <Save size={15} /> {saving ? 'جاري الحفظ...' : 'حفظ صلاحيات الشخص ✅'}
                     </button>
                   </div>
@@ -952,12 +952,8 @@ export default function PermissionsPage({
 
                 <div className="bg-amber-50 p-3.5 rounded-2xl border border-amber-200 space-y-2">
                   <div className="flex justify-between items-center">
-                    <strong className="text-amber-950 text-xs block">
-                      ⚡ الجروبات / البوليسيز المرتبطة بالشخص (يمكن اختيار أكثر من جروب معاً)
-                    </strong>
-                    <span className="text-[11px] font-bold text-amber-800">
-                      مختار: {activeUserPolicyKeys.length}
-                    </span>
+                    <strong className="text-amber-950 text-xs block">⚡ الجروبات / البوليسيز المرتبطة بالشخص (يمكن اختيار أكثر من جروب معاً)</strong>
+                    <span className="text-[11px] font-bold text-amber-800">مختار: {activeUserPolicyKeys.length}</span>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     {roleTemplates.map((tpl) => {
@@ -968,9 +964,7 @@ export default function PermissionsPage({
                           type="button"
                           onClick={() => toggleUserPolicyGroup(tpl.key)}
                           className={`px-3 py-1.5 rounded-xl border text-xs font-bold cursor-pointer transition flex items-center gap-1.5 ${
-                            active
-                              ? 'bg-[#7a1c24] text-white border-[#7a1c24]'
-                              : 'bg-white hover:bg-amber-100 text-amber-950'
+                            active ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white hover:bg-amber-100 text-amber-950'
                           }`}
                         >
                           {active ? <CheckSquare size={13} /> : <Square size={13} />}
@@ -984,28 +978,16 @@ export default function PermissionsPage({
                 {selectedUserSummary && (
                   <div className="grid sm:grid-cols-3 gap-2.5 bg-slate-50 p-3.5 rounded-2xl border text-xs">
                     <div className="bg-white p-2.5 rounded-xl border">
-                      <span className="font-black text-emerald-700 flex items-center gap-1 mb-1">
-                        <Eye size={13} /> يقدر يشوف ({selectedUserSummary.viewable.length})
-                      </span>
-                      <p className="text-[11px] text-gray-700 leading-relaxed">
-                        {selectedUserSummary.viewable.length > 0 ? selectedUserSummary.viewable.join('، ') : 'لا يوجد'}
-                      </p>
+                      <span className="font-black text-emerald-700 flex items-center gap-1 mb-1"><Eye size={13} /> يقدر يشوف ({selectedUserSummary.viewable.length})</span>
+                      <p className="text-[11px] text-gray-700 leading-relaxed">{selectedUserSummary.viewable.length > 0 ? selectedUserSummary.viewable.join('، ') : 'لا يوجد'}</p>
                     </div>
                     <div className="bg-white p-2.5 rounded-xl border">
-                      <span className="font-black text-blue-700 flex items-center gap-1 mb-1">
-                        <Plus size={13} /> يقدر يضيف ({selectedUserSummary.creatable.length})
-                      </span>
-                      <p className="text-[11px] text-gray-700 leading-relaxed">
-                        {selectedUserSummary.creatable.length > 0 ? selectedUserSummary.creatable.join('، ') : 'لا يوجد'}
-                      </p>
+                      <span className="font-black text-blue-700 flex items-center gap-1 mb-1"><Plus size={13} /> يقدر يضيف ({selectedUserSummary.creatable.length})</span>
+                      <p className="text-[11px] text-gray-700 leading-relaxed">{selectedUserSummary.creatable.length > 0 ? selectedUserSummary.creatable.join('، ') : 'لا يوجد'}</p>
                     </div>
                     <div className="bg-white p-2.5 rounded-xl border">
-                      <span className="font-black text-amber-700 flex items-center gap-1 mb-1">
-                        <Edit3 size={13} /> يعدل / يحذف ({selectedUserSummary.editable.length} / {selectedUserSummary.deletable.length})
-                      </span>
-                      <p className="text-[11px] text-gray-700 leading-relaxed">
-                        {selectedUserSummary.editable.length > 0 ? selectedUserSummary.editable.join('، ') : 'عرض فقط'}
-                      </p>
+                      <span className="font-black text-amber-700 flex items-center gap-1 mb-1"><Edit3 size={13} /> يعدل / يحذف ({selectedUserSummary.editable.length} / {selectedUserSummary.deletable.length})</span>
+                      <p className="text-[11px] text-gray-700 leading-relaxed">{selectedUserSummary.editable.length > 0 ? selectedUserSummary.editable.join('، ') : 'عرض فقط'}</p>
                     </div>
                   </div>
                 )}
@@ -1013,58 +995,32 @@ export default function PermissionsPage({
                 <div className="grid sm:grid-cols-3 gap-3 bg-gray-50 p-3 rounded-2xl border">
                   <div>
                     <label className="block text-[11px] text-gray-600 mb-1 font-bold">المسمى الظاهر</label>
-                    <input
-                      className="w-full p-2 border rounded-xl bg-white text-xs font-bold"
-                      value={selectedUser.permissions?.custom_role_label || ''}
-                      onChange={(e) =>
-                        setSelectedUser({
-                          ...selectedUser,
-                          permissions: { ...selectedUser.permissions, custom_role_label: e.target.value }
-                        })
-                      }
-                    />
+                    <input className="w-full p-2 border rounded-xl bg-white text-xs font-bold" value={selectedUser.permissions?.custom_role_label || ''} onChange={(e) => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, custom_role_label: e.target.value } })} />
                   </div>
                   <div>
                     <label className="block text-[11px] text-gray-600 mb-1 font-bold">الدور الأساسي</label>
-                    <select
-                      className="w-full p-2 border rounded-xl bg-white text-xs font-bold"
-                      value={selectedUser.role}
-                      onChange={(e) => setSelectedUser({ ...selectedUser, role: e.target.value })}
-                    >
-                      {Object.entries(ROLE_LABELS)
-                        .filter(([k]) => k !== 'admin')
-                        .map(([k, v]) => (
-                          <option key={k} value={k}>{v}</option>
-                        ))}
+                    <select className="w-full p-2 border rounded-xl bg-white text-xs font-bold" value={selectedUser.role} onChange={(e) => setSelectedUser({ ...selectedUser, role: e.target.value })}>
+                      {Object.entries(ROLE_LABELS).filter(([k]) => k !== 'admin').map(([k, v]) => (
+                        <option key={k} value={k}>{v}</option>
+                      ))}
                     </select>
                   </div>
                   <div>
                     <label className="block text-[11px] text-gray-600 mb-1 font-bold">الشاشة الافتراضية عند الدخول</label>
-                    <select
-                      className="w-full p-2 border rounded-xl bg-white text-xs font-bold"
-                      value={selectedUser.permissions?.default_screen || ''}
-                      onChange={(e) =>
-                        setSelectedUser({
-                          ...selectedUser,
-                          permissions: { ...selectedUser.permissions, default_screen: e.target.value }
-                        })
-                      }
-                    >
+                    <select className="w-full p-2 border rounded-xl bg-white text-xs font-bold" value={selectedUser.permissions?.default_screen || ''} onChange={(e) => setSelectedUser({ ...selectedUser, permissions: { ...selectedUser.permissions, default_screen: e.target.value } })}>
                       <option value="">(حسب افتراضي الدور / الجروب)</option>
-                      {ALL_SCREENS.map((scr) => (
-                        <option key={scr} value={scr}>{SCREEN_LABELS[scr] || scr}</option>
+                      {LOCAL_ALL_SCREENS.map((scr) => (
+                        <option key={scr} value={scr}>{LOCAL_SCREEN_LABELS[scr] || scr}</option>
                       ))}
                     </select>
                   </div>
                 </div>
 
                 <div className="bg-emerald-50/40 p-3.5 rounded-2xl border border-emerald-200 space-y-2.5">
-                  <strong className="text-emerald-950 block">
-                    🖥️ جدول الشاشات الفعلي للشخص (يشوف / يضيف / يعدل / يحذف)
-                  </strong>
-                  <div className="overflow-x-auto bg-white rounded-2xl border">
+                  <strong className="text-emerald-950 block">🖥️ جدول الشاشات الفعلي للشخص (يشوف / يضيف / يعدل / يحذف)</strong>
+                  <div className="overflow-x-auto bg-white rounded-2xl border max-h-96 overflow-y-auto">
                     <table className="w-full text-right text-xs">
-                      <thead className="bg-gray-100 text-gray-800">
+                      <thead className="bg-gray-100 text-gray-800 sticky top-0">
                         <tr>
                           <th className="p-2.5">الشاشة / القسم</th>
                           <th className="p-2.5 text-center">👀 يشوف</th>
@@ -1074,43 +1030,15 @@ export default function PermissionsPage({
                         </tr>
                       </thead>
                       <tbody className="divide-y">
-                        {ALL_SCREENS.map((scrKey) => {
+                        {LOCAL_ALL_SCREENS.map((scrKey) => {
                           const sp = normalizeScreenPermRow(selectedUser.permissions?.screen_permissions?.[scrKey]);
                           return (
                             <tr key={scrKey} className={sp.view ? 'bg-emerald-50/30' : ''}>
-                              <td className="p-2.5 font-bold text-gray-900">{SCREEN_LABELS[scrKey] || scrKey}</td>
-                              <td className="p-2.5 text-center">
-                                <input
-                                  type="checkbox"
-                                  className="cursor-pointer w-4 h-4"
-                                  checked={sp.view}
-                                  onChange={(e) => toggleUserScreenAction(scrKey, 'view', e.target.checked)}
-                                />
-                              </td>
-                              <td className="p-2.5 text-center">
-                                <input
-                                  type="checkbox"
-                                  className="cursor-pointer w-4 h-4"
-                                  checked={sp.create}
-                                  onChange={(e) => toggleUserScreenAction(scrKey, 'create', e.target.checked)}
-                                />
-                              </td>
-                              <td className="p-2.5 text-center">
-                                <input
-                                  type="checkbox"
-                                  className="cursor-pointer w-4 h-4"
-                                  checked={sp.edit}
-                                  onChange={(e) => toggleUserScreenAction(scrKey, 'edit', e.target.checked)}
-                                />
-                              </td>
-                              <td className="p-2.5 text-center">
-                                <input
-                                  type="checkbox"
-                                  className="cursor-pointer w-4 h-4"
-                                  checked={sp.delete}
-                                  onChange={(e) => toggleUserScreenAction(scrKey, 'delete', e.target.checked)}
-                                />
-                              </td>
+                              <td className="p-2.5 font-bold text-gray-900">{LOCAL_SCREEN_LABELS[scrKey] || scrKey}</td>
+                              <td className="p-2.5 text-center"><input type="checkbox" className="cursor-pointer w-4 h-4" checked={sp.view} onChange={(e) => toggleUserScreenAction(scrKey, 'view', e.target.checked)} /></td>
+                              <td className="p-2.5 text-center"><input type="checkbox" className="cursor-pointer w-4 h-4" checked={sp.create} onChange={(e) => toggleUserScreenAction(scrKey, 'create', e.target.checked)} /></td>
+                              <td className="p-2.5 text-center"><input type="checkbox" className="cursor-pointer w-4 h-4" checked={sp.edit} onChange={(e) => toggleUserScreenAction(scrKey, 'edit', e.target.checked)} /></td>
+                              <td className="p-2.5 text-center"><input type="checkbox" className="cursor-pointer w-4 h-4" checked={sp.delete} onChange={(e) => toggleUserScreenAction(scrKey, 'delete', e.target.checked)} /></td>
                             </tr>
                           );
                         })}
@@ -1133,50 +1061,30 @@ export default function PermissionsPage({
                 {newTplForm.key ? `✏️ تعديل جروب Policy (${newTplForm.label})` : '➕ إنشاء جروب Policy جديد'}
               </h3>
               {newTplForm.key && (
-                <button
-                  type="button"
-                  onClick={() => setNewTplForm(EMPTY_TPL_FORM)}
-                  className="px-3 py-1.5 bg-gray-100 rounded-xl text-xs cursor-pointer"
-                >
-                  + قالب جديد
-                </button>
+                <button type="button" onClick={() => setNewTplForm(EMPTY_TPL_FORM)} className="px-3 py-1.5 bg-gray-100 rounded-xl text-xs cursor-pointer">+ قالب جديد</button>
               )}
             </div>
 
             <div className="grid sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-gray-600 mb-1">اسم الصلاحية / الجروب</label>
-                <input
-                  required
-                  placeholder="مثال: أب كاهن، ولي أمر، خادم مرحلة، مخدوم اجتماع..."
-                  className="w-full p-2.5 border rounded-xl"
-                  value={newTplForm.label}
-                  onChange={(e) => setNewTplForm({ ...newTplForm, label: e.target.value })}
-                />
+                <input required placeholder="مثال: خادم الأسر المستترة، أب كاهن، ولي أمر..." className="w-full p-2.5 border rounded-xl" value={newTplForm.label} onChange={(e) => setNewTplForm({ ...newTplForm, label: e.target.value })} />
               </div>
               <div>
                 <label className="block text-xs text-gray-600 mb-1">الدور الأساسي المرتبط به</label>
-                <select
-                  className="w-full p-2.5 border rounded-xl bg-white"
-                  value={newTplForm.base_role}
-                  onChange={(e) => setNewTplForm({ ...newTplForm, base_role: e.target.value })}
-                >
-                  {Object.entries(ROLE_LABELS)
-                    .filter(([k]) => k !== 'admin')
-                    .map(([k, v]) => (
-                      <option key={k} value={k}>{v}</option>
-                    ))}
+                <select className="w-full p-2.5 border rounded-xl bg-white" value={newTplForm.base_role} onChange={(e) => setNewTplForm({ ...newTplForm, base_role: e.target.value })}>
+                  {Object.entries(ROLE_LABELS).filter(([k]) => k !== 'admin').map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
                 </select>
               </div>
             </div>
 
             <div className="bg-gray-50 p-3.5 rounded-2xl border space-y-2">
-              <strong className="block text-xs text-gray-800">
-                الشاشات المسموحة في الجروب (يشوف / يضيف / يعدل / يحذف)
-              </strong>
-              <div className="overflow-x-auto bg-white rounded-2xl border">
+              <strong className="block text-xs text-gray-800">الشاشات المسموحة في الجروب (يشوف / يضيف / يعدل / يحذف)</strong>
+              <div className="overflow-x-auto bg-white rounded-2xl border max-h-80 overflow-y-auto">
                 <table className="w-full text-right text-xs">
-                  <thead className="bg-gray-100 text-gray-800">
+                  <thead className="bg-gray-100 text-gray-800 sticky top-0">
                     <tr>
                       <th className="p-2.5">الشاشة</th>
                       <th className="p-2.5 text-center">👀 يشوف</th>
@@ -1186,43 +1094,15 @@ export default function PermissionsPage({
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {ALL_SCREENS.map((scrKey) => {
+                    {LOCAL_ALL_SCREENS.map((scrKey) => {
                       const sp = normalizeScreenPermRow(newTplForm.screen_permissions?.[scrKey]);
                       return (
                         <tr key={scrKey} className={sp.view ? 'bg-emerald-50/30' : ''}>
-                          <td className="p-2.5 font-bold text-gray-900">{SCREEN_LABELS[scrKey] || scrKey}</td>
-                          <td className="p-2.5 text-center">
-                            <input
-                              type="checkbox"
-                              className="cursor-pointer w-4 h-4"
-                              checked={sp.view}
-                              onChange={(e) => toggleTplScreenAction(scrKey, 'view', e.target.checked)}
-                            />
-                          </td>
-                          <td className="p-2.5 text-center">
-                            <input
-                              type="checkbox"
-                              className="cursor-pointer w-4 h-4"
-                              checked={sp.create}
-                              onChange={(e) => toggleTplScreenAction(scrKey, 'create', e.target.checked)}
-                            />
-                          </td>
-                          <td className="p-2.5 text-center">
-                            <input
-                              type="checkbox"
-                              className="cursor-pointer w-4 h-4"
-                              checked={sp.edit}
-                              onChange={(e) => toggleTplScreenAction(scrKey, 'edit', e.target.checked)}
-                            />
-                          </td>
-                          <td className="p-2.5 text-center">
-                            <input
-                              type="checkbox"
-                              className="cursor-pointer w-4 h-4"
-                              checked={sp.delete}
-                              onChange={(e) => toggleTplScreenAction(scrKey, 'delete', e.target.checked)}
-                            />
-                          </td>
+                          <td className="p-2.5 font-bold text-gray-900">{LOCAL_SCREEN_LABELS[scrKey] || scrKey}</td>
+                          <td className="p-2.5 text-center"><input type="checkbox" className="cursor-pointer w-4 h-4" checked={sp.view} onChange={(e) => toggleTplScreenAction(scrKey, 'view', e.target.checked)} /></td>
+                          <td className="p-2.5 text-center"><input type="checkbox" className="cursor-pointer w-4 h-4" checked={sp.create} onChange={(e) => toggleTplScreenAction(scrKey, 'create', e.target.checked)} /></td>
+                          <td className="p-2.5 text-center"><input type="checkbox" className="cursor-pointer w-4 h-4" checked={sp.edit} onChange={(e) => toggleTplScreenAction(scrKey, 'edit', e.target.checked)} /></td>
+                          <td className="p-2.5 text-center"><input type="checkbox" className="cursor-pointer w-4 h-4" checked={sp.delete} onChange={(e) => toggleTplScreenAction(scrKey, 'delete', e.target.checked)} /></td>
                         </tr>
                       );
                     })}
@@ -1233,30 +1113,17 @@ export default function PermissionsPage({
 
             {newTplForm.key && (
               <label className="flex items-center gap-2 text-xs text-[#7a1c24] bg-red-50 p-3 rounded-xl border border-red-200 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={syncUsersOnTplSave}
-                  onChange={(e) => setSyncUsersOnTplSave(e.target.checked)}
-                />
+                <input type="checkbox" checked={syncUsersOnTplSave} onChange={(e) => setSyncUsersOnTplSave(e.target.checked)} />
                 🔄 تحديث صلاحيات كل الأشخاص المرتبطين بهذا الجروب تلقائياً عند الحفظ
               </label>
             )}
 
             <div className="flex flex-wrap gap-2">
-              <button
-                type="submit"
-                className="px-6 py-2.5 bg-[#7a1c24] text-white rounded-xl cursor-pointer flex items-center gap-1.5"
-              >
+              <button type="submit" className="px-6 py-2.5 bg-[#7a1c24] text-white rounded-xl cursor-pointer flex items-center gap-1.5">
                 <CheckCircle2 size={15} /> {newTplForm.key ? 'حفظ تعديل الجروب' : '+ إنشاء الجروب الجديد'}
               </button>
               {newTplForm.key && (
-                <button
-                  type="button"
-                  onClick={() => setNewTplForm(EMPTY_TPL_FORM)}
-                  className="px-4 py-2 border rounded-xl cursor-pointer"
-                >
-                  إلغاء
-                </button>
+                <button type="button" onClick={() => setNewTplForm(EMPTY_TPL_FORM)} className="px-4 py-2 border rounded-xl cursor-pointer">إلغاء</button>
               )}
             </div>
           </form>
@@ -1273,9 +1140,7 @@ export default function PermissionsPage({
                   <div className="flex justify-between items-start gap-2">
                     <div>
                       <strong className="text-sm text-[#7a1c24] block">{tpl.label}</strong>
-                      <span className="text-[11px] text-gray-500">
-                        الدور: {ROLE_LABELS[tpl.base_role] || tpl.base_role} • الأعضاء: {membersCount}
-                      </span>
+                      <span className="text-[11px] text-gray-500">الدور: {ROLE_LABELS[tpl.base_role] || tpl.base_role} • الأعضاء: {membersCount}</span>
                     </div>
                     <div className="flex gap-1">
                       <button
@@ -1288,11 +1153,7 @@ export default function PermissionsPage({
                             label: tpl.label,
                             base_role: tpl.base_role,
                             screens: tpl.screens || [],
-                            screen_permissions: buildScreenPermissionsMap(
-                              tpl.screens || [],
-                              tpl.actions || {},
-                              tpl.screen_permissions
-                            ),
+                            screen_permissions: buildScreenPermissionsMap(tpl.screens || [], tpl.actions || {}, tpl.screen_permissions),
                             actions: { ...EMPTY_TPL_FORM.actions, ...(tpl.actions || {}) }
                           });
                           window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1311,11 +1172,7 @@ export default function PermissionsPage({
                             label: `${tpl.label} (نسخة)`,
                             base_role: tpl.base_role,
                             screens: tpl.screens || [],
-                            screen_permissions: buildScreenPermissionsMap(
-                              tpl.screens || [],
-                              tpl.actions || {},
-                              tpl.screen_permissions
-                            ),
+                            screen_permissions: buildScreenPermissionsMap(tpl.screens || [], tpl.actions || {}, tpl.screen_permissions),
                             actions: { ...EMPTY_TPL_FORM.actions, ...(tpl.actions || {}) }
                           });
                           window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1324,33 +1181,18 @@ export default function PermissionsPage({
                       >
                         <Copy size={13} />
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setBulkPolicyKeys([tpl.key]);
-                          setTab('bulk');
-                        }}
-                        className="px-2 py-1 bg-amber-50 text-amber-900 hover:bg-amber-100 rounded-lg text-[10px] font-black cursor-pointer"
-                      >
+                      <button type="button" onClick={() => { setBulkPolicyKeys([tpl.key]); setTab('bulk'); }} className="px-2 py-1 bg-amber-50 text-amber-900 hover:bg-amber-100 rounded-lg text-[10px] font-black cursor-pointer">
                         تعيين لناس
                       </button>
-                      <button
-                        type="button"
-                        title="حذف"
-                        onClick={() => handleDeleteRoleTemplate(tpl)}
-                        className="p-1.5 bg-red-50 text-red-700 hover:bg-red-100 rounded-lg cursor-pointer"
-                      >
+                      <button type="button" title="حذف" onClick={() => handleDeleteRoleTemplate(tpl)} className="p-1.5 bg-red-50 text-red-700 hover:bg-red-100 rounded-lg cursor-pointer">
                         <Trash2 size={13} />
                       </button>
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-1 pt-1">
                     {(tpl.screens || []).map((scrKey) => (
-                      <span
-                        key={scrKey}
-                        className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded-md text-[10px] font-bold"
-                      >
-                        {SCREEN_LABELS[scrKey] || scrKey}
+                      <span key={scrKey} className="px-2 py-0.5 bg-gray-100 text-gray-700 rounded-md text-[10px] font-bold">
+                        {LOCAL_SCREEN_LABELS[scrKey] || scrKey}
                       </span>
                     ))}
                   </div>
@@ -1366,41 +1208,23 @@ export default function PermissionsPage({
         <div className="bg-white p-5 rounded-3xl border shadow-sm space-y-4">
           <div className="flex flex-wrap gap-2">
             {ROLES.filter((r) => r.key !== 'admin').map((r) => (
-              <button
-                key={r.key}
-                type="button"
-                onClick={() => setSelectedRole(r.key)}
-                className={`px-3.5 py-2 rounded-xl border text-xs font-bold cursor-pointer ${
-                  selectedRole === r.key ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-gray-50 text-gray-800'
-                }`}
-              >
+              <button key={r.key} type="button" onClick={() => setSelectedRole(r.key)} className={`px-3.5 py-2 rounded-xl border text-xs font-bold cursor-pointer ${selectedRole === r.key ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-gray-50 text-gray-800'}`}>
                 {r.label}
               </button>
             ))}
           </div>
           <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-            {ALL_SCREENS.map((scr) => {
+            {LOCAL_ALL_SCREENS.map((scr) => {
               const checked = roleAllowed.has(scr);
               const isDef = roleDefault === scr;
               return (
-                <div
-                  key={scr}
-                  className={`p-3 rounded-2xl border-2 flex justify-between items-center gap-2 ${
-                    checked ? 'bg-red-50/40 border-[#7a1c24]' : 'bg-gray-50 border-gray-200'
-                  }`}
-                >
+                <div key={scr} className={`p-3 rounded-2xl border-2 flex justify-between items-center gap-2 ${checked ? 'bg-red-50/40 border-[#7a1c24]' : 'bg-gray-50 border-gray-200'}`}>
                   <label className="flex items-center gap-2 font-bold cursor-pointer flex-1">
                     <input type="checkbox" checked={checked} onChange={() => toggleRoleScreen(scr)} />
-                    <span>{SCREEN_LABELS[scr] || scr}</span>
+                    <span>{LOCAL_SCREEN_LABELS[scr] || scr}</span>
                   </label>
                   {checked && (
-                    <button
-                      type="button"
-                      onClick={() => setRoleDefault(scr)}
-                      className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer ${
-                        isDef ? 'bg-[#7a1c24] text-white' : 'bg-white border text-gray-600'
-                      }`}
-                    >
+                    <button type="button" onClick={() => setRoleDefault(scr)} className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer ${isDef ? 'bg-[#7a1c24] text-white' : 'bg-white border text-gray-600'}`}>
                       {isDef ? 'الافتراضية ⭐' : 'تعيين افتراضية'}
                     </button>
                   )}
@@ -1408,12 +1232,7 @@ export default function PermissionsPage({
               );
             })}
           </div>
-          <button
-            type="button"
-            disabled={saving}
-            onClick={saveRoleScreens}
-            className="px-6 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer"
-          >
+          <button type="button" disabled={saving} onClick={saveRoleScreens} className="px-6 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer">
             <Save size={15} /> {saving ? 'جاري الحفظ...' : 'حفظ صلاحيات الدور الأساسي'}
           </button>
         </div>
@@ -1422,9 +1241,7 @@ export default function PermissionsPage({
       {/* TAB 4: التعيين الجماعي */}
       {tab === 'bulk' && (
         <div className="bg-white p-5 rounded-3xl border space-y-4 font-bold">
-          <h3 className="text-base font-black text-[#7a1c24]">
-            ⚡ تطبيق جروبات Group Policy على مجموعة أشخاص دفعة واحدة
-          </h3>
+          <h3 className="text-base font-black text-[#7a1c24]">⚡ تطبيق جروبات Group Policy على مجموعة أشخاص دفعة واحدة</h3>
 
           <div className="bg-amber-50/60 p-3.5 rounded-2xl border border-amber-200 space-y-2">
             <span className="block text-xs text-amber-950">1) اختر الجروبات المراد تطبيقها:</span>
@@ -1436,9 +1253,7 @@ export default function PermissionsPage({
                     key={t.key}
                     type="button"
                     onClick={() => toggleBulkPolicyKey(t.key)}
-                    className={`px-3 py-1.5 rounded-xl border text-xs font-bold cursor-pointer flex items-center gap-1 ${
-                      active ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-amber-950'
-                    }`}
+                    className={`px-3 py-1.5 rounded-xl border text-xs font-bold cursor-pointer flex items-center gap-1 ${active ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-amber-950'}`}
                   >
                     {active ? <CheckSquare size={13} /> : <Square size={13} />}
                     {t.label}
@@ -1451,38 +1266,23 @@ export default function PermissionsPage({
           <div className="grid md:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs text-gray-600 mb-1">2) طريقة التطبيق</label>
-              <select
-                className="w-full p-2.5 border rounded-xl bg-white"
-                value={bulkMode}
-                onChange={(e) => setBulkMode(e.target.value)}
-              >
+              <select className="w-full p-2.5 border rounded-xl bg-white" value={bulkMode} onChange={(e) => setBulkMode(e.target.value)}>
                 <option value="merge">إضافة ودمج مع جروبات الشخص الحالية</option>
                 <option value="replace">استبدال جروبات الشخص بالجروبات المختارة</option>
               </select>
             </div>
             <div>
               <label className="block text-xs text-gray-600 mb-1">3) فلترة الدور</label>
-              <select
-                className="w-full p-2.5 border rounded-xl bg-white"
-                value={bulkRoleFilter}
-                onChange={(e) => setBulkRoleFilter(e.target.value)}
-              >
+              <select className="w-full p-2.5 border rounded-xl bg-white" value={bulkRoleFilter} onChange={(e) => setBulkRoleFilter(e.target.value)}>
                 <option value="all">الكل</option>
-                {Object.entries(ROLE_LABELS)
-                  .filter(([k]) => k !== 'admin')
-                  .map(([k, v]) => (
-                    <option key={k} value={k}>{v}</option>
-                  ))}
+                {Object.entries(ROLE_LABELS).filter(([k]) => k !== 'admin').map(([k, v]) => (
+                  <option key={k} value={k}>{v}</option>
+                ))}
               </select>
             </div>
             <div>
               <label className="block text-xs text-gray-600 mb-1">4) بحث</label>
-              <input
-                placeholder="ابحث بالاسم أو اليوزر..."
-                className="w-full p-2.5 border rounded-xl"
-                value={bulkSearch}
-                onChange={(e) => setBulkSearch(e.target.value)}
-              />
+              <input placeholder="ابحث بالاسم أو اليوزر..." className="w-full p-2.5 border rounded-xl" value={bulkSearch} onChange={(e) => setBulkSearch(e.target.value)} />
             </div>
           </div>
 
@@ -1490,38 +1290,15 @@ export default function PermissionsPage({
             const eligibleUsers = users
               .filter((u) => u.role !== 'admin')
               .filter((u) => bulkRoleFilter === 'all' || u.role === bulkRoleFilter)
-              .filter((u) =>
-                ((u.full_name || '') + ' ' + (u.username || '') + ' ' + (u.phone || ''))
-                  .toLowerCase()
-                  .includes(bulkSearch.toLowerCase())
-              );
+              .filter((u) => ((u.full_name || '') + ' ' + (u.username || '') + ' ' + (u.phone || '')).toLowerCase().includes(bulkSearch.toLowerCase()));
             return (
               <>
                 <div className="flex flex-wrap justify-between items-center gap-2 bg-gray-50 p-3 rounded-2xl border text-xs">
-                  <span>
-                    تم اختيار <strong className="text-[#7a1c24]">{bulkSelectedIds.length}</strong> من {eligibleUsers.length}
-                  </span>
+                  <span>تم اختيار <strong className="text-[#7a1c24]">{bulkSelectedIds.length}</strong> من {eligibleUsers.length}</span>
                   <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setBulkSelectedIds(eligibleUsers.map((u) => u.id))}
-                      className="px-3 py-1.5 bg-white border rounded-xl cursor-pointer"
-                    >
-                      تحديد الكل
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBulkSelectedIds([])}
-                      className="px-3 py-1.5 bg-white border rounded-xl cursor-pointer"
-                    >
-                      إلغاء التحديد
-                    </button>
-                    <button
-                      type="button"
-                      disabled={saving || bulkSelectedIds.length === 0}
-                      onClick={handleBulkApplyPolicies}
-                      className="px-4 py-1.5 bg-[#7a1c24] text-white rounded-xl font-black cursor-pointer disabled:opacity-50"
-                    >
+                    <button type="button" onClick={() => setBulkSelectedIds(eligibleUsers.map((u) => u.id))} className="px-3 py-1.5 bg-white border rounded-xl cursor-pointer">تحديد الكل</button>
+                    <button type="button" onClick={() => setBulkSelectedIds([])} className="px-3 py-1.5 bg-white border rounded-xl cursor-pointer">إلغاء التحديد</button>
+                    <button type="button" disabled={saving || bulkSelectedIds.length === 0} onClick={handleBulkApplyPolicies} className="px-4 py-1.5 bg-[#7a1c24] text-white rounded-xl font-black cursor-pointer disabled:opacity-50">
                       {saving ? 'جاري التطبيق...' : 'تطبيق الصلاحية ✅'}
                     </button>
                   </div>
@@ -1530,26 +1307,17 @@ export default function PermissionsPage({
                   {eligibleUsers.map((u) => {
                     const checked = bulkSelectedIds.includes(u.id);
                     return (
-                      <label
-                        key={u.id}
-                        className={`flex items-center gap-2.5 p-3 rounded-2xl border cursor-pointer text-xs ${
-                          checked ? 'bg-[#f9ecee] border-[#7a1c24]' : 'bg-white hover:bg-gray-50'
-                        }`}
-                      >
+                      <label key={u.id} className={`flex items-center gap-2.5 p-3 rounded-2xl border cursor-pointer text-xs ${checked ? 'bg-[#f9ecee] border-[#7a1c24]' : 'bg-white hover:bg-gray-50'}`}>
                         <input
                           type="checkbox"
                           checked={checked}
                           onChange={(e) =>
-                            setBulkSelectedIds((prev) =>
-                              e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id)
-                            )
+                            setBulkSelectedIds((prev) => (e.target.checked ? [...prev, u.id] : prev.filter((id) => id !== u.id)))
                           }
                         />
                         <div>
                           <strong className="block text-gray-900">{u.full_name}</strong>
-                          <span className="text-[11px] text-gray-500">
-                            {u.permissions?.custom_role_label || ROLE_LABELS[u.role] || u.role}
-                          </span>
+                          <span className="text-[11px] text-gray-500">{u.permissions?.custom_role_label || ROLE_LABELS[u.role] || u.role}</span>
                         </div>
                       </label>
                     );

@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { uploadChurchMedia } from '../lib/mediaUpload';
@@ -29,11 +30,12 @@ const STAGE_OPTIONS = [
 
 const DEFAULT_SECTIONS = [
   { key: 'summary', defaultTitle: 'ملخص الأرقام السريع', sort_order: 1 },
-  { key: 'media', defaultTitle: 'معرض الصور والفيديوهات', sort_order: 2 },
-  { key: 'news', defaultTitle: 'أخبار وأحداث الكنيسة', sort_order: 3 },
-  { key: 'masses_trips', defaultTitle: 'مواعيد القداسات ومكتب الرحلات', sort_order: 4 },
-  { key: 'priest_bio', defaultTitle: 'آباء الكنيسة', sort_order: 5 },
-  { key: 'history', defaultTitle: 'تاريخ الكنيسة', sort_order: 6 }
+  { key: 'hanna_word', defaultTitle: 'كلمة قدس أبونا حنا فؤاد', sort_order: 2 },
+  { key: 'media', defaultTitle: 'صور وفيديوهات الكنيسة', sort_order: 3 },
+  { key: 'news', defaultTitle: 'أخبار وأحداث الكنيسة', sort_order: 4 },
+  { key: 'masses_trips', defaultTitle: 'مواعيد القداسات والصلوات ومكتب الرحلات', sort_order: 5 },
+  { key: 'priest_bio', defaultTitle: 'آباء الكنيسة', sort_order: 6 },
+  { key: 'history', defaultTitle: 'تاريخ الكنيسة', sort_order: 7 }
 ];
 
 function toEmbedUrl(rawUrl = '') {
@@ -219,18 +221,18 @@ export default function PublicPage({
   };
 
   const summaryMeta = getSectionMeta('summary', 'ملخص الأرقام السريع', 1);
-  const mediaMeta = getSectionMeta('media', 'معرض الصور والفيديوهات', 2);
-  const newsMeta = getSectionMeta('news', 'أخبار وأحداث الكنيسة', 3);
-  const massesTripsMeta = getSectionMeta('masses_trips', 'مواعيد القداسات ومكتب الرحلات', 4);
-  const massesMeta = getSectionMeta('masses', 'مواعيد القداسات الإلهية', 4);
-  const tripsMeta = getSectionMeta('trips', 'مكتب الرحلات العامة', 4);
-  const priestBioMeta = getSectionMeta('priest_bio', 'آباء الكنيسة', 5);
-  const historyMeta = getSectionMeta('history', 'تاريخ الكنيسة', 6);
+  const hannaWordMeta = getSectionMeta('hanna_word', 'كلمة قدس أبونا حنا فؤاد', 2);
+  const mediaMeta = getSectionMeta('media', 'صور وفيديوهات الكنيسة', 3);
+  const newsMeta = getSectionMeta('news', 'أخبار وأحداث الكنيسة', 4);
+  const massesTripsMeta = getSectionMeta('masses_trips', 'مواعيد القداسات والصلوات ومكتب الرحلات', 5);
+  const massesMeta = getSectionMeta('masses', 'مواعيد القداسات والصلوات', 5);
+  const tripsMeta = getSectionMeta('trips', 'مكتب الرحلات العامة', 5);
+  const priestBioMeta = getSectionMeta('priest_bio', 'آباء الكنيسة', 6);
+  const historyMeta = getSectionMeta('history', 'تاريخ الكنيسة', 7);
 
-  const orderedSections = [summaryMeta, mediaMeta, newsMeta, massesTripsMeta, priestBioMeta, historyMeta]
+  const orderedSections = [summaryMeta, hannaWordMeta, mediaMeta, newsMeta, massesTripsMeta, priestBioMeta, historyMeta]
     .sort((a, b) => a.sort_order - b.sort_order);
 
-  // تحريك الأقسام لأعلى أو لأسفل من قبل الأدمن مباشرة
   const handleMoveSection = async (secKey, direction) => {
     if (!canEdit) return;
     const currentList = [...orderedSections];
@@ -267,7 +269,6 @@ export default function PublicPage({
     }
   };
 
-  // إخفاء أو إظهار القسم بضغطة زر
   const handleToggleSectionVisibility = async (sec) => {
     if (!canEdit) return;
     const nextHidden = !sec.hidden;
@@ -286,7 +287,6 @@ export default function PublicPage({
     await loadPublic();
   };
 
-  // تغيير اسم القسم / التابة فوراً
   const handleQuickRenameSection = async (sec) => {
     if (!canEdit) return;
     const newName = prompt('اكتب الاسم الجديد لهذا القسم أو التابة:', sec.title);
@@ -307,16 +307,17 @@ export default function PublicPage({
   };
 
   const allKindOptions = [
-    { value: 'logo', label: '✝ اسم الكنيسة وشعارها (لوجو متحرك)' },
-    { value: 'virgin_mary', label: '🕊️ صورة السيدة العذراء مريم (بجانب الترحيب)' },
-    { value: 'video', label: '🎬 فيديو ترحيبي / متحرك' },
-    { value: 'image', label: '🖼️ صورة / بانر / إعلان مصور' },
+    { value: 'hanna_word', label: `✝ ${hannaWordMeta.title}` },
+    { value: 'image', label: '🖼️ صورة للكنيسة' },
+    { value: 'video', label: '🎬 فيديو للكنيسة' },
     { value: 'livestream', label: '📺 بث مباشر (YouTube / رابط البث)' },
     { value: 'news', label: `📰 ${newsMeta.title}` },
     { value: 'mass', label: `⛪ ${massesMeta.title}` },
     { value: 'trip', label: `🚌 ${tripsMeta.title}` },
     { value: 'priest_bio', label: `✝ ${priestBioMeta.title}` },
     { value: 'history', label: `📜 ${historyMeta.title}` },
+    { value: 'logo', label: '✝ اسم الكنيسة وشعارها (لوجو متحرك)' },
+    { value: 'virgin_mary', label: '🕊️ صورة السيدة العذراء مريم (بجانب الترحيب)' },
     ...customCategories.map(c => ({ value: c.title, label: `✨ ${c.body || c.title}` }))
   ];
 
@@ -325,7 +326,11 @@ export default function PublicPage({
     setEditingItemId(null);
     setCreatingCategory(false);
     setNewCategoryLabel('');
-    setContentForm({ ...emptyEdit, kind: defaultKind });
+    setContentForm({
+      ...emptyEdit,
+      kind: defaultKind,
+      title: defaultKind === 'hanna_word' ? 'كلمة قدس أبونا حنا فؤاد' : ''
+    });
     setShowContentModal(true);
   };
 
@@ -558,6 +563,7 @@ export default function PublicPage({
   const activeChurchTitle = logoConfig?.title || churchName || DEFAULT_CHURCH_NAME;
   const activeChurchSubtitle = logoConfig?.body || 'مواعيد القداسات، مكتب الرحلات العامة، أخبار الكنيسة، والآباء الكهنة';
 
+  const hannaWords = items.filter(i => i.kind === 'hanna_word');
   const videos = items.filter(i => i.kind === 'video');
   const images = items.filter(i => i.kind === 'image');
   const livestreams = items.filter(i => i.kind === 'livestream');
@@ -571,6 +577,7 @@ export default function PublicPage({
   const featuredLive = livestreams[0] || null;
 
   const tickerText = [
+    ...hannaWords.map(hw => `✝ ${hw.title}`),
     ...newsList.map(n => `📰 ${n.title}${n.time_text ? ` (${n.time_text})` : ''}`),
     ...events.map(e => `✨ ${e.title}${e.event_time ? ` — ${e.event_time}` : ''}`)
   ].join('   •   ');
@@ -730,36 +737,10 @@ export default function PublicPage({
     return (
       <div className="flex items-center gap-1.5 bg-amber-50/95 border border-amber-300 px-3 py-1.5 rounded-2xl text-[11px] font-bold text-amber-950 mb-3 flex-wrap shadow-2xs">
         <span className="text-gray-500 font-normal">تحكم بالأدمن:</span>
-        <button
-          type="button"
-          onClick={() => handleMoveSection(sec.key, 'up')}
-          className="px-2 py-1 hover:bg-amber-200 rounded-lg cursor-pointer flex items-center gap-0.5"
-          title="نقل القسم لأعلى"
-        >
-          <ArrowUp size={13} /> لأعلى
-        </button>
-        <button
-          type="button"
-          onClick={() => handleMoveSection(sec.key, 'down')}
-          className="px-2 py-1 hover:bg-amber-200 rounded-lg cursor-pointer flex items-center gap-0.5"
-          title="نقل القسم لأسفل"
-        >
-          <ArrowDown size={13} /> لأسفل
-        </button>
-        <button
-          type="button"
-          onClick={() => handleQuickRenameSection(sec)}
-          className="px-2 py-1 hover:bg-amber-200 rounded-lg cursor-pointer flex items-center gap-0.5"
-          title="تغيير اسم القسم"
-        >
-          <Edit3 size={13} /> تعديل الاسم
-        </button>
-        <button
-          type="button"
-          onClick={() => handleToggleSectionVisibility(sec)}
-          className="px-2 py-1 hover:bg-amber-200 rounded-lg cursor-pointer flex items-center gap-0.5 text-red-700"
-          title="إخفاء / إظهار"
-        >
+        <button type="button" onClick={() => handleMoveSection(sec.key, 'up')} className="px-2 py-1 hover:bg-amber-200 rounded-lg cursor-pointer flex items-center gap-0.5"><ArrowUp size={13} /> لأعلى</button>
+        <button type="button" onClick={() => handleMoveSection(sec.key, 'down')} className="px-2 py-1 hover:bg-amber-200 rounded-lg cursor-pointer flex items-center gap-0.5"><ArrowDown size={13} /> لأسفل</button>
+        <button type="button" onClick={() => handleQuickRenameSection(sec)} className="px-2 py-1 hover:bg-amber-200 rounded-lg cursor-pointer flex items-center gap-0.5"><Edit3 size={13} /> تعديل الاسم</button>
+        <button type="button" onClick={() => handleToggleSectionVisibility(sec)} className="px-2 py-1 hover:bg-amber-200 rounded-lg cursor-pointer flex items-center gap-0.5 text-red-700">
           {sec.hidden ? <><Eye size={13} /> إظهار القسم</> : <><EyeOff size={13} /> إخفاء القسم</>}
         </button>
       </div>
@@ -768,8 +749,19 @@ export default function PublicPage({
 
   const showParentChildrenBox = regForm.requested_role === 'parent' || regForm.also_parent;
 
-  // قائمة أزرار الأقسام والخدمات لتنسيقها في Grid متساوي ومتناسق
   const navButtons = [
+    !hannaWordMeta.hidden && {
+      key: 'nav_hanna',
+      href: '#sec-hanna',
+      label: `✝ ${hannaWordMeta.title}`,
+      className: 'bg-amber-300 hover:bg-amber-200 text-[#4a0e13] font-black shadow'
+    },
+    !mediaMeta.hidden && {
+      key: 'nav_media',
+      href: '#sec-media',
+      label: `📸 ${mediaMeta.title}`,
+      className: 'bg-white/15 hover:bg-white/25 border border-white/20 text-white font-bold'
+    },
     !newsMeta.hidden && {
       key: 'nav_news',
       href: '#sec-news',
@@ -840,10 +832,10 @@ export default function PublicPage({
                 <strong className="text-lg font-black text-[#7a1c24]">{newsList.length + events.length} حدث</strong>
               </a>
             )}
-            {!priestBioMeta.hidden && (
-              <a href="#sec-priests" className="bg-white p-4 rounded-2xl border shadow-2xs hover:border-[#7a1c24] transition">
-                <span className="text-xs text-gray-500 block">✝ {priestBioMeta.title}</span>
-                <strong className="text-sm font-black text-[#7a1c24] block mt-1">{loading ? 'جاري التحميل...' : `${priestBios.length} أب كاهن`}</strong>
+            {!mediaMeta.hidden && (
+              <a href="#sec-media" className="bg-white p-4 rounded-2xl border shadow-2xs hover:border-[#7a1c24] transition">
+                <span className="text-xs text-gray-500 block">📸 {mediaMeta.title}</span>
+                <strong className="text-sm font-black text-[#7a1c24] block mt-1">{images.length} صورة • {videos.length} فيديو</strong>
               </a>
             )}
           </div>
@@ -851,55 +843,156 @@ export default function PublicPage({
       );
     }
 
-    if (sec.key === 'media') {
-      if (!canEdit && !(images.length > 0 || videos.length > 1 || livestreams.length > 1 || (featuredLive && featuredVideo))) return null;
+    if (sec.key === 'hanna_word') {
       return (
-        <section key="media" className="space-y-3">
+        <section key="hanna_word" id="sec-hanna" className="bg-linear-to-br from-amber-50 via-white to-orange-50/40 rounded-3xl p-5 md:p-6 border-2 border-amber-300 shadow-sm space-y-4">
           {renderSectionHeaderControls(sec)}
-          <div className="flex justify-between items-center">
-            <h2 className="text-lg font-black text-[#7a1c24] flex items-center gap-2"><ImageIcon size={20} /> {sec.title}</h2>
+          <div className="flex flex-wrap justify-between items-center gap-2 border-b border-amber-200 pb-3">
+            <h2 className="text-base md:text-xl font-black text-[#7a1c24] flex items-center gap-2">
+              ✝ {sec.title}
+            </h2>
             {canEdit && (
-              <button type="button" onClick={() => openAddContentModal('image')} className="px-3 py-1.5 bg-white border rounded-xl text-xs font-bold text-[#7a1c24] cursor-pointer">
-                + رفع صورة / فيديو من الجهاز
+              <button
+                type="button"
+                onClick={() => openAddContentModal('hanna_word')}
+                className="px-3.5 py-2 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl text-xs font-black cursor-pointer shadow"
+              >
+                + إضافة / تحديث كلمة لأبونا حنا فؤاد
               </button>
             )}
           </div>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {images.map(img => (
-              <div key={img.id} className="bg-white rounded-3xl border shadow-sm overflow-hidden flex flex-col">
-                {img.url && <img src={img.url} alt={img.title} className="w-full h-52 object-cover" />}
-                <div className="p-4 flex justify-between items-start gap-2">
-                  <div>
-                    <strong className="text-sm text-[#7a1c24] block">{img.title}</strong>
-                    {img.body && <p className="text-xs text-gray-600 mt-1">{img.body}</p>}
-                  </div>
-                  {renderCardActions(img)}
-                </div>
+
+          {hannaWords.length === 0 ? (
+            <div className="p-5 bg-white/85 rounded-2xl border border-amber-200 flex flex-col sm:flex-row items-center gap-4">
+              <div className="w-16 h-16 rounded-2xl bg-[#f9ecee] text-[#7a1c24] flex items-center justify-center text-3xl font-black border border-[#7a1c24]/20 shrink-0">
+                ✝
               </div>
-            ))}
-            {videos.slice(featuredLive ? 0 : 1).map(v => {
-              const embed = toEmbedUrl(v.url);
-              const directVid = isDirectVideo(v.url);
-              return (
-                <div key={v.id} className="bg-white rounded-3xl border shadow-sm overflow-hidden">
-                  {embed ? (
-                    <div className="aspect-video bg-black">
-                      <iframe src={embed} title={v.title} className="w-full h-full" allowFullScreen />
+              <div className="space-y-1 text-center sm:text-right">
+                <strong className="text-base font-black text-gray-900 block">رسالة وكلمة قدس أبونا القمص/القس حنا فؤاد</strong>
+                <p className="text-xs md:text-sm text-gray-600 leading-relaxed">
+                  سلام ونعمة لشعب الكنيسة المبارك — هذه المساحة مخصصة لعرض كلمات وتأملات ورسائل قدس أبونا حنا فؤاد الروحية لجميع أفراد الكنيسة.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-4">
+              {hannaWords.map(hw => {
+                const embed = toEmbedUrl(hw.url);
+                const directVid = isDirectVideo(hw.url);
+                return (
+                  <div key={hw.id} className="bg-white p-4 md:p-5 rounded-2xl border border-amber-200 shadow-2xs space-y-3">
+                    <div className="flex flex-col sm:flex-row items-start gap-4">
+                      {hw.url && !embed && !directVid && (
+                        <img src={hw.url} alt={hw.title} className="w-24 h-24 rounded-2xl object-cover border-2 border-amber-300 shrink-0" />
+                      )}
+                      <div className="flex-1 space-y-1.5 min-w-0">
+                        <div className="flex justify-between items-start gap-2">
+                          <div>
+                            <strong className="text-base md:text-lg font-black text-[#7a1c24] block">{hw.title}</strong>
+                            {hw.time_text && (
+                              <span className="inline-block mt-1 px-2.5 py-0.5 bg-amber-100 text-amber-950 rounded-lg text-[11px] font-bold">
+                                📅 {hw.time_text}
+                              </span>
+                            )}
+                          </div>
+                          {renderCardActions(hw)}
+                        </div>
+                        {hw.body && (
+                          <p className="text-xs md:text-sm text-gray-800 leading-relaxed whitespace-pre-line pt-1">
+                            {hw.body}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                  ) : directVid ? (
-                    <video src={v.url} controls className="w-full aspect-video bg-black object-cover" />
-                  ) : null}
+
+                    {embed && (
+                      <div className="aspect-video max-w-2xl rounded-2xl overflow-hidden bg-black border">
+                        <iframe src={embed} title={hw.title} className="w-full h-full" allowFullScreen />
+                      </div>
+                    )}
+                    {directVid && (
+                      <video src={hw.url} controls className="w-full max-w-2xl aspect-video rounded-2xl bg-black object-cover border" />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      );
+    }
+
+    if (sec.key === 'media') {
+      return (
+        <section key="media" id="sec-media" className="bg-white rounded-3xl p-5 md:p-6 border shadow-sm space-y-4">
+          {renderSectionHeaderControls(sec)}
+          <div className="flex flex-wrap justify-between items-center gap-2 border-b pb-3">
+            <h2 className="text-base md:text-lg font-black text-[#7a1c24] flex items-center gap-2">
+              <ImageIcon size={20} /> {sec.title}
+            </h2>
+            {canEdit && (
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => openAddContentModal('image')} className="px-3 py-1.5 bg-[#f9ecee] hover:bg-red-100 text-[#7a1c24] rounded-xl text-xs font-black cursor-pointer">
+                  + إضافة صورة للكنيسة
+                </button>
+                <button type="button" onClick={() => openAddContentModal('video')} className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 rounded-xl text-xs font-black cursor-pointer">
+                  + إضافة فيديو للكنيسة
+                </button>
+              </div>
+            )}
+          </div>
+
+          {images.length === 0 && videos.length === 0 ? (
+            <div className="p-6 text-center bg-[#fbfaf7] rounded-2xl border border-dashed text-xs text-gray-500">
+              لم تُضف صور أو فيديوهات للكنيسة حتى الآن — يمكن للأدمن أو الأب الكاهن رفع الصور والفيديوهات من جهازك أو رابط يوتيوب.
+            </div>
+          ) : (
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {images.map(img => (
+                <div key={img.id} className="bg-[#fbfaf7] rounded-3xl border shadow-2xs overflow-hidden flex flex-col">
+                  {img.url && <img src={img.url} alt={img.title} className="w-full h-52 object-cover" />}
                   <div className="p-4 flex justify-between items-start gap-2">
                     <div>
-                      <strong className="text-sm text-[#7a1c24] block">{v.title}</strong>
-                      {v.body && <p className="text-xs text-gray-600 mt-1">{v.body}</p>}
+                      <span className="px-2 py-0.5 bg-amber-100 text-amber-950 rounded text-[10px] font-black mb-1 inline-block">🖼️ صورة</span>
+                      <strong className="text-sm text-[#7a1c24] block">{img.title}</strong>
+                      {img.body && <p className="text-xs text-gray-600 mt-1">{img.body}</p>}
                     </div>
-                    {renderCardActions(v)}
+                    {renderCardActions(img)}
                   </div>
                 </div>
-              );
-            })}
-          </div>
+              ))}
+              {videos.map(v => {
+                const embed = toEmbedUrl(v.url);
+                const directVid = isDirectVideo(v.url);
+                return (
+                  <div key={v.id} className="bg-[#fbfaf7] rounded-3xl border shadow-2xs overflow-hidden flex flex-col">
+                    {embed ? (
+                      <div className="aspect-video bg-black">
+                        <iframe src={embed} title={v.title} className="w-full h-full" allowFullScreen />
+                      </div>
+                    ) : directVid ? (
+                      <video src={v.url} controls className="w-full aspect-video bg-black object-cover" />
+                    ) : v.url ? (
+                      <div className="aspect-video bg-slate-900 text-white flex flex-col items-center justify-center p-4 gap-2">
+                        <Video size={28} className="text-amber-300" />
+                        <a href={v.url} target="_blank" rel="noreferrer" className="px-3 py-1.5 bg-amber-400 text-[#4a0e13] rounded-xl text-xs font-black flex items-center gap-1">
+                          <ExternalLink size={12} /> تشغيل الفيديو
+                        </a>
+                      </div>
+                    ) : null}
+                    <div className="p-4 flex justify-between items-start gap-2">
+                      <div>
+                        <span className="px-2 py-0.5 bg-indigo-100 text-indigo-900 rounded text-[10px] font-black mb-1 inline-block">🎬 فيديو</span>
+                        <strong className="text-sm text-[#7a1c24] block">{v.title}</strong>
+                        {v.body && <p className="text-xs text-gray-600 mt-1">{v.body}</p>}
+                      </div>
+                      {renderCardActions(v)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
       );
     }
@@ -962,12 +1055,12 @@ export default function PublicPage({
               <section id="sec-masses" className="bg-white rounded-3xl p-5 md:p-6 border shadow-sm space-y-3">
                 <div className="flex justify-between items-center border-b pb-2.5">
                   <h2 className="text-base font-black text-[#7a1c24] flex items-center gap-2"><Church size={19} /> {massesMeta.title}</h2>
-                  {canEdit && <button type="button" onClick={() => openAddContentModal('mass')} className="px-2.5 py-1 bg-[#f9ecee] text-[#7a1c24] rounded-lg text-[11px] font-black cursor-pointer">+ قداس</button>}
+                  {canEdit && <button type="button" onClick={() => openAddContentModal('mass')} className="px-2.5 py-1 bg-[#f9ecee] text-[#7a1c24] rounded-lg text-[11px] font-black cursor-pointer">+ قداس / صلاة</button>}
                 </div>
                 {publicMasses.length === 0 && masses.length === 0 ? (
-                  <p className="text-xs text-gray-500">لم تُضف مواعيد قداسات عامة بعد.</p>
+                  <p className="text-xs text-gray-500">لم تُضف مواعيد قداسات أو صلوات عامة بعد.</p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
                     {publicMasses.map(m => (
                       <div key={m.id} className="p-3 bg-[#fbfaf7] rounded-2xl border flex justify-between items-center gap-2 text-xs">
                         <div>
@@ -1012,7 +1105,7 @@ export default function PublicPage({
                 {tripContents.length === 0 && publicTrips.length === 0 && priestPublicTrips.length === 0 ? (
                   <p className="text-xs text-gray-500">لا توجد رحلات عامة معلنة حالياً.</p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
                     {publicTrips.map(tr => {
                       const isOvernight = Number(tr.days_count || 1) > 1 || (Array.isArray(tr.rooms) && tr.rooms.length > 0);
                       return (
@@ -1174,7 +1267,6 @@ export default function PublicPage({
         <div className="max-w-6xl mx-auto px-4 py-4 md:py-5 space-y-3.5">
           <div className="grid md:grid-cols-12 gap-4 items-center">
             <div className="md:col-span-8 space-y-3">
-              {/* العنوان + الشعار */}
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-2xl bg-white/10 border border-amber-300/50 flex items-center justify-center overflow-hidden shadow-inner animate-float-logo shrink-0">
                   {logoConfig?.url ? (
@@ -1192,7 +1284,6 @@ export default function PublicPage({
                 </div>
               </div>
 
-              {/* صف أزرار الدخول والتسجيل (شبكة متساوية 2 عمود في الموبايل) */}
               {isLoggedIn ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <button
@@ -1252,7 +1343,6 @@ export default function PublicPage({
                 </div>
               )}
 
-              {/* شبكة متناسقة لأقسام وخدمات الكنيسة (2 عمود في الموبايل و3-4 في الشاشات الأوسع) */}
               {navButtons.length > 0 && (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 pt-0.5">
                   {navButtons.map((btn, idx) => {
@@ -1284,7 +1374,6 @@ export default function PublicPage({
               )}
             </div>
 
-            {/* أيقونة السيدة العذراء أو البث المباشر */}
             <div className="md:col-span-4 flex justify-center md:justify-end">
               {(featuredLive || featuredVideo) ? (() => {
                 const media = featuredLive || featuredVideo;
@@ -1294,7 +1383,7 @@ export default function PublicPage({
                   <div className="w-full max-w-xs bg-black/35 border border-white/20 rounded-2xl p-2 space-y-1.5 shadow-xl">
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="px-2 py-0.5 bg-red-600 text-white rounded-full font-black flex items-center gap-1">
-                        {featuredLive ? <><Radio size={11} className="animate-pulse" /> بث مباشر</> : <><Video size={11} /> فيديو</>}
+                        {featuredLive ? <><Radio size={11} className="animate-pulse" /> بث مباشر</> : <><Video size={11} /> فيديو الكنيسة</>}
                       </span>
                       {renderCardActions(media)}
                     </div>
@@ -1337,7 +1426,6 @@ export default function PublicPage({
         )}
       </header>
 
-      {/* الأقسام المرتبة حسب تعديل الأدمن */}
       <main className="max-w-6xl mx-auto w-full px-4 py-6 md:py-8 space-y-7 flex-1">
         {orderedSections.map(sec => renderDynamicSection(sec))}
 
@@ -1384,7 +1472,6 @@ export default function PublicPage({
         ✝ {activeChurchTitle} — جميع الحقوق محفوظة
       </footer>
 
-      {/* مودال تعديل أو إضافة محتوى */}
       {showContentModal && canEdit && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-4 max-h-[92vh] overflow-y-auto shadow-2xl">
@@ -1413,22 +1500,22 @@ export default function PublicPage({
               </div>
               <input required placeholder="العنوان / الاسم *" className="w-full p-2.5 border rounded-xl" value={contentForm.title} onChange={e => setContentForm({ ...contentForm, title: e.target.value })} />
               <div className="grid grid-cols-2 gap-2">
-                <input placeholder="الوقت / الدرجة" className="w-full p-2.5 border rounded-xl" value={contentForm.time_text} onChange={e => setContentForm({ ...contentForm, time_text: e.target.value })} />
+                <input placeholder="الوقت / التاريخ / المناسبة" className="w-full p-2.5 border rounded-xl" value={contentForm.time_text} onChange={e => setContentForm({ ...contentForm, time_text: e.target.value })} />
                 <input placeholder="المكان / التليفون" className="w-full p-2.5 border rounded-xl" value={contentForm.location} onChange={e => setContentForm({ ...contentForm, location: e.target.value })} />
               </div>
               <div className="bg-indigo-50/60 p-3 rounded-2xl border border-indigo-200 space-y-2">
                 <div className="flex flex-wrap gap-2 items-center">
                   {contentForm.kind !== 'livestream' && (
                     <label className="px-3.5 py-2.5 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shrink-0 bg-indigo-700 text-white">
-                      <Upload size={14} /> {uploadingMedia ? 'جاري الرفع...' : 'اختر ملف من الجهاز'}
+                      <Upload size={14} /> {uploadingMedia ? 'جاري الرفع...' : 'اختر صورة أو فيديو من الجهاز'}
                       <input type="file" accept="image/*,video/*" className="hidden" disabled={uploadingMedia} onChange={handleUploadFile} />
                     </label>
                   )}
-                  <input placeholder="أو رابط مباشر https://..." className="flex-1 min-w-45 p-2.5 border rounded-xl bg-white" value={contentForm.url} onChange={e => setContentForm({ ...contentForm, url: e.target.value })} />
+                  <input placeholder="أو رابط مباشر / رابط يوتيوب https://..." className="flex-1 min-w-45 p-2.5 border rounded-xl bg-white" value={contentForm.url} onChange={e => setContentForm({ ...contentForm, url: e.target.value })} />
                 </div>
                 {contentForm.url && isImageUrl(contentForm.url) && <img src={contentForm.url} alt="معاينة" className="h-24 rounded-xl border object-cover bg-white" />}
               </div>
-              <textarea rows="3" placeholder="التفاصيل / السيرة / النص..." className="w-full p-2.5 border rounded-xl font-normal" value={contentForm.body} onChange={e => setContentForm({ ...contentForm, body: e.target.value })} />
+              <textarea rows="4" placeholder="الكلمة / التفاصيل / السيرة / النص..." className="w-full p-2.5 border rounded-xl font-normal" value={contentForm.body} onChange={e => setContentForm({ ...contentForm, body: e.target.value })} />
               <button type="submit" disabled={savingContent || uploadingMedia} className="w-full py-3 bg-[#7a1c24] text-white rounded-xl font-black text-sm cursor-pointer">
                 {savingContent ? 'جاري الحفظ...' : editingItemId ? 'حفظ التعديل' : 'إضافة ونشر فوراً'}
               </button>
@@ -1437,7 +1524,6 @@ export default function PublicPage({
         </div>
       )}
 
-      {/* مودال ترتيب وإخفاء الأقسام من الأدمن */}
       {showSectionsModal && canEdit && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -1468,7 +1554,6 @@ export default function PublicPage({
         </div>
       )}
 
-      {/* مودال تعديل القداس أو الفعالية */}
       {editEventModal && canEdit && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl w-full max-w-md p-6 space-y-3 shadow-2xl">
@@ -1500,7 +1585,6 @@ export default function PublicPage({
         </div>
       )}
 
-      {/* مودال تسجيل عضو جديد */}
       {showRegister && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl w-full max-w-xl p-6 space-y-4 max-h-[92vh] overflow-y-auto shadow-2xl">

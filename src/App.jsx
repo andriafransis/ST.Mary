@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { supabase } from './lib/supabase';
 import { startUserSession, endUserSession } from './lib/activityLogger';
@@ -12,6 +13,7 @@ import PublicEditor from './pages/PublicEditor';
 import ApprovalsPage from './pages/ApprovalsPage';
 import PermissionsPage from './pages/PermissionsPage';
 import TripsOfficePage from './pages/TripsOfficePage';
+import HiddenFamiliesPage from './pages/HiddenFamiliesPage';
 import LoginPage from './pages/LoginPage';
 import AdminDashboard from './pages/AdminDashboard';
 import PriestDashboard from './pages/PriestDashboard';
@@ -25,6 +27,13 @@ import { LogOut, Bell, GraduationCap, HeartHandshake, Menu, X } from 'lucide-rea
 const SAVED_USER_KEY = 'church_app_logged_user_id';
 const DEFAULT_CHURCH_NAME = 'كنيسة السيدة العذراء مريم بالمطرية';
 const DEFAULT_TAGLINE = 'مواعيد القداسات، مكتب الرحلات العامة، أخبار الكنيسة، والآباء الكهنة';
+
+const APP_SCREEN_LABELS = {
+  ...SCREEN_LABELS,
+  hidden_families: '🕊️ خدمة الأسر المستترة'
+};
+
+const APP_SCREEN_ORDER = Array.from(new Set([...SCREEN_ORDER, 'hidden_families']));
 
 const ROLE_TEXT = {
   admin: '🛡️ سوبر أدمن الكنيسة',
@@ -66,8 +75,32 @@ function normalizeGenderValue(u) {
   return 'ذكر';
 }
 
+function hasHiddenFamiliesAccess(user, allowedSet) {
+  if (!user) return false;
+  if (user.role === 'admin' || user.role === 'priest') return true;
+  if (allowedSet?.has('hidden_families')) return true;
+  const perms = user.permissions || {};
+  if (perms.screen_permissions?.hidden_families?.view) return true;
+  if (Array.isArray(perms.allowed_screens) && perms.allowed_screens.includes('hidden_families')) return true;
+  if (Array.isArray(perms.policy_keys) && perms.policy_keys.includes('tpl_hidden_families')) return true;
+  if (perms.template_key === 'tpl_hidden_families') return true;
+  return false;
+}
+
+function getEffectiveAllowedSet(user, roleScreens, roleTemplates) {
+  const res = resolveScreens(user, roleScreens, roleTemplates);
+  const effectiveAllowed = new Set(res.allowed);
+  if (hasHiddenFamiliesAccess(user, effectiveAllowed)) {
+    effectiveAllowed.add('hidden_families');
+  }
+  return { ...res, allowed: effectiveAllowed };
+}
+
 function getPostLoginScreen(user, roleScreens, roleTemplates = []) {
-  const { allowed, defaultScreen } = resolveScreens(user, roleScreens, roleTemplates);
+  const { allowed, defaultScreen } = getEffectiveAllowedSet(user, roleScreens, roleTemplates);
+  if (user?.permissions?.default_screen === 'hidden_families' && allowed.has('hidden_families')) {
+    return 'hidden_families';
+  }
   if (defaultScreen && defaultScreen !== 'public_page' && allowed.has(defaultScreen)) {
     return defaultScreen;
   }
@@ -77,11 +110,11 @@ function getPostLoginScreen(user, roleScreens, roleTemplates = []) {
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
-  const [authView, setAuthView] = useState('public'); // 'public' | 'login' | 'edu_public' | 'joseph_public'
+  const [authView, setAuthView] = useState('public');
   const [loginError, setLoginError] = useState('');
   const [registerMessage, setRegisterMessage] = useState('');
   const [activeScreen, setActiveScreen] = useState('');
-  const [extraScreen, setExtraScreen] = useState(''); // '' | 'edu_center' | 'joseph_arimathea'
+  const [extraScreen, setExtraScreen] = useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [churchName, setChurchName] = useState(DEFAULT_CHURCH_NAME);
@@ -231,7 +264,7 @@ export default function App() {
       setExtraScreen('');
       return;
     }
-    const { allowed } = resolveScreens(currentUser, roleScreens, roleTemplates);
+    const { allowed } = getEffectiveAllowedSet(currentUser, roleScreens, roleTemplates);
     if (!activeScreen || !allowed.has(activeScreen)) {
       setActiveScreen(getPostLoginScreen(currentUser, roleScreens, roleTemplates));
     }
@@ -383,7 +416,6 @@ export default function App() {
     }
   };
 
-  // ====== CRUD Users ======
   const handleAddUser = async (u) => {
     const { data, error } = await supabase.from('church_users').insert([buildUserPayload(u)]).select().single();
     if (!error && data) { setUsers([...users, data]); alert('تم الحفظ بنجاح!'); }
@@ -406,7 +438,6 @@ export default function App() {
     if (!error) setUsers(users.filter(u => u.id !== id));
   };
 
-  // ====== ربط / فك ربط الأبناء بولي الأمر ======
   const handleLinkChild = async (childId, shouldLink = true, guardianRole = null) => {
     const resolvedType =
       guardianRole === 'mother' || guardianRole === 'الأم'
@@ -569,7 +600,6 @@ export default function App() {
     }
   };
 
-  // ====== Servant actions ======
   const handleAddMemberByServant = async (m) => {
     const { siblings, ...userData } = m;
     const { data: memberData, error } = await supabase.from('church_users').insert([buildUserPayload(userData)]).select().single();
@@ -597,7 +627,6 @@ export default function App() {
     if (data) { setMemberNotes([data, ...memberNotes]); alert('تم حفظ الملاحظة بنجاح!'); }
   };
 
-  // ====== Events / Services / Categories / Custom Cards ======
   const handleAddEvent = async (ev) => {
     const { data } = await supabase.from('church_events').insert([ev]).select().single();
     if (data) setChurchEvents([data, ...churchEvents]);
@@ -672,23 +701,10 @@ export default function App() {
         <div className="min-h-screen bg-[#f6f4ef] flex flex-col justify-between" dir="rtl">
           <div>
             <div className="bg-[#4b0b11] text-white px-3 sm:px-5 py-3 flex justify-between items-center gap-2 sticky top-0 z-40 shadow-md">
-              <button
-                type="button"
-                onClick={() => setAuthView('public')}
-                className="px-3 py-2 bg-white/15 hover:bg-white/25 rounded-xl text-xs font-black cursor-pointer shrink-0"
-              >
-                → الرئيسية
-              </button>
+              <button type="button" onClick={() => setAuthView('public')} className="px-3 py-2 bg-white/15 hover:bg-white/25 rounded-xl text-xs font-black cursor-pointer shrink-0">→ الرئيسية</button>
               <strong className="text-xs sm:text-sm text-amber-200 truncate">🎓 المركز التعليمي — {churchName}</strong>
-              <button
-                type="button"
-                onClick={() => setAuthView('login')}
-                className="px-3 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl text-xs font-black cursor-pointer shrink-0"
-              >
-                🔐 دخول
-              </button>
+              <button type="button" onClick={() => setAuthView('login')} className="px-3 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl text-xs font-black cursor-pointer shrink-0">🔐 دخول</button>
             </div>
-
             <div className="max-w-5xl mx-auto p-3 sm:p-6">
               <EducationalCenterManager currentUser={null} todayISO={todayISO} />
             </div>
@@ -703,30 +719,12 @@ export default function App() {
         <div className="min-h-screen bg-[#f6f4ef] flex flex-col justify-between" dir="rtl">
           <div>
             <div className="bg-[#4b0b11] text-white px-3 sm:px-5 py-3 flex justify-between items-center gap-2 sticky top-0 z-40 shadow-md">
-              <button
-                type="button"
-                onClick={() => setAuthView('public')}
-                className="px-3 py-2 bg-white/15 hover:bg-white/25 rounded-xl text-xs font-black cursor-pointer shrink-0"
-              >
-                → الرئيسية
-              </button>
+              <button type="button" onClick={() => setAuthView('public')} className="px-3 py-2 bg-white/15 hover:bg-white/25 rounded-xl text-xs font-black cursor-pointer shrink-0">→ الرئيسية</button>
               <strong className="text-xs sm:text-sm text-amber-200 truncate">🕊️ خدمة يوسف الرامي — {churchName}</strong>
-              <button
-                type="button"
-                onClick={() => setAuthView('login')}
-                className="px-3 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl text-xs font-black cursor-pointer shrink-0"
-              >
-                🔐 دخول
-              </button>
+              <button type="button" onClick={() => setAuthView('login')} className="px-3 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl text-xs font-black cursor-pointer shrink-0">🔐 دخول</button>
             </div>
-
             <div className="max-w-5xl mx-auto p-3 sm:p-6">
-              <JosephArimatheaManager
-                currentUser={null}
-                users={users}
-                todayISO={todayISO}
-                onRequireLogin={() => setAuthView('login')}
-              />
+              <JosephArimatheaManager currentUser={null} users={users} todayISO={todayISO} onRequireLogin={() => setAuthView('login')} />
             </div>
           </div>
           <ChurchGlobalFooter churchName={churchName} />
@@ -749,7 +747,7 @@ export default function App() {
     );
   }
 
-  const { allowed } = resolveScreens(currentUser, roleScreens, roleTemplates);
+  const { allowed } = getEffectiveAllowedSet(currentUser, roleScreens, roleTemplates);
   const fallbackTab = getPostLoginScreen(currentUser, roleScreens, roleTemplates);
   const currentScr = activeScreen && allowed.has(activeScreen) ? activeScreen : fallbackTab;
 
@@ -783,6 +781,8 @@ export default function App() {
     allowed.has('trips_office') ||
     tripsAccess.view ||
     Boolean(currentUser.permissions?.manage_trips);
+
+  const canAccessHiddenFamilies = hasHiddenFamiliesAccess(currentUser, allowed);
 
   const allServants = users.filter(u => ['servant', 'head_servant', 'vice_head_servant', 'meeting_servant', 'mercy_servant'].includes(u.role));
   const myChildrenAsParent = users.filter(
@@ -827,10 +827,11 @@ export default function App() {
     );
   }
 
-  const navScreens = Array.from(new Set(SCREEN_ORDER)).filter(s => {
+  const navScreens = APP_SCREEN_ORDER.filter(s => {
     if (s === 'edu_center' || s === 'joseph_arimathea') return false;
     if (s === 'public_editor') return canEditPublic;
     if (s === 'trips_office') return canAccessTripsOffice;
+    if (s === 'hidden_families') return canAccessHiddenFamilies;
     return allowed.has(s);
   });
 
@@ -942,7 +943,7 @@ export default function App() {
                         : 'bg-white/10 hover:bg-white/20 text-white/95'
                     }`}
                   >
-                    <span>{SCREEN_LABELS[scr] || scr}</span>
+                    <span>{APP_SCREEN_LABELS[scr] || scr}</span>
                     {scr === 'approvals' && pendingCount > 0 && (
                       <span className="px-1.5 py-0.5 bg-red-600 text-white rounded-full text-[10px] font-black">{pendingCount}</span>
                     )}
@@ -994,7 +995,7 @@ export default function App() {
                         isActive ? 'bg-amber-400 text-[#4a0e13] font-black' : 'bg-white/10 text-white'
                       }`}
                     >
-                      <span className="truncate">{SCREEN_LABELS[scr] || scr}</span>
+                      <span className="truncate">{APP_SCREEN_LABELS[scr] || scr}</span>
                       {scr === 'approvals' && pendingCount > 0 && (
                         <span className="px-1.5 py-0.5 bg-red-600 text-white rounded-full text-[10px] font-black">{pendingCount}</span>
                       )}
@@ -1071,6 +1072,14 @@ export default function App() {
             </div>
           )}
 
+          {!extraScreen && currentScr === 'hidden_families' && canAccessHiddenFamilies && (
+            <HiddenFamiliesPage
+              currentUser={currentUser}
+              users={users}
+              onRefresh={fetchData}
+            />
+          )}
+
           {!extraScreen && currentScr === 'trips_office' && canAccessTripsOffice && (
             <TripsOfficePage currentUser={currentUser} users={users} />
           )}
@@ -1093,6 +1102,7 @@ export default function App() {
               servants={allServants}
               events={churchEvents}
               services={churchServices}
+              serviceGroups={serviceGroups}
               attendance={combinedAttendance}
               confessionSlots={confessionSlots}
               priestPublicEvents={priestPublicEvents}
