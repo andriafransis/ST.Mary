@@ -41,6 +41,15 @@ const COLOR_THEMES = {
 
 export const ADMIN_CARDS_CONFIG_KIND = 'admin_cards_config';
 export const ADMIN_CARDS_LOCAL_KEY = 'church_admin_cards_config_v1';
+export const CARDS_UPDATED_EVENT = 'church-cards-updated';
+
+export const notifyCardsUpdated = () => {
+  try {
+    window.dispatchEvent(new CustomEvent(CARDS_UPDATED_EVENT, { detail: { ts: Date.now() } }));
+  } catch {
+    // ignore non-browser environments
+  }
+};
 
 export const SCREEN_TARGETS = [
   { key: 'admin_hub', label: '🛡️ لوحة الإدارة الرئيسية' },
@@ -97,15 +106,12 @@ const DEFAULT_PRIEST_CARDS = [
 ];
 
 const DEFAULT_PRIEST_SUBCARDS = [
-  // كروت الخدمة (الكاهن) -> داخل كارت الخدمة ومدارس الأحد
   { id: 'priest_srv_sequence', icon: '📋', title: 'شيت التسلسل والافتقاد والترحيم', desc: 'عرض كل خدمة على حدة وبند المعاشات + حالة الافتقاد وذكرى الترحيم', screen: 'service_hub', defaultParentKey: 'builtin:service_hub' },
   { id: 'priest_srv_commitment', icon: '🏅', title: 'الالتزام والكفاءة والعروض والرحلات', desc: 'متابعة الالتزام والغياب والتأخير، ومنح العروض والخصومات، والملاحظات لولي الأمر', screen: 'service_hub', defaultParentKey: 'builtin:service_hub' },
   { id: 'priest_srv_schedule', icon: '🏫', title: 'جدول الخدمة', desc: 'كروت الخدمات، القيادات، الفصول، الخدام، وافتقاد الخدمة', screen: 'service_hub', defaultParentKey: 'builtin:service_hub' },
-  // كروت الاعترافات -> داخل كارت الاعترافات
   { id: 'priest_conf_slots', icon: '📅', title: 'إضافة مواعيد الاعتراف', desc: 'تحديد المدة (أسبوع/شهر/3 شهور)، صباحي/مسائي', screen: 'confessions', defaultParentKey: 'builtin:confessions' },
   { id: 'priest_conf_list', icon: '🙏', title: 'المعترفون', desc: 'الملف الروحي، الثغرات والإجراءات، والقانون الروحي', screen: 'confessions', defaultParentKey: 'builtin:confessions' },
   { id: 'priest_conf_visitations', icon: '🕊️', title: 'افتقاد المعترفين', desc: 'افتقاد بزيارة، رسالة واتساب، أو اتصال', screen: 'confessions', defaultParentKey: 'builtin:confessions' },
-  // كروت بحث الحالة -> داخل كارت بحث الحالة / العيلة
   { id: 'priest_cases_search', icon: '🔎', title: 'بحث الحالة / العيلة', desc: 'الاسم الرباعي، الموبايل، العنوان، التقييم، المرفقات، وطباعة شيت رسمي', screen: 'cases', defaultParentKey: 'builtin:cases' },
   { id: 'priest_cases_cats', icon: '📂', title: 'تصنيفات الحالات', desc: 'حالات مستترة، إخوة الرب، متوسطة، مستقرة', screen: 'cases', defaultParentKey: 'builtin:cases' },
   { id: 'priest_cases_add', icon: '➕', title: 'إضافة حالة جديدة', desc: 'رب الأسرة، الزوجة، الأولاد، الاحتياجات، والمرفقات', screen: 'cases', defaultParentKey: 'builtin:cases' }
@@ -181,6 +187,7 @@ export const saveAdminCardsConfig = async (config) => {
       .update(dbPayload)
       .eq('id', config.rowId);
     if (error) throw new Error(error.message);
+    notifyCardsUpdated();
     return { ...cleanPayload, rowId: config.rowId };
   } else {
     const { data: existing } = await supabase
@@ -196,6 +203,7 @@ export const saveAdminCardsConfig = async (config) => {
         .update(dbPayload)
         .eq('id', existing.id);
       if (error) throw new Error(error.message);
+      notifyCardsUpdated();
       return { ...cleanPayload, rowId: existing.id };
     }
 
@@ -205,6 +213,7 @@ export const saveAdminCardsConfig = async (config) => {
       .select('id')
       .single();
     if (error) throw new Error(error.message);
+    notifyCardsUpdated();
     return { ...cleanPayload, rowId: data?.id || null };
   }
 };
@@ -296,6 +305,13 @@ export default function NestedCardsBuilder({
     field_value: ''
   });
   const [savingEntry, setSavingEntry] = useState(false);
+
+  const triggerInstantSync = async () => {
+    notifyCardsUpdated();
+    if (onRefresh) {
+      await onRefresh();
+    }
+  };
 
   const fetchAll = async () => {
     setLoading(true);
@@ -545,7 +561,6 @@ export default function NestedCardsBuilder({
 
   const currentParentItem = currentParentKey ? itemByKey[currentParentKey] : null;
 
-  // في المستوى الرئيسي: لو اخترنا "كل الكروت" يعرض كل الكروت للتعديل السريع، ولو اخترنا تبويب يعرض كروته
   const visibleCards = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
 
@@ -765,7 +780,7 @@ export default function NestedCardsBuilder({
 
       setNestedModalOpen(false);
       await fetchAll();
-      if (onRefresh) await onRefresh();
+      await triggerInstantSync();
     } catch (err) {
       alert('تعذر حفظ الكارت: ' + err.message);
     } finally {
@@ -847,7 +862,7 @@ export default function NestedCardsBuilder({
 
       setLiveModalOpen(false);
       await fetchAll();
-      if (onRefresh) await onRefresh();
+      await triggerInstantSync();
     } catch (err) {
       alert('تعذر الحفظ: ' + err.message);
     } finally {
@@ -887,7 +902,7 @@ export default function NestedCardsBuilder({
         setCardsConfig(saved);
       }
       await fetchAll();
-      if (onRefresh) await onRefresh();
+      await triggerInstantSync();
     } catch (err) {
       alert('تعذر تغيير الحالة: ' + err.message);
     }
@@ -901,7 +916,7 @@ export default function NestedCardsBuilder({
     const saved = await saveAdminCardsConfig({ ...cardsConfig, overrides: nextOv });
     setCardsConfig(saved);
     await fetchAll();
-    if (onRefresh) await onRefresh();
+    await triggerInstantSync();
   };
 
   const handleDeleteCard = async (item, e) => {
@@ -932,7 +947,7 @@ export default function NestedCardsBuilder({
         setCurrentParentKey(item.parent_key || (rootParentId ? `nested:${rootParentId}` : null));
       }
       await fetchAll();
-      if (onRefresh) await onRefresh();
+      await triggerInstantSync();
       return;
     }
 
@@ -948,7 +963,7 @@ export default function NestedCardsBuilder({
       const { error } = await supabase.from(tbl).delete().eq('id', item.id);
       if (error) return alert('تعذر الحذف: ' + error.message);
       await fetchAll();
-      if (onRefresh) await onRefresh();
+      await triggerInstantSync();
     }
   };
 
@@ -1014,6 +1029,7 @@ export default function NestedCardsBuilder({
       }
 
       setEntryForm({ id: null, title: '', entry_date: '', details: '', field_label: '', field_value: '' });
+      notifyCardsUpdated();
     } catch (err) {
       alert('تعذر حفظ العنصر: ' + err.message);
     } finally {
@@ -1026,6 +1042,7 @@ export default function NestedCardsBuilder({
     const { error } = await supabase.from('priest_custom_entries').delete().eq('id', entryId);
     if (!error) {
       setDynamicEntries(prev => prev.filter(x => x.id !== entryId));
+      notifyCardsUpdated();
     }
   };
 
@@ -1083,7 +1100,6 @@ export default function NestedCardsBuilder({
 
   return (
     <div className="space-y-3 text-xs">
-      {/* شريط العنوان والإضافة */}
       <div className="bg-white p-3.5 rounded-2xl border shadow-2xs flex flex-wrap justify-between items-center gap-2">
         <div className="flex items-center gap-2 flex-wrap">
           {(currentParentKey || onExit) && (
@@ -1112,7 +1128,6 @@ export default function NestedCardsBuilder({
         )}
       </div>
 
-      {/* مسار الكروت المتداخلة */}
       <div className="bg-[#fbfaf7] px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 flex-wrap font-bold text-gray-700">
         <button
           type="button"
@@ -1136,7 +1151,6 @@ export default function NestedCardsBuilder({
         ))}
       </div>
 
-      {/* شريط الفلتر والبحث */}
       <div className="bg-white p-3 rounded-2xl border space-y-2.5">
         {!currentParentKey ? (
           <div className="flex items-center gap-1.5 flex-wrap font-bold">
@@ -1195,7 +1209,6 @@ export default function NestedCardsBuilder({
         </div>
       </div>
 
-      {/* شبكة الكروت */}
       {loading ? (
         <div className="bg-white p-8 rounded-3xl border text-center text-gray-500 font-bold">
           جاري تحميل الكروت...
@@ -1370,7 +1383,6 @@ export default function NestedCardsBuilder({
         </div>
       )}
 
-      {/* نافذة إضافة / تعديل كارت متداخل */}
       {nestedModalOpen && isAdmin && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto">
@@ -1628,7 +1640,6 @@ export default function NestedCardsBuilder({
         </div>
       )}
 
-      {/* نافذة تعديل / نقل كارت أساسي أو كارت خدمة/فصل/تصنيف */}
       {liveModalOpen && isAdmin && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto">
@@ -1809,7 +1820,6 @@ export default function NestedCardsBuilder({
         </div>
       )}
 
-      {/* نافذة بناء وإدارة محتوى/عناصر الشاشة داخل الكارت */}
       {activeBuilderCard && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl w-full max-w-2xl p-6 space-y-4 text-xs font-bold max-h-[90vh] overflow-y-auto">
