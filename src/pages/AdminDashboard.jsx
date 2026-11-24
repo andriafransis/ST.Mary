@@ -4097,9 +4097,3 @@ export default function AdminDashboard({
     </div>
   );
 }
-```[cite: 12]
-
----
-
-### ملحوظة مهمة بخصوص الكروت اللي جوه صفحة الكاهن (`PriestDashboard.jsx`)
-لو في كروت ثابتة مكتوبة جوه `PriestDashboard.jsx` نفسها (مش جاية من `customCards`) وعايز تتحكم فيها من الأدمن أو تعدلها، ابعتلي `PriestDashboard.jsx` و `NestedCardsBuilder.jsx` عشان نربطهم مع بعض بشكل كامل وتكون شايف كل كارت في مكانه بدون أي لخبطة.
