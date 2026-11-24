@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import {
   FolderPlus, Edit3, Trash2, ArrowRight, FolderOpen,
   Save, X, Layers, ExternalLink, FileText, ChevronLeft,
-  Search, Power, Play, RotateCcw, ShieldCheck
+  Search, Power, Play, RotateCcw, ShieldCheck, Plus, LayoutGrid
 } from 'lucide-react';
 
 const COLOR_THEMES = {
@@ -46,6 +46,13 @@ export const SCREEN_TARGETS = [
   { key: 'admin_hub', label: '🛡️ لوحة الإدارة الرئيسية' },
   { key: 'setup_hub', label: '🛠️ الإعدادات SETUP' },
   { key: 'priest_hub', label: '✝ شاشة الأب الكاهن' },
+  { key: 'service_hub', label: '🏫 الخدمة ومدارس الأحد' },
+  { key: 'confessions', label: '🙏 الاعترافات' },
+  { key: 'masses', label: '⛪ جدول القداسات' },
+  { key: 'personal', label: '📅 الجدول الخاص بالكاهن' },
+  { key: 'cases', label: '🔍 بحث الحالة والأسر' },
+  { key: 'edu_center', label: '🎓 المركز التعليمي' },
+  { key: 'joseph_arimathea', label: '🕊️ خدمة يوسف الرامي' },
   { key: 'servant_hub', label: '📖 شاشة الخادم' },
   { key: 'member_hub', label: '🎓 شاشة المخدوم' },
   { key: 'parent_hub', label: '👨‍👩‍👦 شاشة ولي الأمر' }
@@ -64,6 +71,11 @@ export const CARD_ROLE_OPTIONS = [
 export const INTERNAL_SCREENS = [
   { key: 'users', label: 'حسابات الكنيسة' },
   { key: 'services', label: 'الخدمات والاجتماعات والفصول' },
+  { key: 'service_hub', label: 'الخدمة ومدارس الأحد (الكاهن)' },
+  { key: 'confessions', label: 'الاعترافات والمتابعة الروحية' },
+  { key: 'masses', label: 'جدول القداسات' },
+  { key: 'personal', label: 'الجدول الخاص والرحلات' },
+  { key: 'cases', label: 'بحث الحالة والأسر' },
   { key: 'events', label: 'مواعيد القداسات والاجتماعات' },
   { key: 'roles_permissions', label: 'الصلاحيات والأدوار' },
   { key: 'edu_center', label: 'المركز التعليمي' },
@@ -74,6 +86,15 @@ export const INTERNAL_SCREENS = [
   { key: 'page_designer', label: 'التصميم وتعديل الصفحات' },
   { key: 'settings', label: 'الإعدادات وهوية الكنيسة' }
 ];
+
+export const isCardAllowedForRole = (allowedRoles = ['all'], userRole = null, isAdmin = false) => {
+  if (isAdmin || userRole === 'admin') return true;
+  if (!Array.isArray(allowedRoles) || allowedRoles.length === 0 || allowedRoles.includes('all')) {
+    return true;
+  }
+  if (!userRole) return false;
+  return allowedRoles.includes(userRole);
+};
 
 export const loadAdminCardsConfig = async () => {
   let localCfg = { overrides: {}, customScreenCards: [], cardMeta: {} };
@@ -183,7 +204,6 @@ export default function NestedCardsBuilder({
   priests = [],
   onRefresh
 }) {
-  // المسار الحالي للتصفح: null = المستوى الرئيسي، 'builtin:id' = داخل كارت أساسي، 'nested:uuid' = داخل كارت متداخل
   const [currentParentKey, setCurrentParentKey] = useState(
     rootParentId ? `nested:${rootParentId}` : null
   );
@@ -197,6 +217,7 @@ export default function NestedCardsBuilder({
     cardMeta: {}
   });
   const [nestedRows, setNestedRows] = useState([]);
+  const [dynamicEntries, setDynamicEntries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -244,7 +265,17 @@ export default function NestedCardsBuilder({
   });
   const [savingLive, setSavingLive] = useState(false);
 
-  const [selectedInfoCard, setSelectedInfoCard] = useState(null);
+  // نافذة الشاشة/المحتوى الديناميكي المدمج داخل الكارت
+  const [activeBuilderCard, setActiveBuilderCard] = useState(null);
+  const [entryForm, setEntryForm] = useState({
+    id: null,
+    title: '',
+    entry_date: '',
+    details: '',
+    field_label: '',
+    field_value: ''
+  });
+  const [savingEntry, setSavingEntry] = useState(false);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -259,12 +290,22 @@ export default function NestedCardsBuilder({
         query = query.eq('is_active', true);
       }
 
-      const [cardsRes, cfg] = await Promise.all([query, loadAdminCardsConfig()]);
+      const [cardsRes, cfg, entriesRes] = await Promise.all([
+        query,
+        loadAdminCardsConfig(),
+        supabase.from('priest_custom_entries').select('*').order('created_at', { ascending: false })
+      ]);
+
       if (cardsRes.error) {
         console.error(cardsRes.error);
       } else {
         setNestedRows(cardsRes.data || []);
       }
+
+      if (!entriesRes.error && entriesRes.data) {
+        setDynamicEntries(entriesRes.data);
+      }
+
       setCardsConfig(cfg);
     } finally {
       setLoading(false);
@@ -279,7 +320,6 @@ export default function NestedCardsBuilder({
     setCurrentParentKey(rootParentId ? `nested:${rootParentId}` : null);
   }, [rootParentId]);
 
-  // توحيد كل الكروت في شجرة واحدة (كروت الشاشات الأساسية + الكروت المتداخلة + كروت الخدمات والملفات)
   const unifiedCards = useMemo(() => {
     const overrides = cardsConfig.overrides || {};
     const cardMeta = cardsConfig.cardMeta || {};
@@ -325,7 +365,6 @@ export default function NestedCardsBuilder({
     (hubCards || []).forEach(c => addBuiltin(c, 'admin_hub'));
     (setupCards || []).forEach(c => addBuiltin(c, 'setup_hub'));
 
-    // الكروت المتداخلة من جدول nested_cards
     (nestedRows || []).forEach(row => {
       const meta = cardMeta[row.id] || {};
       const parentKey = row.parent_id
@@ -363,7 +402,6 @@ export default function NestedCardsBuilder({
       });
     });
 
-    // كروت الخدمات
     (serviceGroups || []).forEach((grp, idx) => {
       items.push({
         key: `srvgrp:${grp.id || idx}`,
@@ -390,7 +428,6 @@ export default function NestedCardsBuilder({
       });
     });
 
-    // كروت الفصول
     (services || []).forEach((srv, idx) => {
       items.push({
         key: `srvcls:${srv.id || idx}`,
@@ -417,7 +454,6 @@ export default function NestedCardsBuilder({
       });
     });
 
-    // كروت بحث الحالة
     (caseCategories || []).forEach((cat, idx) => {
       items.push({
         key: `cat:${cat.id || idx}`,
@@ -444,7 +480,6 @@ export default function NestedCardsBuilder({
       });
     });
 
-    // كروت الكاهن
     (customCards || []).forEach((cc, idx) => {
       items.push({
         key: `priestcc:${cc.id || idx}`,
@@ -490,7 +525,6 @@ export default function NestedCardsBuilder({
     return map;
   }, [unifiedCards]);
 
-  // مسار التنقل الحالي (Breadcrumbs)
   const breadcrumbs = useMemo(() => {
     const trail = [];
     let cursor = currentParentKey ? itemByKey[currentParentKey] : null;
@@ -505,7 +539,6 @@ export default function NestedCardsBuilder({
 
   const currentParentItem = currentParentKey ? itemByKey[currentParentKey] : null;
 
-  // الكروت المعروضة في المستوى الحالي
   const visibleCards = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
 
@@ -542,7 +575,6 @@ export default function NestedCardsBuilder({
     return [...collected];
   };
 
-  // خيارات الكروت المتاحة كـ "كارت أب" داخل النموذج
   const parentCardOptions = useMemo(() => {
     const blocked = editingNestedId ? new Set(collectDescendantKeys(`nested:${editingNestedId}`)) : new Set();
     return unifiedCards.filter(c => c.canNestInside && !blocked.has(c.key));
@@ -552,7 +584,7 @@ export default function NestedCardsBuilder({
     if (!isAdmin) return alert('🔒 إضافة الكروت متاحة للسوبر أدمن فقط.');
 
     const defaultScreen =
-      !presetParentKey && ['admin_hub', 'setup_hub', 'priest_hub', 'servant_hub', 'member_hub', 'parent_hub'].includes(screenFilter)
+      !presetParentKey && SCREEN_TARGETS.some(s => s.key === screenFilter)
         ? screenFilter
         : 'admin_hub';
 
@@ -606,7 +638,6 @@ export default function NestedCardsBuilder({
       return;
     }
 
-    // كارت نظام أساسي أو كارت جدول خاص
     const raw = item.raw || {};
     setEditingLiveCard(item);
     setLiveForm({
@@ -673,7 +704,6 @@ export default function NestedCardsBuilder({
 
     setSaving(true);
     try {
-      // نستخدم children/info/link في العمود الأساسي بالجدول لضمان توافق الداتابيز، ونحفظ الشاشة في cardMeta
       const dbTargetAction = nestedForm.target_action === 'screen' ? 'info' : nestedForm.target_action;
       const payload = {
         parent_id: dbParentId,
@@ -927,6 +957,83 @@ export default function NestedCardsBuilder({
     }
   };
 
+  const parseEntryPayload = (row) => {
+    try {
+      const parsed = JSON.parse(row.details || '{}');
+      if (parsed && typeof parsed === 'object' && ('text' in parsed || 'field_label' in parsed)) {
+        return {
+          text: parsed.text || '',
+          field_label: parsed.field_label || '',
+          field_value: parsed.field_value || ''
+        };
+      }
+    } catch {
+      // نص عادي
+    }
+    return { text: row.details || '', field_label: '', field_value: '' };
+  };
+
+  const handleSaveDynamicEntry = async (e) => {
+    e.preventDefault();
+    if (!activeBuilderCard || !entryForm.title.trim()) return;
+    setSavingEntry(true);
+    try {
+      const encodedDetails = JSON.stringify({
+        text: (entryForm.details || '').trim(),
+        field_label: (entryForm.field_label || '').trim(),
+        field_value: (entryForm.field_value || '').trim()
+      });
+
+      if (entryForm.id) {
+        const { data, error } = await supabase
+          .from('priest_custom_entries')
+          .update({
+            title: entryForm.title.trim(),
+            entry_date: entryForm.entry_date || null,
+            details: encodedDetails
+          })
+          .eq('id', entryForm.id)
+          .select()
+          .single();
+        if (error) throw new Error(error.message);
+        if (data) {
+          setDynamicEntries(prev => prev.map(x => (x.id === data.id ? data : x)));
+        }
+      } else {
+        const defaultPriestId = currentUser?.id || priests?.[0]?.id || null;
+        const { data, error } = await supabase
+          .from('priest_custom_entries')
+          .insert([{
+            card_id: activeBuilderCard.id,
+            priest_id: defaultPriestId,
+            title: entryForm.title.trim(),
+            entry_date: entryForm.entry_date || null,
+            details: encodedDetails
+          }])
+          .select()
+          .single();
+        if (error) throw new Error(error.message);
+        if (data) {
+          setDynamicEntries(prev => [data, ...prev]);
+        }
+      }
+
+      setEntryForm({ id: null, title: '', entry_date: '', details: '', field_label: '', field_value: '' });
+    } catch (err) {
+      alert('تعذر حفظ العنصر: ' + err.message);
+    } finally {
+      setSavingEntry(false);
+    }
+  };
+
+  const handleDeleteDynamicEntry = async (entryId) => {
+    if (!confirm('حذف هذا العنصر من محتوى الكارت؟')) return;
+    const { error } = await supabase.from('priest_custom_entries').delete().eq('id', entryId);
+    if (!error) {
+      setDynamicEntries(prev => prev.filter(x => x.id !== entryId));
+    }
+  };
+
   const handleOpenOrRunCard = (item) => {
     if (item.kind === 'nested') {
       if (item.target_action === 'link' && item.target_url) {
@@ -938,7 +1045,8 @@ export default function NestedCardsBuilder({
         return;
       }
       if (item.target_action === 'info') {
-        setSelectedInfoCard(item);
+        setEntryForm({ id: null, title: '', entry_date: '', details: '', field_label: '', field_value: '' });
+        setActiveBuilderCard(item);
         return;
       }
       setCurrentParentKey(item.key);
@@ -966,6 +1074,10 @@ export default function NestedCardsBuilder({
     }
     if (onExit) onExit();
   };
+
+  const builderEntries = activeBuilderCard
+    ? dynamicEntries.filter(en => String(en.card_id) === String(activeBuilderCard.id))
+    : [];
 
   return (
     <div className="space-y-3 text-xs">
@@ -998,7 +1110,7 @@ export default function NestedCardsBuilder({
         )}
       </div>
 
-      {/* مسار الكروت المتداخلة (Breadcrumbs) */}
+      {/* مسار الكروت المتداخلة */}
       <div className="bg-[#fbfaf7] px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 flex-wrap font-bold text-gray-700">
         <button
           type="button"
@@ -1031,10 +1143,11 @@ export default function NestedCardsBuilder({
               { key: 'admin_hub', label: 'لوحة الإدارة' },
               { key: 'setup_hub', label: 'الإعدادات SETUP' },
               { key: 'priest_hub', label: 'شاشة الكاهن' },
-              { key: 'servant_hub', label: 'شاشة الخادم' },
-              { key: 'member_hub', label: 'شاشة المخدوم' },
+              { key: 'service_hub', label: 'الخدمة (الكاهن)' },
+              { key: 'confessions', label: 'الاعترافات' },
+              { key: 'cases', label: 'بحث الحالة' },
               { key: 'services', label: 'الخدمات والفصول' },
-              { key: 'categories', label: 'بحث الحالة' },
+              { key: 'categories', label: 'تصنيفات الحالة' },
               { key: 'custom_cards', label: 'كروت الكاهن' },
               { key: 'nested_only', label: 'الكروت المضافة' }
             ].map(tab => (
@@ -1081,7 +1194,7 @@ export default function NestedCardsBuilder({
         </div>
       </div>
 
-      {/* شبكة الكروت داخل حاوية Scroll منظمة */}
+      {/* شبكة الكروت */}
       {loading ? (
         <div className="bg-white p-8 rounded-3xl border text-center text-gray-500 font-bold">
           جاري تحميل الكروت...
@@ -1110,6 +1223,7 @@ export default function NestedCardsBuilder({
             {visibleCards.map((item) => {
               const theme = COLOR_THEMES[item.accent] || COLOR_THEMES.red;
               const innerCount = (childrenByParentKey[item.key] || []).length;
+              const entriesCount = dynamicEntries.filter(en => String(en.card_id) === String(item.id)).length;
               const rolesLabel = item.allowed_roles.includes('all')
                 ? 'للجميع'
                 : item.allowed_roles.map(r => CARD_ROLE_OPTIONS.find(o => o.key === r)?.label || r).join('، ');
@@ -1146,7 +1260,7 @@ export default function NestedCardsBuilder({
                         )}
                         {item.target_action === 'info' && (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-100 text-indigo-900 flex items-center gap-0.5">
-                            <FileText size={10} /> محتوى
+                            <FileText size={10} /> محتوى ({entriesCount})
                           </span>
                         )}
                       </div>
@@ -1178,6 +1292,18 @@ export default function NestedCardsBuilder({
                           className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer ${theme.btn}`}
                         >
                           <FolderPlus size={12} /> + كارت جواه
+                        </button>
+                      )}
+                      {item.kind === 'nested' && item.target_action === 'info' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEntryForm({ id: null, title: '', entry_date: '', details: '', field_label: '', field_value: '' });
+                            setActiveBuilderCard(item);
+                          }}
+                          className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 rounded-xl text-[11px] font-black flex items-center gap-1 cursor-pointer"
+                        >
+                          <LayoutGrid size={12} /> عناصر الشاشة ({entriesCount})
                         </button>
                       )}
                       {item.kind === 'builtin' && onNavigateScreen && (
@@ -1245,7 +1371,7 @@ export default function NestedCardsBuilder({
         </div>
       )}
 
-      {/* نافذة إضافة / تعديل كارت متداخل + صلاحية مكان الظهور والأدوار */}
+      {/* نافذة إضافة / تعديل كارت متداخل */}
       {nestedModalOpen && isAdmin && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto">
@@ -1263,7 +1389,6 @@ export default function NestedCardsBuilder({
             </div>
 
             <form onSubmit={handleSaveNestedCard} className="space-y-3">
-              {/* صلاحية مكان الظهور: في شاشة أم جوا كارت */}
               <div className="bg-amber-50/60 p-3 rounded-2xl border border-amber-200 space-y-2">
                 <label className="block text-[#7a1c24] font-black">① أين يظهر هذا الكارت؟ (مكان الظهور):</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -1327,7 +1452,6 @@ export default function NestedCardsBuilder({
                 )}
               </div>
 
-              {/* صلاحية مين يشوف الكارت */}
               <div className="bg-emerald-50/50 p-3 rounded-2xl border border-emerald-200 space-y-2">
                 <label className="block text-emerald-950 font-black">② صلاحية الرؤية (مين يشوف الكارت ده؟):</label>
                 <div className="flex flex-wrap gap-1.5">
@@ -1420,7 +1544,7 @@ export default function NestedCardsBuilder({
                   >
                     <option value="children">🗂️ كروت فرعية بداخله</option>
                     <option value="screen">🖥️ شاشة من النظام</option>
-                    <option value="info">📄 شاشة محتوى / ملاحظات</option>
+                    <option value="info">📄 شاشة محتوى / عناصر ديناميكية</option>
                     <option value="link">🔗 رابط خارجي</option>
                   </select>
                 </div>
@@ -1683,27 +1807,153 @@ export default function NestedCardsBuilder({
         </div>
       )}
 
-      {selectedInfoCard && (
+      {/* نافذة بناء وإدارة محتوى/عناصر الشاشة داخل الكارت */}
+      {activeBuilderCard && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl w-full max-w-md p-6 space-y-3 text-xs">
-            <div className="flex items-center justify-between border-b pb-2">
-              <h3 className="text-base font-black text-gray-900">
-                {selectedInfoCard.icon} {selectedInfoCard.title}
-              </h3>
-              <button type="button" onClick={() => setSelectedInfoCard(null)} className="p-1 text-gray-500 cursor-pointer">
+          <div className="bg-white rounded-3xl w-full max-w-2xl p-6 space-y-4 text-xs font-bold max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div>
+                <h3 className="text-sm md:text-base font-black text-[#7a1c24]">
+                  {activeBuilderCard.icon} شاشة ومحتوى: {activeBuilderCard.title}
+                </h3>
+                {activeBuilderCard.subtitle && (
+                  <p className="text-[11px] text-gray-500 mt-0.5">{activeBuilderCard.subtitle}</p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveBuilderCard(null)}
+                className="p-1.5 bg-gray-100 rounded-xl text-gray-600 cursor-pointer"
+              >
                 <X size={16} />
               </button>
             </div>
-            {selectedInfoCard.subtitle && (
-              <div className="font-bold text-[#7a1c24]">{selectedInfoCard.subtitle}</div>
+
+            {activeBuilderCard.description && (
+              <div className="p-3 bg-[#fbfaf7] border rounded-2xl text-gray-700 whitespace-pre-line">
+                {activeBuilderCard.description}
+              </div>
             )}
-            <p className="text-gray-700 whitespace-pre-line leading-relaxed max-h-[50vh] overflow-y-auto">
-              {selectedInfoCard.description || 'لا يوجد وصف إضافي.'}
-            </p>
+
+            {isAdmin && (
+              <form onSubmit={handleSaveDynamicEntry} className="bg-amber-50/50 border border-amber-200 p-4 rounded-2xl space-y-2.5">
+                <div className="font-black text-[#7a1c24] flex items-center gap-1">
+                  <Plus size={14} /> {entryForm.id ? 'تعديل عنصر / سجل داخل الكارت' : 'إضافة عنصر / حقل بيانات جديد داخل الكارت'}
+                </div>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  <input
+                    required
+                    placeholder="عنوان البند أو السجل *"
+                    className="p-2.5 border rounded-xl bg-white"
+                    value={entryForm.title}
+                    onChange={e => setEntryForm({ ...entryForm, title: e.target.value })}
+                  />
+                  <input
+                    type="date"
+                    className="p-2.5 border rounded-xl bg-white"
+                    value={entryForm.entry_date}
+                    onChange={e => setEntryForm({ ...entryForm, entry_date: e.target.value })}
+                  />
+                </div>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  <input
+                    placeholder="اسم حقل إضافي (مثال: المسؤول / المبلغ / الحالة)"
+                    className="p-2.5 border rounded-xl bg-white"
+                    value={entryForm.field_label}
+                    onChange={e => setEntryForm({ ...entryForm, field_label: e.target.value })}
+                  />
+                  <input
+                    placeholder="قيمة الحقل الإضافي"
+                    className="p-2.5 border rounded-xl bg-white"
+                    value={entryForm.field_value}
+                    onChange={e => setEntryForm({ ...entryForm, field_value: e.target.value })}
+                  />
+                </div>
+                <textarea
+                  rows={2}
+                  placeholder="تفاصيل أو ملاحظات البند..."
+                  className="w-full p-2.5 border rounded-xl bg-white"
+                  value={entryForm.details}
+                  onChange={e => setEntryForm({ ...entryForm, details: e.target.value })}
+                />
+                <div className="flex justify-end gap-2">
+                  {entryForm.id && (
+                    <button
+                      type="button"
+                      onClick={() => setEntryForm({ id: null, title: '', entry_date: '', details: '', field_label: '', field_value: '' })}
+                      className="px-3 py-1.5 border rounded-xl bg-white cursor-pointer"
+                    >
+                      إلغاء التعديل
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={savingEntry}
+                    className="px-4 py-1.5 bg-[#7a1c24] text-white rounded-xl cursor-pointer"
+                  >
+                    {savingEntry ? 'جاري الحفظ...' : (entryForm.id ? 'حفظ تعديل العنصر' : '+ إضافة عنصر')}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {builderEntries.length === 0 ? (
+                <div className="text-center py-6 text-gray-400 border rounded-2xl">
+                  لا توجد عناصر مضافة داخل هذا الكارت حتى الآن.
+                </div>
+              ) : (
+                builderEntries.map(en => {
+                  const parsed = parseEntryPayload(en);
+                  return (
+                    <div key={en.id} className="p-3 bg-[#fbfaf7] border rounded-2xl flex justify-between items-start gap-2">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <strong className="text-gray-900">{en.title}</strong>
+                          {en.entry_date && <span className="text-[11px] text-gray-500">({en.entry_date})</span>}
+                          {parsed.field_label && parsed.field_value && (
+                            <span className="px-2 py-0.5 bg-indigo-100 text-indigo-900 rounded-lg text-[10px]">
+                              {parsed.field_label}: {parsed.field_value}
+                            </span>
+                          )}
+                        </div>
+                        {parsed.text && <p className="text-gray-700 whitespace-pre-line font-normal">{parsed.text}</p>}
+                      </div>
+                      {isAdmin && (
+                        <div className="flex gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setEntryForm({
+                              id: en.id,
+                              title: en.title || '',
+                              entry_date: en.entry_date || '',
+                              details: parsed.text || '',
+                              field_label: parsed.field_label || '',
+                              field_value: parsed.field_value || ''
+                            })}
+                            className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-800 cursor-pointer"
+                          >
+                            <Edit3 size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteDynamicEntry(en.id)}
+                            className="p-1.5 bg-red-50 hover:bg-red-100 rounded-lg text-red-700 cursor-pointer"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
             <div className="flex justify-end pt-2">
               <button
                 type="button"
-                onClick={() => setSelectedInfoCard(null)}
+                onClick={() => setActiveBuilderCard(null)}
                 className="px-4 py-2 bg-[#7a1c24] text-white rounded-xl font-bold cursor-pointer"
               >
                 إغلاق
