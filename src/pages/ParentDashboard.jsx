@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import {
   CalendarCheck, MessageSquareHeart, ShieldCheck, Info, Calendar,
   MapPin, School, Search, UserCheck, Sparkles, X, Check, Unlink, RotateCcw, Bell,
-  Award, Gift, ClipboardCheck
+  Award, Gift, Link2
 } from 'lucide-react';
 
 export const isArabicOnlyName = (value = '') => {
@@ -235,6 +235,7 @@ export default function ParentDashboard({
   const isMother = useMemo(() => detectParentIsMother(parent), [parent]);
   const dismissedStorageKey = `parent_dismissed_children_${parent.id}`;
 
+  const [activeTab, setActiveTab] = useState('children'); // 'children' | 'linking' | 'campaigns' | 'masses' | 'services'
   const [phoneQuery, setPhoneQuery] = useState('');
   const [validationError, setValidationError] = useState('');
   const [busyChildId, setBusyChildId] = useState(null);
@@ -312,7 +313,10 @@ export default function ParentDashboard({
     setBusyChildId(child.id);
     try {
       const ok = await onLinkChild(child.id, true, isMother ? 'mother' : 'father');
-      if (ok) setPhoneQuery('');
+      if (ok) {
+        setPhoneQuery('');
+        setActiveTab('children');
+      }
     } finally {
       setBusyChildId(null);
     }
@@ -397,499 +401,612 @@ export default function ParentDashboard({
     );
   };
 
+  const linkAlertCount = linkRequests.length + (canManageLinks ? autoSuggestions.length : 0);
+
+  const tabsList = [
+    { id: 'children', label: `👨‍👩‍👦 الأبناء والمتابعة (${effectiveChildrenList.length})` },
+    ...(canManageLinks || linkRequests.length > 0
+      ? [{ id: 'linking', label: '🔗 ربط الأبناء', badge: linkAlertCount }]
+      : []),
+    { id: 'campaigns', label: `🎁 العروض والرحلات (${rewardCampaigns.length})` },
+    { id: 'masses', label: `⛪ القداسات والاجتماعات (${events.length})` },
+    { id: 'services', label: `🏫 الفصول والخدمات (${services.length})` }
+  ];
+
   return (
-    <div className="space-y-4 text-xs" dir="rtl">
-      <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md">
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-base sm:text-xl font-black text-amber-200">أهلاً بحضرتك، {parent.full_name}</h2>
-          <span className="px-2.5 py-0.5 rounded-full bg-white/15 text-amber-100 text-[11px] font-black">
-            {isMother ? '👩 حساب ولي الأمر: الأم' : '👨 حساب ولي الأمر: الأب'}
-          </span>
+    <div className="space-y-3 text-xs" dir="rtl">
+      {/* كارت الترحيب */}
+      <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base sm:text-xl font-black text-amber-200">أهلاً بحضرتك، {parent.full_name}</h2>
+            <span className="px-2.5 py-0.5 rounded-full bg-white/15 text-amber-100 text-[11px] font-black">
+              {isMother ? '👩 حساب ولي الأمر: الأم' : '👨 حساب ولي الأمر: الأب'}
+            </span>
+          </div>
+          <p className="text-xs text-white/85 mt-1">
+            متابعة الأبناء في الكنيسة: الحضور السنوي، الالتزام، الاعتراف، العروض، وملاحظات الأب الكاهن
+          </p>
         </div>
-        <p className="text-xs text-white/85 mt-1">
-          متابعة الأبناء في الكنيسة: الحضور السنوي، الالتزام، الاعتراف، العروض، وملاحظات الأب الكاهن • الأبناء المربوطون حالياً: <strong>{effectiveChildrenList.length}</strong>
-        </p>
+
+        <div className="grid grid-cols-2 sm:flex items-center gap-2 shrink-0">
+          <div className="bg-white/15 border border-white/15 px-3.5 py-2 rounded-2xl text-center">
+            <span className="text-[10px] opacity-85 font-bold block">الأبناء المربوطون</span>
+            <strong className="text-sm sm:text-base text-amber-200 font-black">{effectiveChildrenList.length}</strong>
+          </div>
+          {linkAlertCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('linking')}
+              className="bg-amber-400 hover:bg-amber-300 text-[#4a0e13] px-3.5 py-2 rounded-2xl text-center font-black cursor-pointer shadow transition"
+            >
+              <span className="text-[10px] block">طلبات / مقترحات ربط</span>
+              <strong className="text-sm">{linkAlertCount} ↗</strong>
+            </button>
+          )}
+        </div>
       </div>
 
-      {linkRequests.length > 0 && (
-        <div className="bg-emerald-50 border-2 border-emerald-300 p-4 sm:p-5 rounded-3xl shadow-sm space-y-3">
-          <div className="flex items-center gap-2 text-emerald-950">
-            <Bell size={18} className="text-emerald-700 shrink-0" />
-            <div>
-              <h3 className="text-sm font-black">طلبات ربط أبناء تنتظر موافقتك ({linkRequests.length})</h3>
-              <p className="text-[11px] text-emerald-900/80">
-                راجع بيانات الابن واضغط «قبول الربط» لتأكيد صلته بك أو «رفض» لتجاهل الطلب.
-              </p>
-            </div>
+      {/* تنبيه سريع في حال وجود طلب ربط من الأبناء */}
+      {linkRequests.length > 0 && activeTab !== 'linking' && (
+        <div className="bg-emerald-50 border-2 border-emerald-300 px-4 py-2.5 rounded-2xl flex flex-wrap justify-between items-center gap-2">
+          <div className="flex items-center gap-2 text-emerald-950 font-black">
+            <Bell size={16} className="text-emerald-700" />
+            <span>يوجد ({linkRequests.length}) طلب ربط ابن ينتظر موافقتك</span>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-            {linkRequests.map(req => {
-              const childUser = allUsers.find(u => u.id === req.child_id);
-              const displayName = childUser?.full_name || req.child_name || 'حساب ابن';
-              const guardianLabel = req.guardian_type === 'mother' ? 'الأم' : 'الأب';
-
-              return (
-                <div key={req.id} className="bg-white p-3.5 rounded-2xl border border-emerald-200 flex flex-col justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <strong className="text-sm text-[#7a1c24]">{displayName}</strong>
-                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded-lg text-[10px] font-bold shrink-0">
-                        طلب ربط بـ {guardianLabel}
-                      </span>
-                    </div>
-                    {childUser && (
-                      <p className="text-gray-500">
-                        المرحلة: {childUser.detailed_stage || childUser.service_stage || '—'}
-                        {childUser.assigned_class ? ` • فصل: ${childUser.assigned_class}` : ''}
-                      </p>
-                    )}
-                    {(childUser?.father_phone || childUser?.mother_phone) && (
-                      <p className="text-[11px] text-gray-500">
-                        {childUser.father_phone ? `تليفون الأب: ${childUser.father_phone}` : ''}
-                        {childUser.father_phone && childUser.mother_phone ? ' • ' : ''}
-                        {childUser.mother_phone ? `تليفون الأم: ${childUser.mother_phone}` : ''}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    <button
-                      type="button"
-                      disabled={busyRequestId === req.id}
-                      onClick={() => handleApproveReq(req)}
-                      className="py-2 px-3 bg-green-700 hover:bg-green-800 text-white rounded-xl font-black flex items-center justify-center gap-1 cursor-pointer transition"
-                    >
-                      <Check size={14} /> {busyRequestId === req.id ? 'جاري القبول...' : 'قبول الربط'}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busyRequestId === req.id}
-                      onClick={() => handleRejectReq(req)}
-                      className="py-2 px-3 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition"
-                    >
-                      <X size={14} /> رفض
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('linking')}
+            className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-black cursor-pointer"
+          >
+            مراجعة وقبول الطلبات ↗
+          </button>
         </div>
       )}
 
+      {/* شريط التابات الداخلية المنظمة */}
+      <div className="bg-white p-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto font-black">
+        {tabsList.map(tab => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 transition ${
+              activeTab === tab.id
+                ? 'bg-[#7a1c24] text-white shadow-2xs'
+                : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+            }`}
+          >
+            <span>{tab.label}</span>
+            {tab.badge > 0 && (
+              <span className="px-1.5 py-0.5 bg-amber-400 text-[#4a0e13] rounded-full text-[10px] font-black">
+                {tab.badge}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
       {validationError && (
-        <div className="bg-red-50 border border-red-300 text-red-900 p-3.5 rounded-2xl font-bold flex items-center justify-between gap-2">
+        <div className="bg-red-50 border border-red-300 text-red-900 p-3 rounded-2xl font-bold flex items-center justify-between gap-2">
           <span>⚠️ {validationError}</span>
           <button type="button" onClick={() => setValidationError('')} className="text-red-700 font-black cursor-pointer">✕</button>
         </div>
       )}
 
-      {canManageLinks && autoSuggestions.length > 0 && (
-        <div className="bg-amber-50 border-2 border-amber-300 p-4 sm:p-5 rounded-3xl shadow-sm space-y-3">
-          <div className="flex items-center gap-2 text-amber-950">
-            <Sparkles size={18} className="text-[#7a1c24] shrink-0" />
-            <div>
-              <h3 className="text-sm font-black">تم العثور على أبناء مطابقين لبياناتك تلقائياً — هل هم أبناؤك؟</h3>
-              <p className="text-[11px] text-amber-900/80">
-                اضغط «نعم، ده ابني» لربط الحساب القائم بحسابك مباشرة (الطفل الأول والثاني وكل ابن) دون إنشاء حسابات مكررة.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-            {autoSuggestions.map(({ user: child, reason }) => (
-              <div key={child.id} className="bg-white p-3.5 rounded-2xl border border-amber-200 flex flex-col justify-between gap-3">
-                <div className="space-y-1">
-                  <div className="flex flex-wrap items-start justify-between gap-1.5">
-                    {renderNameBreakdown(child)}
-                    <span className="px-2 py-0.5 bg-amber-100 text-amber-900 rounded-lg text-[10px] font-bold shrink-0">
-                      {reason}
-                    </span>
+      {/* محتوى التاب داخل حاوية Scroll حتى لا تطول الصفحة */}
+      <div className="max-h-[calc(100vh-265px)] overflow-y-auto pr-1 space-y-4">
+        {/* TAB 1: الأبناء والمتابعة */}
+        {activeTab === 'children' && (
+          <>
+            {effectiveChildrenList.length === 0 ? (
+              <div className="bg-amber-50/70 border border-amber-200 p-6 rounded-3xl flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-right">
+                <div className="flex flex-col sm:flex-row items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-amber-100 text-[#7a1c24] flex items-center justify-center shrink-0">
+                    <Info size={22} />
                   </div>
-                  <p className="text-gray-500">
-                    المرحلة: {child.detailed_stage || child.service_stage || '—'}
-                    {child.assigned_class ? ` • فصل: ${child.assigned_class}` : ''}
-                  </p>
-                  {(child.father_full_name || child.mother_full_name) && (
-                    <p className="text-[11px] text-gray-500">
-                      {child.father_full_name ? `الأب: ${child.father_full_name}` : ''}
-                      {child.father_full_name && child.mother_full_name ? ' • ' : ''}
-                      {child.mother_full_name ? `الأم: ${child.mother_full_name}` : ''}
+                  <div>
+                    <strong className="text-sm text-amber-950 block">لا يوجد أبناء مربوطون بحسابك حتى الآن</strong>
+                    <p className="text-amber-900/80 mt-0.5">
+                      يمكنك ربط أبنائك من تاب «ربط الأبناء» عبر الاقتراحات التلقائية أو البحث برقم تليفون الأب أو الأم.
                     </p>
-                  )}
+                  </div>
                 </div>
-
-                <div className="grid grid-cols-2 gap-2 pt-1">
+                {canManageLinks && (
                   <button
                     type="button"
-                    disabled={busyChildId === child.id}
-                    onClick={() => handleConfirmLink(child)}
-                    className="py-2 px-3 bg-green-700 hover:bg-green-800 text-white rounded-xl font-black flex items-center justify-center gap-1 cursor-pointer transition"
+                    onClick={() => setActiveTab('linking')}
+                    className="px-4 py-2.5 bg-[#7a1c24] text-white rounded-xl font-black shrink-0 flex items-center gap-1.5 cursor-pointer"
                   >
-                    <Check size={14} /> {busyChildId === child.id ? 'جاري الربط...' : 'نعم، ده ابني'}
+                    <Link2 size={14} /> الانتقال لربط الأبناء
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDismissSuggestion(child.id)}
-                    className="py-2 px-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition"
-                  >
-                    <X size={14} /> لأ، مش ابني
-                  </button>
-                </div>
+                )}
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+            ) : (
+              <div className="grid gap-4">
+                {effectiveChildrenList.map(child => {
+                  const childAtt = attendance.filter(a => a.member_id === child.id && a.event_date?.startsWith(String(curYear)));
+                  const presentCount = childAtt.filter(a => a.present).length;
+                  const totalCount = childAtt.length;
+                  const rate = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
 
-      {canManageLinks && (
-        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
-          <div className="flex flex-wrap justify-between items-center gap-2">
-            <div className="flex items-center gap-2">
-              <UserCheck size={17} className="text-[#7a1c24] shrink-0" />
-              <div>
-                <h3 className="font-black text-sm text-[#7a1c24]">إظهار تفاصيل الأبناء وربطهم برقم تليفون الأب أو الأم</h3>
-                <p className="text-[11px] text-gray-500">
-                  اكتب رقم تليفون الأب أو الأم (7 أرقام فأكثر) لإظهار تفاصيل الابن المطابق وربطه على الحساب.
-                </p>
-              </div>
-            </div>
+                  const commStat = commitmentStats.find(c => String(c.member_id) === String(child.id));
+                  const noteObj = spiritualNotes.find(n => n.member_id === child.id);
+                  const childVisibleNotes = visibleMemberNotes.filter(
+                    n => String(n.member_id) === String(child.id) && n.visible_to_parent !== false
+                  );
+                  const childRewardsList = memberRewards.filter(r => String(r.member_id) === String(child.id));
 
-            {dismissedIds.length > 0 && (
-              <button
-                type="button"
-                onClick={handleResetDismissed}
-                className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-[11px] flex items-center gap-1 cursor-pointer"
-              >
-                <RotateCcw size={12} /> إظهار المقترحات المخفية
-              </button>
-            )}
-          </div>
-
-          <div className="relative">
-            <Search size={16} className="absolute right-3.5 top-3 text-gray-400" />
-            <input
-              type="tel"
-              inputMode="tel"
-              placeholder="اكتب رقم تليفون الأب أو الأم لإظهار التفاصيل..."
-              className="w-full pr-10 pl-9 py-2.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl text-xs outline-none focus:border-[#7a1c24] focus:bg-white transition"
-              value={phoneQuery}
-              onChange={e => setPhoneQuery(e.target.value)}
-            />
-            {phoneQuery && (
-              <button
-                type="button"
-                onClick={() => setPhoneQuery('')}
-                className="absolute left-3 top-2.5 text-gray-400 hover:text-gray-700 cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            )}
-          </div>
-
-          {phoneQuery.trim() && normalizePhone(phoneQuery).length < 7 && (
-            <p className="text-[11px] text-amber-800 bg-amber-50/80 px-3 py-2 rounded-xl border border-amber-200">
-              أكمل كتابة رقم تليفون الأب أو الأم (7 أرقام على الأقل) لإظهار التفاصيل.
-            </p>
-          )}
-
-          {normalizePhone(phoneQuery).length >= 7 && (
-            <div className="space-y-2 pt-1">
-              {phoneLookupResults.length === 0 ? (
-                <p className="text-center text-gray-400 py-3 bg-[#fbfaf7] rounded-2xl border border-dashed">
-                  لا يوجد أبناء غير مربوطين مسجل لديهم رقم تليفون الأب أو الأم هذا.
-                </p>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                  {phoneLookupResults.map(({ user: child, matchLabel }) => {
-                    const linkedToOther = isCandidateBlockedByOtherParent(parent, child, isMother, existingUserIds);
-                    return (
-                      <div key={child.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col justify-between gap-2.5">
-                        <div className="space-y-1">
-                          <div className="flex items-start justify-between gap-1.5">
-                            {renderNameBreakdown(child)}
-                            <span className="px-2 py-0.5 bg-blue-50 text-blue-800 rounded-lg text-[10px] font-bold shrink-0">
-                              {matchLabel}
-                            </span>
-                          </div>
-                          <p className="text-gray-500">
+                  return (
+                    <div key={child.id} className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 border-b border-gray-100 pb-3">
+                        <div>
+                          <h3 className="text-base font-black text-[#7a1c24]">{child.full_name}</h3>
+                          <p className="text-gray-500 mt-0.5">
                             المرحلة: {child.detailed_stage || child.service_stage || '—'}
                             {child.assigned_class ? ` • ${child.assigned_class}` : ''}
+                            {child.sector ? ` • ${child.sector}` : ''}
                           </p>
-                          {(child.father_full_name || child.mother_full_name) && (
-                            <p className="text-[11px] text-gray-500">
-                              {child.father_full_name ? `الأب: ${child.father_full_name}` : ''}
-                              {child.father_full_name && child.mother_full_name ? ' • ' : ''}
-                              {child.mother_full_name ? `الأم: ${child.mother_full_name}` : ''}
-                            </p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+                          <span className="px-3.5 py-1.5 bg-amber-100 text-amber-950 rounded-xl font-black">
+                            حضور {curYear}: {commStat?.attendance_percentage ?? rate}%
+                          </span>
+                          {commStat?.commitment_status && (
+                            <span className="px-3 py-1.5 bg-teal-50 text-teal-900 border border-teal-200 rounded-xl font-black">
+                              {commStat.commitment_status}
+                            </span>
                           )}
-                          {(child.father_phone || child.mother_phone) && (
+                          {onLinkChild && canManageLinks && (
+                            <button
+                              type="button"
+                              disabled={busyChildId === child.id}
+                              onClick={() => handleUnlink(child)}
+                              title="إلغاء ربط الابن"
+                              className="p-2 bg-gray-100 hover:bg-red-50 text-gray-500 hover:text-red-700 rounded-xl cursor-pointer transition"
+                            >
+                              <Unlink size={14} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-gray-200/70 space-y-1">
+                          <div className="flex items-center gap-1.5 font-black text-gray-800">
+                            <CalendarCheck size={16} className="text-green-700" /> الحضور والالتزام خلال سنة {curYear}
+                          </div>
+                          <p className="text-gray-600">
+                            حضر <strong className="text-green-700 text-sm">{presentCount}</strong> مرة من أصل <strong>{totalCount}</strong> لقاء مسجل.
+                          </p>
+                          {commStat && (
                             <p className="text-[11px] text-gray-500">
-                              {child.father_phone ? `تليفون الأب: ${child.father_phone}` : ''}
-                              {child.father_phone && child.mother_phone ? ' • ' : ''}
-                              {child.mother_phone ? `تليفون الأم: ${child.mother_phone}` : ''}
+                              الغياب: <strong>{commStat.absent_count ?? 0}</strong> • التأخير: <strong>{commStat.late_count ?? 0}</strong> • الانصراف المبكر: <strong>{commStat.early_leave_count ?? 0}</strong>
                             </p>
                           )}
                         </div>
 
-                        {linkedToOther ? (
-                          <span className="px-3 py-2 bg-gray-100 text-gray-600 rounded-xl font-bold text-center text-[11px]">
-                            مربوط بحساب ولي أمر آخر (راجع أدمن الكنيسة لو في خطأ)
-                          </span>
-                        ) : (
+                        <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-gray-200/70 space-y-1">
+                          <div className="flex items-center gap-1.5 font-black text-gray-800">
+                            <ShieldCheck size={16} className="text-[#7a1c24]" /> متابعة الاعتراف
+                          </div>
+                          {noteObj ? (
+                            <>
+                              <p className="text-gray-700">
+                                الحالة: <strong className="text-[#7a1c24]">{noteObj.confession_status}</strong>
+                              </p>
+                              <p className="text-gray-500">آخر اعتراف مسجل: {noteObj.last_confession_date || 'غير مسجل'}</p>
+                            </>
+                          ) : (
+                            <p className="text-gray-400">لم يقم الأب الكاهن بتسجيل متابعة اعتراف بعد.</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="bg-[#f9ecee] border border-[#ebd0d4] p-3.5 rounded-2xl space-y-2">
+                        <div className="flex items-center gap-1.5 font-black text-[#7a1c24]">
+                          <MessageSquareHeart size={16} /> ملاحظات الأب الكاهن والمتابعة على الابن/الابنة:
+                        </div>
+                        {(noteObj?.priest_note || childVisibleNotes.length === 0) && (
+                          <p className="text-[#4a0e13] leading-relaxed">
+                            {noteObj?.priest_note ? noteObj.priest_note : 'لا توجد ملاحظات مسجلة من الأب الكاهن حالياً.'}
+                          </p>
+                        )}
+
+                        {childVisibleNotes.length > 0 && (
+                          <div className="space-y-1.5 pt-1">
+                            {childVisibleNotes.map(mn => {
+                              const isAcked = mn.acknowledged || ackedNoteIds.has(mn.id);
+                              return (
+                                <div key={mn.id} className="bg-white/90 p-2.5 rounded-xl border border-[#e3c2c7] flex flex-wrap justify-between items-center gap-2">
+                                  <div>
+                                    <span className="px-2 py-0.5 bg-amber-100 text-amber-950 rounded-lg text-[10px] font-black ml-1.5">
+                                      {mn.behavior_tag || 'ملاحظة متابعة'}
+                                    </span>
+                                    <span className="text-[#4a0e13] font-bold">{mn.note_text}</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAcknowledge(mn.id)}
+                                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black cursor-pointer ${
+                                      isAcked ? 'bg-emerald-100 text-emerald-900' : 'bg-[#7a1c24] text-white'
+                                    }`}
+                                  >
+                                    {isAcked ? 'تم الاطلاع ✓' : 'تأكيد الاطلاع'}
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {childRewardsList.length > 0 && (
+                        <div className="bg-emerald-50/70 border border-emerald-200 p-3.5 rounded-2xl space-y-2">
+                          <div className="flex items-center gap-1.5 font-black text-emerald-950">
+                            <Gift size={16} className="text-emerald-700" /> مكافآت وعروض وخصومات مستحقة
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {childRewardsList.map(rw => (
+                              <div key={rw.id} className="bg-white p-2.5 rounded-xl border border-emerald-200 flex justify-between items-center gap-2">
+                                <div>
+                                  <strong className="text-gray-900 block">{rw.reward_title}</strong>
+                                  <span className="text-[11px] text-gray-500">{rw.reward_type} {rw.granted_date ? `• ${rw.granted_date}` : ''}</span>
+                                </div>
+                                {Number(rw.discount_percent || 0) > 0 && (
+                                  <span className="px-2 py-1 bg-emerald-100 text-emerald-900 rounded-lg font-black text-[11px] shrink-0">
+                                    خصم {rw.discount_percent}%
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* TAB 2: ربط الأبناء وطلبات الموافقة */}
+        {activeTab === 'linking' && (
+          <div className="space-y-4">
+            {linkRequests.length > 0 && (
+              <div className="bg-emerald-50 border-2 border-emerald-300 p-4 sm:p-5 rounded-3xl shadow-sm space-y-3">
+                <div className="flex items-center gap-2 text-emerald-950">
+                  <Bell size={18} className="text-emerald-700 shrink-0" />
+                  <div>
+                    <h3 className="text-sm font-black">طلبات ربط أبناء تنتظر موافقتك ({linkRequests.length})</h3>
+                    <p className="text-[11px] text-emerald-900/80">
+                      راجع بيانات الابن واضغط «قبول الربط» لتأكيد صلته بك أو «رفض» لتجاهل الطلب.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {linkRequests.map(req => {
+                    const childUser = allUsers.find(u => u.id === req.child_id);
+                    const displayName = childUser?.full_name || req.child_name || 'حساب ابن';
+                    const guardianLabel = req.guardian_type === 'mother' ? 'الأم' : 'الأب';
+
+                    return (
+                      <div key={req.id} className="bg-white p-3.5 rounded-2xl border border-emerald-200 flex flex-col justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <strong className="text-sm text-[#7a1c24]">{displayName}</strong>
+                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded-lg text-[10px] font-bold shrink-0">
+                              طلب ربط بـ {guardianLabel}
+                            </span>
+                          </div>
+                          {childUser && (
+                            <p className="text-gray-500">
+                              المرحلة: {childUser.detailed_stage || childUser.service_stage || '—'}
+                              {childUser.assigned_class ? ` • فصل: ${childUser.assigned_class}` : ''}
+                            </p>
+                          )}
+                          {(childUser?.father_phone || childUser?.mother_phone) && (
+                            <p className="text-[11px] text-gray-500">
+                              {childUser.father_phone ? `تليفون الأب: ${childUser.father_phone}` : ''}
+                              {childUser.father_phone && childUser.mother_phone ? ' • ' : ''}
+                              {childUser.mother_phone ? `تليفون الأم: ${childUser.mother_phone}` : ''}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 pt-1">
                           <button
                             type="button"
-                            disabled={busyChildId === child.id}
-                            onClick={() => handleConfirmLink(child)}
-                            className="w-full py-2 px-3 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center justify-center gap-1.5 cursor-pointer transition"
+                            disabled={busyRequestId === req.id}
+                            onClick={() => handleApproveReq(req)}
+                            className="py-2 px-3 bg-green-700 hover:bg-green-800 text-white rounded-xl font-black flex items-center justify-center gap-1 cursor-pointer transition"
                           >
-                            <Check size={14} /> {busyChildId === child.id ? 'جاري الربط...' : 'نعم، ربط هذا الابن بحسابي'}
+                            <Check size={14} /> {busyRequestId === req.id ? 'جاري القبول...' : 'قبول الربط'}
                           </button>
-                        )}
+                          <button
+                            type="button"
+                            disabled={busyRequestId === req.id}
+                            onClick={() => handleRejectReq(req)}
+                            className="py-2 px-3 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition"
+                          >
+                            <X size={14} /> رفض
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
                 </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+              </div>
+            )}
 
-      {effectiveChildrenList.length === 0 ? (
-        <div className="bg-amber-50/70 border border-amber-200 p-5 rounded-3xl flex flex-col sm:flex-row items-center gap-3 text-center sm:text-right">
-          <div className="w-11 h-11 rounded-2xl bg-amber-100 text-[#7a1c24] flex items-center justify-center shrink-0">
-            <Info size={22} />
-          </div>
-          <div>
-            <strong className="text-sm text-amber-950 block">لا يوجد أبناء مربوطون بحسابك حتى الآن</strong>
-            <p className="text-amber-900/80 mt-0.5">
-              يمكنك ربط أبنائك من الاقتراحات التلقائية بالأعلى أو بكتابة رقم تليفون الأب أو الأم لإظهار التفاصيل.
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div className="grid gap-4">
-          {effectiveChildrenList.map(child => {
-            const childAtt = attendance.filter(a => a.member_id === child.id && a.event_date?.startsWith(String(curYear)));
-            const presentCount = childAtt.filter(a => a.present).length;
-            const totalCount = childAtt.length;
-            const rate = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
-
-            const commStat = commitmentStats.find(c => String(c.member_id) === String(child.id));
-            const noteObj = spiritualNotes.find(n => n.member_id === child.id);
-            const childVisibleNotes = visibleMemberNotes.filter(
-              n => String(n.member_id) === String(child.id) && n.visible_to_parent !== false
-            );
-            const childRewardsList = memberRewards.filter(r => String(r.member_id) === String(child.id));
-
-            return (
-              <div key={child.id} className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-4">
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 border-b border-gray-100 pb-3">
+            {canManageLinks && autoSuggestions.length > 0 && (
+              <div className="bg-amber-50 border-2 border-amber-300 p-4 sm:p-5 rounded-3xl shadow-sm space-y-3">
+                <div className="flex items-center gap-2 text-amber-950">
+                  <Sparkles size={18} className="text-[#7a1c24] shrink-0" />
                   <div>
-                    <h3 className="text-base font-black text-[#7a1c24]">{child.full_name}</h3>
-                    <p className="text-gray-500 mt-0.5">
-                      المرحلة: {child.detailed_stage || child.service_stage || '—'}
-                      {child.assigned_class ? ` • ${child.assigned_class}` : ''}
-                      {child.sector ? ` • ${child.sector}` : ''}
+                    <h3 className="text-sm font-black">تم العثور على أبناء مطابقين لبياناتك تلقائياً — هل هم أبناؤك؟</h3>
+                    <p className="text-[11px] text-amber-900/80">
+                      اضغط «نعم، ده ابني» لربط الحساب القائم بحسابك مباشرة (الطفل الأول والثاني وكل ابن) دون إنشاء حسابات مكررة.
                     </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
-                    <span className="px-3.5 py-1.5 bg-amber-100 text-amber-950 rounded-xl font-black">
-                      حضور {curYear}: {commStat?.attendance_percentage ?? rate}%
-                    </span>
-                    {commStat?.commitment_status && (
-                      <span className="px-3 py-1.5 bg-teal-50 text-teal-900 border border-teal-200 rounded-xl font-black">
-                        {commStat.commitment_status}
-                      </span>
-                    )}
-                    {onLinkChild && canManageLinks && (
-                      <button
-                        type="button"
-                        disabled={busyChildId === child.id}
-                        onClick={() => handleUnlink(child)}
-                        title="إلغاء ربط الابن"
-                        className="p-2 bg-gray-100 hover:bg-red-50 text-gray-500 hover:text-red-700 rounded-xl cursor-pointer transition"
-                      >
-                        <Unlink size={14} />
-                      </button>
-                    )}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-gray-200/70 space-y-1">
-                    <div className="flex items-center gap-1.5 font-black text-gray-800">
-                      <CalendarCheck size={16} className="text-green-700" /> الحضور والالتزام خلال سنة {curYear}
-                    </div>
-                    <p className="text-gray-600">
-                      حضر <strong className="text-green-700 text-sm">{presentCount}</strong> مرة من أصل <strong>{totalCount}</strong> لقاء مسجل.
-                    </p>
-                    {commStat && (
-                      <p className="text-[11px] text-gray-500">
-                        الغياب: <strong>{commStat.absent_count ?? 0}</strong> • التأخير: <strong>{commStat.late_count ?? 0}</strong> • الانصراف المبكر: <strong>{commStat.early_leave_count ?? 0}</strong>
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-gray-200/70 space-y-1">
-                    <div className="flex items-center gap-1.5 font-black text-gray-800">
-                      <ShieldCheck size={16} className="text-[#7a1c24]" /> متابعة الاعتراف
-                    </div>
-                    {noteObj ? (
-                      <>
-                        <p className="text-gray-700">
-                          الحالة: <strong className="text-[#7a1c24]">{noteObj.confession_status}</strong>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {autoSuggestions.map(({ user: child, reason }) => (
+                    <div key={child.id} className="bg-white p-3.5 rounded-2xl border border-amber-200 flex flex-col justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-start justify-between gap-1.5">
+                          {renderNameBreakdown(child)}
+                          <span className="px-2 py-0.5 bg-amber-100 text-amber-900 rounded-lg text-[10px] font-bold shrink-0">
+                            {reason}
+                          </span>
+                        </div>
+                        <p className="text-gray-500">
+                          المرحلة: {child.detailed_stage || child.service_stage || '—'}
+                          {child.assigned_class ? ` • فصل: ${child.assigned_class}` : ''}
                         </p>
-                        <p className="text-gray-500">آخر اعتراف مسجل: {noteObj.last_confession_date || 'غير مسجل'}</p>
-                      </>
-                    ) : (
-                      <p className="text-gray-400">لم يقم الأب الكاهن بتسجيل متابعة اعتراف بعد.</p>
-                    )}
-                  </div>
-                </div>
+                        {(child.father_full_name || child.mother_full_name) && (
+                          <p className="text-[11px] text-gray-500">
+                            {child.father_full_name ? `الأب: ${child.father_full_name}` : ''}
+                            {child.father_full_name && child.mother_full_name ? ' • ' : ''}
+                            {child.mother_full_name ? `الأم: ${child.mother_full_name}` : ''}
+                          </p>
+                        )}
+                      </div>
 
-                <div className="bg-[#f9ecee] border border-[#ebd0d4] p-3.5 rounded-2xl space-y-2">
-                  <div className="flex items-center gap-1.5 font-black text-[#7a1c24]">
-                    <MessageSquareHeart size={16} /> ملاحظات الأب الكاهن والمتابعة على الابن/الابنة:
-                  </div>
-                  <p className="text-[#4a0e13] leading-relaxed">
-                    {noteObj?.priest_note
-                      ? noteObj.priest_note
-                      : childVisibleNotes.length === 0
-                        ? 'لا توجد ملاحظات مسجلة من الأب الكاهن حالياً.'
-                        : ''}
-                  </p>
-
-                  {childVisibleNotes.length > 0 && (
-                    <div className="space-y-1.5 pt-1">
-                      {childVisibleNotes.map(mn => {
-                        const isAcked = mn.acknowledged || ackedNoteIds.has(mn.id);
-                        return (
-                          <div key={mn.id} className="bg-white/90 p-2.5 rounded-xl border border-[#e3c2c7] flex flex-wrap justify-between items-center gap-2">
-                            <div>
-                              <span className="px-2 py-0.5 bg-amber-100 text-amber-950 rounded-lg text-[10px] font-black ml-1.5">
-                                {mn.behavior_tag || 'ملاحظة متابعة'}
-                              </span>
-                              <span className="text-[#4a0e13] font-bold">{mn.note_text}</span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleAcknowledge(mn.id)}
-                              className={`px-2.5 py-1 rounded-lg text-[10px] font-black cursor-pointer ${
-                                isAcked ? 'bg-emerald-100 text-emerald-900' : 'bg-[#7a1c24] text-white'
-                              }`}
-                            >
-                              {isAcked ? 'تم الاطلاع ✓' : 'تأكيد الاطلاع'}
-                            </button>
-                          </div>
-                        );
-                      })}
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={busyChildId === child.id}
+                          onClick={() => handleConfirmLink(child)}
+                          className="py-2 px-3 bg-green-700 hover:bg-green-800 text-white rounded-xl font-black flex items-center justify-center gap-1 cursor-pointer transition"
+                        >
+                          <Check size={14} /> {busyChildId === child.id ? 'جاري الربط...' : 'نعم، ده ابني'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDismissSuggestion(child.id)}
+                          className="py-2 px-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold flex items-center justify-center gap-1 cursor-pointer transition"
+                        >
+                          <X size={14} /> لأ، مش ابني
+                        </button>
+                      </div>
                     </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {canManageLinks && (
+              <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
+                <div className="flex flex-wrap justify-between items-center gap-2">
+                  <div className="flex items-center gap-2">
+                    <UserCheck size={17} className="text-[#7a1c24] shrink-0" />
+                    <div>
+                      <h3 className="font-black text-sm text-[#7a1c24]">إظهار تفاصيل الأبناء وربطهم برقم تليفون الأب أو الأم</h3>
+                      <p className="text-[11px] text-gray-500">
+                        اكتب رقم تليفون الأب أو الأم (7 أرقام فأكثر) لإظهار تفاصيل الابن المطابق وربطه على الحساب.
+                      </p>
+                    </div>
+                  </div>
+
+                  {dismissedIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleResetDismissed}
+                      className="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                    >
+                      <RotateCcw size={12} /> إظهار المقترحات المخفية
+                    </button>
                   )}
                 </div>
 
-                {childRewardsList.length > 0 && (
-                  <div className="bg-emerald-50/70 border border-emerald-200 p-3.5 rounded-2xl space-y-2">
-                    <div className="flex items-center gap-1.5 font-black text-emerald-950">
-                      <Gift size={16} className="text-emerald-700" /> مكافآت وعروض وخصومات مستحقة
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {childRewardsList.map(rw => (
-                        <div key={rw.id} className="bg-white p-2.5 rounded-xl border border-emerald-200 flex justify-between items-center gap-2">
-                          <div>
-                            <strong className="text-gray-900 block">{rw.reward_title}</strong>
-                            <span className="text-[11px] text-gray-500">{rw.reward_type} {rw.granted_date ? `• ${rw.granted_date}` : ''}</span>
-                          </div>
-                          {Number(rw.discount_percent || 0) > 0 && (
-                            <span className="px-2 py-1 bg-emerald-100 text-emerald-900 rounded-lg font-black text-[11px] shrink-0">
-                              خصم {rw.discount_percent}%
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
+                <div className="relative">
+                  <Search size={16} className="absolute right-3.5 top-3 text-gray-400" />
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    placeholder="اكتب رقم تليفون الأب أو الأم لإظهار التفاصيل..."
+                    className="w-full pr-10 pl-9 py-2.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl text-xs outline-none focus:border-[#7a1c24] focus:bg-white transition"
+                    value={phoneQuery}
+                    onChange={e => setPhoneQuery(e.target.value)}
+                  />
+                  {phoneQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setPhoneQuery('')}
+                      className="absolute left-3 top-2.5 text-gray-400 hover:text-gray-700 cursor-pointer"
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+
+                {phoneQuery.trim() && normalizePhone(phoneQuery).length < 7 && (
+                  <p className="text-[11px] text-amber-800 bg-amber-50/80 px-3 py-2 rounded-xl border border-amber-200">
+                    أكمل كتابة رقم تليفون الأب أو الأم (7 أرقام على الأقل) لإظهار التفاصيل.
+                  </p>
+                )}
+
+                {normalizePhone(phoneQuery).length >= 7 && (
+                  <div className="space-y-2 pt-1">
+                    {phoneLookupResults.length === 0 ? (
+                      <p className="text-center text-gray-400 py-3 bg-[#fbfaf7] rounded-2xl border border-dashed">
+                        لا يوجد أبناء غير مربوطين مسجل لديهم رقم تليفون الأب أو الأم هذا.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                        {phoneLookupResults.map(({ user: child, matchLabel }) => {
+                          const linkedToOther = isCandidateBlockedByOtherParent(parent, child, isMother, existingUserIds);
+                          return (
+                            <div key={child.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col justify-between gap-2.5">
+                              <div className="space-y-1">
+                                <div className="flex items-start justify-between gap-1.5">
+                                  {renderNameBreakdown(child)}
+                                  <span className="px-2 py-0.5 bg-blue-50 text-blue-800 rounded-lg text-[10px] font-bold shrink-0">
+                                    {matchLabel}
+                                  </span>
+                                </div>
+                                <p className="text-gray-500">
+                                  المرحلة: {child.detailed_stage || child.service_stage || '—'}
+                                  {child.assigned_class ? ` • ${child.assigned_class}` : ''}
+                                </p>
+                                {(child.father_full_name || child.mother_full_name) && (
+                                  <p className="text-[11px] text-gray-500">
+                                    {child.father_full_name ? `الأب: ${child.father_full_name}` : ''}
+                                    {child.father_full_name && child.mother_full_name ? ' • ' : ''}
+                                    {child.mother_full_name ? `الأم: ${child.mother_full_name}` : ''}
+                                  </p>
+                                )}
+                                {(child.father_phone || child.mother_phone) && (
+                                  <p className="text-[11px] text-gray-500">
+                                    {child.father_phone ? `تليفون الأب: ${child.father_phone}` : ''}
+                                    {child.father_phone && child.mother_phone ? ' • ' : ''}
+                                    {child.mother_phone ? `تليفون الأم: ${child.mother_phone}` : ''}
+                                  </p>
+                                )}
+                              </div>
+
+                              {linkedToOther ? (
+                                <span className="px-3 py-2 bg-gray-100 text-gray-600 rounded-xl font-bold text-center text-[11px]">
+                                  مربوط بحساب ولي أمر آخر (راجع أدمن الكنيسة لو في خطأ)
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={busyChildId === child.id}
+                                  onClick={() => handleConfirmLink(child)}
+                                  className="w-full py-2 px-3 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center justify-center gap-1.5 cursor-pointer transition"
+                                >
+                                  <Check size={14} /> {busyChildId === child.id ? 'جاري الربط...' : 'نعم، ربط هذا الابن بحسابي'}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            );
-          })}
-        </div>
-      )}
+            )}
+          </div>
+        )}
 
-      {rewardCampaigns.length > 0 && (
-        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
-          <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
-            <Award size={17} /> العروض والرحلات والمؤتمرات المتاحة ({rewardCampaigns.length})
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {rewardCampaigns.map(camp => (
-              <div key={camp.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <strong className="text-sm text-gray-900">{camp.title}</strong>
-                  <span className="px-2 py-0.5 bg-amber-100 text-amber-950 rounded-lg font-bold text-[10px]">{camp.target_scope || 'عام'}</span>
-                </div>
-                {camp.description && <p className="text-gray-600">{camp.description}</p>}
+        {/* TAB 3: العروض والرحلات والمكافآت */}
+        {activeTab === 'campaigns' && (
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
+            <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
+              <Award size={17} /> العروض والرحلات والمؤتمرات المتاحة ({rewardCampaigns.length})
+            </h3>
+            {rewardCampaigns.length === 0 ? (
+              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+                لا توجد عروض أو رحلات مضافة حالياً.
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
-        <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
-          <Calendar size={17} /> مواعيد القداسات والاجتماعات بالكنيسة
-        </h3>
-        {events.length === 0 ? (
-          <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
-            لا توجد مواعيد مضافة حالياً.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {events.map(ev => (
-              <div key={ev.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-2">
-                <div className="space-y-1">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900 font-bold text-[10px]">{ev.event_type || 'قداس'}</span>
-                    <strong className="text-sm text-gray-900">{ev.title}</strong>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {rewardCampaigns.map(camp => (
+                  <div key={camp.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <strong className="text-sm text-gray-900">{camp.title}</strong>
+                      <span className="px-2 py-0.5 bg-amber-100 text-amber-950 rounded-lg font-bold text-[10px]">
+                        {camp.target_scope || 'عام'}
+                      </span>
+                    </div>
+                    {camp.description && <p className="text-gray-600">{camp.description}</p>}
                   </div>
-                  <span className="text-gray-500 flex items-center gap-1">
-                    <MapPin size={12} className="text-[#7a1c24]" /> {ev.place}
-                  </span>
-                </div>
-                <span className="self-start sm:self-center px-3 py-1 bg-red-50 text-[#7a1c24] rounded-xl font-black text-[11px] shrink-0">
-                  {ev.event_time}
-                </span>
+                ))}
               </div>
-            ))}
+            )}
+          </div>
+        )}
+
+        {/* TAB 4: مواعيد القداسات والاجتماعات */}
+        {activeTab === 'masses' && (
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
+            <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
+              <Calendar size={17} /> مواعيد القداسات والاجتماعات بالكنيسة
+            </h3>
+            {events.length === 0 ? (
+              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+                لا توجد مواعيد مضافة حالياً.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {events.map(ev => (
+                  <div key={ev.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900 font-bold text-[10px]">{ev.event_type || 'قداس'}</span>
+                        <strong className="text-sm text-gray-900">{ev.title}</strong>
+                      </div>
+                      <span className="text-gray-500 flex items-center gap-1">
+                        <MapPin size={12} className="text-[#7a1c24]" /> {ev.place}
+                      </span>
+                    </div>
+                    <span className="self-start sm:self-center px-3 py-1 bg-red-50 text-[#7a1c24] rounded-xl font-black text-[11px] shrink-0">
+                      {ev.event_time}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 5: الفصول والخدمات */}
+        {activeTab === 'services' && (
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
+            <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
+              <School size={17} /> الفصول والخدمات المتاحة بالكنيسة
+            </h3>
+            {services.length === 0 ? (
+              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+                لا توجد فصول أو خدمات مسجلة حالياً.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {services.map(srv => {
+                  const grp = serviceGroups.find(g => g.id === srv.group_id);
+                  return (
+                    <div key={srv.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl space-y-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <strong className="text-sm text-gray-900">{srv.class_name}</strong>
+                        <span className="px-2 py-0.5 bg-blue-50 text-blue-800 rounded-lg font-bold text-[10px]">
+                          {grp?.group_name ? `${grp.group_name} • ` : ''}{srv.stage_name}
+                        </span>
+                      </div>
+                      <span className="text-gray-500 block">⏰ {srv.meeting_time} {srv.room_name ? `• 📍 ${srv.room_name}` : ''}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>
-
-      {services.length > 0 && (
-        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
-          <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
-            <School size={17} /> الفصول والخدمات المتاحة بالكنيسة
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {services.map(srv => {
-              const grp = serviceGroups.find(g => g.id === srv.group_id);
-              return (
-                <div key={srv.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl space-y-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <strong className="text-sm text-gray-900">{srv.class_name}</strong>
-                    <span className="px-2 py-0.5 bg-blue-50 text-blue-800 rounded-lg font-bold text-[10px]">
-                      {grp?.group_name ? `${grp.group_name} • ` : ''}{srv.stage_name}
-                    </span>
-                  </div>
-                  <span className="text-gray-500 block">⏰ {srv.meeting_time} {srv.room_name ? `• 📍 ${srv.room_name}` : ''}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
