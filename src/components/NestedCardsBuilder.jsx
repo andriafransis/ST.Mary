@@ -82,7 +82,6 @@ export const INTERNAL_SCREENS = [
   { key: 'joseph_arimathea', label: 'خدمة يوسف الرامي' },
   { key: 'burial_and_caskets', label: 'أماكن الدفن والصناديق' },
   { key: 'categories', label: 'كروت بحث الحالة' },
-  { key: 'custom_cards', label: 'كروت إضافية للكاهن' },
   { key: 'page_designer', label: 'التصميم وتعديل الصفحات' },
   { key: 'settings', label: 'الإعدادات وهوية الكنيسة' }
 ];
@@ -225,7 +224,6 @@ export default function NestedCardsBuilder({
   serviceGroups = [],
   services = [],
   caseCategories = [],
-  customCards = [],
   priests = [],
   onRefresh
 }) {
@@ -246,7 +244,6 @@ export default function NestedCardsBuilder({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // نافذة إضافة / تعديل كارت متداخل + صلاحيات مكانه والأدوار
   const [nestedModalOpen, setNestedModalOpen] = useState(false);
   const [editingNestedId, setEditingNestedId] = useState(null);
   const [nestedForm, setNestedForm] = useState({
@@ -267,7 +264,6 @@ export default function NestedCardsBuilder({
     is_active: true
   });
 
-  // نافذة تعديل / نقل أي كارت في النظام
   const [liveModalOpen, setLiveModalOpen] = useState(false);
   const [editingLiveCard, setEditingLiveCard] = useState(null);
   const [liveForm, setLiveForm] = useState({
@@ -290,7 +286,6 @@ export default function NestedCardsBuilder({
   });
   const [savingLive, setSavingLive] = useState(false);
 
-  // نافذة بناء وإدارة محتوى/عناصر الشاشة داخل الكارت
   const [activeBuilderCard, setActiveBuilderCard] = useState(null);
   const [entryForm, setEntryForm] = useState({
     id: null,
@@ -352,7 +347,7 @@ export default function NestedCardsBuilder({
     const seenBuiltin = new Set();
 
     const addBuiltin = (raw, defaultScreen) => {
-      if (!raw?.id || raw.isCustom || raw.isNestedRoot) return;
+      if (!raw?.id || raw.isCustom || raw.isNestedRoot || raw.id === 'custom_cards') return;
       if (seenBuiltin.has(raw.id)) return;
       seenBuiltin.add(raw.id);
 
@@ -517,36 +512,8 @@ export default function NestedCardsBuilder({
       });
     });
 
-    (customCards || []).forEach((cc, idx) => {
-      const id = cc.id || `pcc_${idx}`;
-      const ov = overrides[`priestcc:${id}`] || {};
-      items.push({
-        key: `priestcc:${id}`,
-        kind: 'db_item',
-        sourceType: 'custom_card',
-        id: cc.id,
-        raw: cc,
-        title: ov.title || cc.card_title || '',
-        subtitle: 'كارت مخصص في صفحة الأب الكاهن',
-        description: ov.desc !== undefined ? ov.desc : (cc.description || ''),
-        icon: ov.icon || cc.card_icon || '📌',
-        badge: 'كارت كاهن',
-        accent: 'purple',
-        isActive: ov.is_active !== undefined ? ov.is_active : true,
-        placement_mode: ov.parent_key ? 'card' : 'screen',
-        placement_screen: ov.placement_screen || 'custom_cards',
-        parent_key: ov.parent_key || null,
-        allowed_roles: Array.isArray(ov.allowed_roles) && ov.allowed_roles.length > 0 ? ov.allowed_roles : ['admin', 'priest'],
-        target_action: 'screen',
-        target_screen: 'custom_cards',
-        editable: Boolean(cc.id),
-        deletable: Boolean(cc.id),
-        canNestInside: false
-      });
-    });
-
     return items;
-  }, [hubCards, setupCards, nestedRows, cardsConfig, serviceGroups, services, caseCategories, customCards]);
+  }, [hubCards, setupCards, nestedRows, cardsConfig, serviceGroups, services, caseCategories]);
 
   const itemByKey = useMemo(() => {
     const map = {};
@@ -578,6 +545,7 @@ export default function NestedCardsBuilder({
 
   const currentParentItem = currentParentKey ? itemByKey[currentParentKey] : null;
 
+  // في المستوى الرئيسي: لو اخترنا "كل الكروت" يعرض كل الكروت للتعديل السريع، ولو اخترنا تبويب يعرض كروته
   const visibleCards = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
 
@@ -587,16 +555,16 @@ export default function NestedCardsBuilder({
       return children.filter(c => `${c.title} ${c.subtitle} ${c.description}`.toLowerCase().includes(q));
     }
 
-    const rootList = childrenByParentKey['__ROOT__'] || [];
-    return rootList.filter(item => {
-      if (screenFilter === 'nested_only' && item.kind !== 'nested') return false;
-      else if (screenFilter !== 'all' && screenFilter !== 'nested_only') {
-        if (item.placement_screen !== screenFilter) return false;
-      }
-      if (!q) return true;
-      return `${item.title} ${item.subtitle} ${item.description}`.toLowerCase().includes(q);
-    });
-  }, [currentParentKey, childrenByParentKey, screenFilter, searchQuery]);
+    const baseList = screenFilter === 'all'
+      ? unifiedCards
+      : (childrenByParentKey['__ROOT__'] || []).filter(item => {
+          if (screenFilter === 'nested_only') return item.kind === 'nested';
+          return item.placement_screen === screenFilter;
+        });
+
+    if (!q) return baseList;
+    return baseList.filter(c => `${c.title} ${c.subtitle} ${c.description}`.toLowerCase().includes(q));
+  }, [currentParentKey, childrenByParentKey, unifiedCards, screenFilter, searchQuery]);
 
   const collectDescendantKeys = (startKey) => {
     const collected = new Set([startKey]);
@@ -875,17 +843,6 @@ export default function NestedCardsBuilder({
           .update({ name: liveForm.title.trim(), icon: (liveForm.icon || '📂').trim() })
           .eq('id', targetId);
         if (error) throw new Error(error.message);
-      } else if (liveForm.sourceType === 'custom_card') {
-        const { error } = await supabase
-          .from('priest_custom_cards')
-          .update({
-            card_title: liveForm.title.trim(),
-            card_icon: (liveForm.icon || '📌').trim(),
-            description: (liveForm.description || '').trim(),
-            priest_id: liveForm.extra1 || null
-          })
-          .eq('id', targetId);
-        if (error) throw new Error(error.message);
       }
 
       setLiveModalOpen(false);
@@ -984,8 +941,7 @@ export default function NestedCardsBuilder({
       const tableMap = {
         service_group: 'service_groups',
         service_class: 'services',
-        case_category: 'case_categories',
-        custom_card: 'priest_custom_cards'
+        case_category: 'case_categories'
       };
       const tbl = tableMap[item.sourceType];
       if (!tbl) return;
@@ -1073,7 +1029,6 @@ export default function NestedCardsBuilder({
     }
   };
 
-  // عند الضغط على الكارت: يفتح الكروت اللي جواه مباشرة لو فيه كروت فرعية أو كان كارت متداخل/أساسي يقبل كروت جواه
   const handleOpenOrRunCard = (item) => {
     const innerCards = childrenByParentKey[item.key] || [];
 
@@ -1164,7 +1119,7 @@ export default function NestedCardsBuilder({
           onClick={() => setCurrentParentKey(rootParentId ? `nested:${rootParentId}` : null)}
           className={`px-2.5 py-1 rounded-lg cursor-pointer ${!currentParentKey ? 'bg-[#7a1c24] text-white' : 'hover:bg-gray-200'}`}
         >
-          🏠 المستوى الرئيسي (الشاشات والكروت)
+          🏠 المستوى الرئيسي (كل الكروت)
         </button>
 
         {breadcrumbs.map((crumb) => (
@@ -1195,7 +1150,6 @@ export default function NestedCardsBuilder({
               { key: 'cases', label: 'بحث الحالة' },
               { key: 'services', label: 'الخدمات والفصول' },
               { key: 'categories', label: 'تصنيفات الحالة' },
-              { key: 'custom_cards', label: 'كروت الكاهن' },
               { key: 'nested_only', label: 'الكروت المضافة' }
             ].map(tab => (
               <button
@@ -1789,7 +1743,7 @@ export default function NestedCardsBuilder({
                 </div>
               </div>
 
-              {(liveForm.sourceType === 'card_override' || liveForm.sourceType === 'custom_card') && (
+              {liveForm.sourceType === 'card_override' && (
                 <div>
                   <label className="block mb-1">الوصف</label>
                   <textarea
