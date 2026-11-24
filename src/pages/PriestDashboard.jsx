@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { startUserSession, logActivity } from '../lib/activityLogger';
-import { loadAdminCardsConfig, isCardAllowedForRole } from './NestedCardsBuilder';
+import { loadAdminCardsConfig, isCardAllowedForRole } from '../components/NestedCardsBuilder';
 import WhatsAppComposerModal, { FALLBACK_WA_TEMPLATES, formatWaMessage } from '../components/priest/WhatsAppComposerModal';
 import BellNotificationsPanel from '../components/priest/BellNotificationsPanel';
 import ConfessorProfileModal from '../components/priest/ConfessorProfileModal';
