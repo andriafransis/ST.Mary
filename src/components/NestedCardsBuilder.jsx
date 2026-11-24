@@ -98,18 +98,18 @@ const DEFAULT_PRIEST_CARDS = [
 ];
 
 const DEFAULT_PRIEST_SUBCARDS = [
-  // كروت الخدمة (الكاهن)
-  { id: 'priest_srv_sequence', icon: '📋', title: 'شيت التسلسل والافتقاد والترحيم', desc: 'عرض كل خدمة على حدة وبند المعاشات + حالة الافتقاد وذكرى الترحيم', screen: 'service_hub' },
-  { id: 'priest_srv_commitment', icon: '🏅', title: 'الالتزام والكفاءة والعروض والرحلات', desc: 'متابعة الالتزام والغياب والتأخير، ومنح العروض والخصومات، والملاحظات لولي الأمر', screen: 'service_hub' },
-  { id: 'priest_srv_schedule', icon: '🏫', title: 'جدول الخدمة', desc: 'كروت الخدمات، القيادات، الفصول، الخدام، وافتقاد الخدمة', screen: 'service_hub' },
-  // كروت الاعترافات
-  { id: 'priest_conf_slots', icon: '📅', title: 'إضافة مواعيد الاعتراف', desc: 'تحديد المدة (أسبوع/شهر/3 شهور)، صباحي/مسائي', screen: 'confessions' },
-  { id: 'priest_conf_list', icon: '🙏', title: 'المعترفون', desc: 'الملف الروحي، الثغرات والإجراءات، والقانون الروحي', screen: 'confessions' },
-  { id: 'priest_conf_visitations', icon: '🕊️', title: 'افتقاد المعترفين', desc: 'افتقاد بزيارة، رسالة واتساب، أو اتصال', screen: 'confessions' },
-  // كروت بحث الحالة
-  { id: 'priest_cases_search', icon: '🔎', title: 'بحث الحالة / العيلة', desc: 'الاسم الرباعي، الموبايل، العنوان، التقييم، المرفقات، وطباعة شيت رسمي', screen: 'cases' },
-  { id: 'priest_cases_cats', icon: '📂', title: 'تصنيفات الحالات', desc: 'حالات مستترة، إخوة الرب، متوسطة، مستقرة', screen: 'cases' },
-  { id: 'priest_cases_add', icon: '➕', title: 'إضافة حالة جديدة', desc: 'رب الأسرة، الزوجة، الأولاد، الاحتياجات، والمرفقات', screen: 'cases' }
+  // كروت الخدمة (الكاهن) -> داخل كارت الخدمة ومدارس الأحد
+  { id: 'priest_srv_sequence', icon: '📋', title: 'شيت التسلسل والافتقاد والترحيم', desc: 'عرض كل خدمة على حدة وبند المعاشات + حالة الافتقاد وذكرى الترحيم', screen: 'service_hub', defaultParentKey: 'builtin:service_hub' },
+  { id: 'priest_srv_commitment', icon: '🏅', title: 'الالتزام والكفاءة والعروض والرحلات', desc: 'متابعة الالتزام والغياب والتأخير، ومنح العروض والخصومات، والملاحظات لولي الأمر', screen: 'service_hub', defaultParentKey: 'builtin:service_hub' },
+  { id: 'priest_srv_schedule', icon: '🏫', title: 'جدول الخدمة', desc: 'كروت الخدمات، القيادات، الفصول، الخدام، وافتقاد الخدمة', screen: 'service_hub', defaultParentKey: 'builtin:service_hub' },
+  // كروت الاعترافات -> داخل كارت الاعترافات
+  { id: 'priest_conf_slots', icon: '📅', title: 'إضافة مواعيد الاعتراف', desc: 'تحديد المدة (أسبوع/شهر/3 شهور)، صباحي/مسائي', screen: 'confessions', defaultParentKey: 'builtin:confessions' },
+  { id: 'priest_conf_list', icon: '🙏', title: 'المعترفون', desc: 'الملف الروحي، الثغرات والإجراءات، والقانون الروحي', screen: 'confessions', defaultParentKey: 'builtin:confessions' },
+  { id: 'priest_conf_visitations', icon: '🕊️', title: 'افتقاد المعترفين', desc: 'افتقاد بزيارة، رسالة واتساب، أو اتصال', screen: 'confessions', defaultParentKey: 'builtin:confessions' },
+  // كروت بحث الحالة -> داخل كارت بحث الحالة / العيلة
+  { id: 'priest_cases_search', icon: '🔎', title: 'بحث الحالة / العيلة', desc: 'الاسم الرباعي، الموبايل، العنوان، التقييم، المرفقات، وطباعة شيت رسمي', screen: 'cases', defaultParentKey: 'builtin:cases' },
+  { id: 'priest_cases_cats', icon: '📂', title: 'تصنيفات الحالات', desc: 'حالات مستترة، إخوة الرب، متوسطة، مستقرة', screen: 'cases', defaultParentKey: 'builtin:cases' },
+  { id: 'priest_cases_add', icon: '➕', title: 'إضافة حالة جديدة', desc: 'رب الأسرة، الزوجة، الأولاد، الاحتياجات، والمرفقات', screen: 'cases', defaultParentKey: 'builtin:cases' }
 ];
 
 export const isCardAllowedForRole = (allowedRoles = ['all'], userRole = null, isAdmin = false) => {
@@ -358,7 +358,10 @@ export default function NestedCardsBuilder({
 
       const ov = overrides[raw.id] || {};
       const key = `builtin:${raw.id}`;
-      const placementMode = ov.parent_key ? 'card' : 'screen';
+      const effectiveParentKey = ov.parent_key !== undefined
+        ? ov.parent_key
+        : (raw.defaultParentKey || null);
+      const placementMode = effectiveParentKey ? 'card' : 'screen';
       const placementScreen = ov.placement_screen || defaultScreen;
 
       items.push({
@@ -368,7 +371,7 @@ export default function NestedCardsBuilder({
         id: raw.id,
         raw,
         title: ov.title || raw.title || '',
-        subtitle: getScreenLabel(placementScreen),
+        subtitle: effectiveParentKey ? (raw.screen ? getScreenLabel(raw.screen) : '') : getScreenLabel(placementScreen),
         description: ov.desc !== undefined ? ov.desc : (raw.desc || ''),
         icon: ov.icon || raw.icon || '🗂️',
         badge: raw.count || '',
@@ -377,7 +380,7 @@ export default function NestedCardsBuilder({
         hasOverride: Boolean(overrides[raw.id]),
         placement_mode: placementMode,
         placement_screen: placementScreen,
-        parent_key: ov.parent_key || null,
+        parent_key: effectiveParentKey,
         allowed_roles: Array.isArray(ov.allowed_roles) && ov.allowed_roles.length > 0 ? ov.allowed_roles : ['all'],
         target_action: 'screen',
         target_screen: raw.id,
@@ -390,10 +393,7 @@ export default function NestedCardsBuilder({
     (hubCards || []).forEach(c => addBuiltin(c, 'admin_hub'));
     (setupCards || []).forEach(c => addBuiltin(c, 'setup_hub'));
 
-    const sourcePriestCards = (customCards && customCards.length > 0)
-      ? DEFAULT_PRIEST_CARDS
-      : DEFAULT_PRIEST_CARDS;
-    sourcePriestCards.forEach(pc => addBuiltin(pc, pc.screen || 'priest_hub'));
+    DEFAULT_PRIEST_CARDS.forEach(pc => addBuiltin(pc, pc.screen || 'priest_hub'));
     DEFAULT_PRIEST_SUBCARDS.forEach(psc => addBuiltin(psc, psc.screen || 'priest_hub'));
 
     (nestedRows || []).forEach(row => {
@@ -920,7 +920,7 @@ export default function NestedCardsBuilder({
               desc: prevOv.desc !== undefined ? prevOv.desc : item.description,
               icon: prevOv.icon || item.icon,
               placement_screen: prevOv.placement_screen || item.placement_screen,
-              parent_key: prevOv.parent_key || item.parent_key || null,
+              parent_key: prevOv.parent_key !== undefined ? prevOv.parent_key : item.parent_key,
               allowed_roles: prevOv.allowed_roles || item.allowed_roles || ['all'],
               is_active: !(item.isActive !== false)
             }
@@ -1073,7 +1073,15 @@ export default function NestedCardsBuilder({
     }
   };
 
+  // عند الضغط على الكارت: يفتح الكروت اللي جواه مباشرة لو فيه كروت فرعية أو كان كارت متداخل/أساسي يقبل كروت جواه
   const handleOpenOrRunCard = (item) => {
+    const innerCards = childrenByParentKey[item.key] || [];
+
+    if (innerCards.length > 0) {
+      setCurrentParentKey(item.key);
+      return;
+    }
+
     if (item.kind === 'nested') {
       if (item.target_action === 'link' && item.target_url) {
         window.open(item.target_url, '_blank', 'noopener,noreferrer');
@@ -1173,7 +1181,7 @@ export default function NestedCardsBuilder({
         ))}
       </div>
 
-      {/* شريط الفلتر والبحث بدون سكرول أفقي مضغوط */}
+      {/* شريط الفلتر والبحث */}
       <div className="bg-white p-3 rounded-2xl border space-y-2.5">
         {!currentParentKey ? (
           <div className="flex items-center gap-1.5 flex-wrap font-bold">
@@ -1445,7 +1453,7 @@ export default function NestedCardsBuilder({
                     onClick={() => setNestedForm(prev => ({
                       ...prev,
                       placement_mode: 'card',
-                      parent_key: prev.parent_key || parentCardOptions[0]?.key || ''
+                      parent_key: prev.parent_key || currentParentKey || parentCardOptions[0]?.key || ''
                     }))}
                     className={`p-2 rounded-xl border text-[11px] cursor-pointer ${
                       nestedForm.placement_mode === 'card'
