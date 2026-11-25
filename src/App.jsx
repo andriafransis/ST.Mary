@@ -19,6 +19,13 @@ import PermissionsPage from './pages/PermissionsPage';
 import TripsOfficePage from './pages/TripsOfficePage';
 import HiddenFamiliesPage from './pages/HiddenFamiliesPage';
 import LoginPage from './pages/LoginPage';
+import BiometricGate from './components/BiometricGate';
+import {
+  isBiometricSupported,
+  isBiometricEnabledFor,
+  enableBiometric,
+  disableBiometric
+} from './lib/biometricLock';
 import AdminDashboard from './pages/AdminDashboard';
 import PriestDashboard from './pages/PriestDashboard';
 import ServantDashboard from './pages/ServantDashboard';
@@ -159,6 +166,48 @@ export default function App() {
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
   );
   const [showNotifSummary, setShowNotifSummary] = useState(false);
+  const [bioSupported, setBioSupported] = useState(false);
+  const [bioEnabled, setBioEnabled] = useState(() => {
+    try {
+      const savedId = localStorage.getItem(SAVED_USER_KEY);
+      return savedId ? isBiometricEnabledFor(savedId) : false;
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    isBiometricSupported().then(setBioSupported);
+  }, []);
+
+  useEffect(() => {
+    setBioEnabled(currentUser?.id ? isBiometricEnabledFor(currentUser.id) : false);
+  }, [currentUser?.id]);
+
+  const handleToggleBiometric = async () => {
+    if (!currentUser) return;
+    if (!bioSupported && !bioEnabled) {
+      alert(
+        !window.isSecureContext
+          ? 'القفل بالبصمة محتاج الموقع يشتغل على HTTPS.'
+          : 'الجهاز ده مش بيدعم البصمة من المتصفح، أو مفيش بصمة/قفل شاشة مفعّل على الموبايل.'
+      );
+      return;
+    }
+    if (bioEnabled) {
+      disableBiometric();
+      setBioEnabled(false);
+      alert('تم إيقاف القفل بالبصمة.');
+      return;
+    }
+    try {
+      await enableBiometric(currentUser);
+      setBioEnabled(true);
+      alert('تم تفعيل القفل بالبصمة ✅');
+    } catch {
+      alert('لم يتم تفعيل البصمة. تأكد إن الموبايل عليه بصمة أو قفل شاشة وجرّب تاني.');
+    }
+  };
 
   const todayISO = new Date().toISOString().split('T')[0];
 
@@ -537,6 +586,7 @@ export default function App() {
 
   const handleLogout = async () => {
     await endUserSession();
+    disableBiometric();
     localStorage.removeItem(SAVED_USER_KEY);
     updateAppIconBadge(0, churchName);
     setCurrentUser(null);
@@ -1093,6 +1143,7 @@ export default function App() {
   };
 
   return (
+    <BiometricGate enabled={bioEnabled} onLogout={handleLogout}>
     <div className="min-h-screen bg-[#f6f4ef] flex flex-col justify-between" dir="rtl">
       <div>
         <header className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#68161d] text-white sticky top-0 z-40 shadow-md print:hidden">
@@ -1167,6 +1218,18 @@ export default function App() {
                 >
                   🎂 {upcomingBirthdays.length}
                 </span>
+              )}
+
+              {true && (
+                <button
+                  type="button"
+                  onClick={handleToggleBiometric}
+                  className={`px-2.5 sm:px-3 py-2 rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1 cursor-pointer transition ${bioEnabled ? 'bg-emerald-500/30 hover:bg-emerald-500/40' : 'bg-white/10 hover:bg-white/20'}`}
+                  title={bioEnabled ? 'إيقاف القفل بالبصمة' : 'تفعيل القفل بالبصمة'}
+                >
+                  <span>🔒</span>
+                  <span className="hidden sm:inline">{bioEnabled ? 'البصمة مفعلة' : 'تفعيل البصمة'}</span>
+                </button>
               )}
 
               <button
@@ -1476,5 +1539,6 @@ export default function App() {
 
       <ChurchGlobalFooter churchName={churchName} />
     </div>
+    </BiometricGate>
   );
 }
