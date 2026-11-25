@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
+import PriestInvitationModal from '../components/PriestInvitationModal';
 import {
   CalendarCheck, MessageSquareHeart, ShieldCheck, Info, Calendar,
   MapPin, School, Search, UserCheck, Sparkles, X, Check, Unlink, RotateCcw, Bell,
-  Award, Gift, Link2
+  Award, Gift, Link2, MailPlus
 } from 'lucide-react';
 
 export const isArabicOnlyName = (value = '') => {
@@ -235,7 +236,7 @@ export default function ParentDashboard({
   const isMother = useMemo(() => detectParentIsMother(parent), [parent]);
   const dismissedStorageKey = `parent_dismissed_children_${parent.id}`;
 
-  const [activeTab, setActiveTab] = useState('children'); // 'children' | 'linking' | 'campaigns' | 'masses' | 'services'
+  const [activeTab, setActiveTab] = useState('children');
   const [phoneQuery, setPhoneQuery] = useState('');
   const [validationError, setValidationError] = useState('');
   const [busyChildId, setBusyChildId] = useState(null);
@@ -410,12 +411,12 @@ export default function ParentDashboard({
       : []),
     { id: 'campaigns', label: `🎁 العروض والرحلات (${rewardCampaigns.length})` },
     { id: 'masses', label: `⛪ القداسات والاجتماعات (${events.length})` },
-    { id: 'services', label: `🏫 الفصول والخدمات (${services.length})` }
+    { id: 'services', label: `🏫 الفصول والخدمات (${services.length})` },
+    { id: 'invite', label: '💌 دعوة لأبونا لمناسبة' }
   ];
 
   return (
     <div className="space-y-3 text-xs" dir="rtl">
-      {/* كارت الترحيب */}
       <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -438,16 +439,22 @@ export default function ParentDashboard({
             <button
               type="button"
               onClick={() => setActiveTab('linking')}
-              className="bg-amber-400 hover:bg-amber-300 text-[#4a0e13] px-3.5 py-2 rounded-2xl text-center font-black cursor-pointer shadow transition"
+              className="bg-amber-100 hover:bg-amber-200 text-[#4a0e13] px-3.5 py-2 rounded-2xl text-center font-black cursor-pointer shadow transition"
             >
               <span className="text-[10px] block">طلبات / مقترحات ربط</span>
               <strong className="text-sm">{linkAlertCount} ↗</strong>
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setActiveTab('invite')}
+            className="col-span-2 sm:col-span-1 px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-2xl font-black flex items-center justify-center gap-1.5 cursor-pointer shadow"
+          >
+            <MailPlus size={15} /> دعوة لأبونا
+          </button>
         </div>
       </div>
 
-      {/* تنبيه سريع في حال وجود طلب ربط من الأبناء */}
       {linkRequests.length > 0 && activeTab !== 'linking' && (
         <div className="bg-emerald-50 border-2 border-emerald-300 px-4 py-2.5 rounded-2xl flex flex-wrap justify-between items-center gap-2">
           <div className="flex items-center gap-2 text-emerald-950 font-black">
@@ -464,7 +471,6 @@ export default function ParentDashboard({
         </div>
       )}
 
-      {/* شريط التابات الداخلية المنظمة */}
       <div className="bg-white p-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto font-black">
         {tabsList.map(tab => (
           <button
@@ -494,9 +500,7 @@ export default function ParentDashboard({
         </div>
       )}
 
-      {/* محتوى التاب داخل حاوية Scroll حتى لا تطول الصفحة */}
       <div className="max-h-[calc(100vh-265px)] overflow-y-auto pr-1 space-y-4">
-        {/* TAB 1: الأبناء والمتابعة */}
         {activeTab === 'children' && (
           <>
             {effectiveChildrenList.length === 0 ? (
@@ -671,7 +675,6 @@ export default function ParentDashboard({
           </>
         )}
 
-        {/* TAB 2: ربط الأبناء وطلبات الموافقة */}
         {activeTab === 'linking' && (
           <div className="space-y-4">
             {linkRequests.length > 0 && (
@@ -915,7 +918,6 @@ export default function ParentDashboard({
           </div>
         )}
 
-        {/* TAB 3: العروض والرحلات والمكافآت */}
         {activeTab === 'campaigns' && (
           <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
             <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
@@ -943,7 +945,6 @@ export default function ParentDashboard({
           </div>
         )}
 
-        {/* TAB 4: مواعيد القداسات والاجتماعات */}
         {activeTab === 'masses' && (
           <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
             <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
@@ -976,7 +977,6 @@ export default function ParentDashboard({
           </div>
         )}
 
-        {/* TAB 5: الفصول والخدمات */}
         {activeTab === 'services' && (
           <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
             <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
@@ -1005,6 +1005,14 @@ export default function ParentDashboard({
               </div>
             )}
           </div>
+        )}
+
+        {activeTab === 'invite' && (
+          <PriestInvitationModal
+            inline={true}
+            currentUser={parent}
+            defaultRoleLabel="ولي أمر"
+          />
         )}
       </div>
     </div>
