@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import {
   FolderPlus, Edit3, Trash2, ArrowRight, FolderOpen,
   Save, X, Layers, ExternalLink, FileText, ChevronLeft,
-  Search, Power, Play, RotateCcw, ShieldCheck, Plus, LayoutGrid, ArrowLeftRight
+  Search, Power, Play, RotateCcw, ShieldCheck, Plus, LayoutGrid,
+  ArrowLeftRight, Link2, ChevronDown, ChevronUp, Eye
 } from 'lucide-react';
 
 const COLOR_THEMES = {
@@ -117,6 +118,13 @@ const DEFAULT_PRIEST_SUBCARDS = [
   { id: 'priest_cases_add', icon: '➕', title: 'إضافة حالة جديدة', desc: 'رب الأسرة، الزوجة، الأولاد، الاحتياجات، والمرفقات', screen: 'cases', defaultParentKey: 'builtin:cases' }
 ];
 
+const EMPTY_CONFIG = {
+  rowId: null,
+  overrides: {},
+  customScreenCards: [],
+  cardMeta: {}
+};
+
 export const isCardAllowedForRole = (allowedRoles = ['all'], userRole = null, isAdmin = false) => {
   if (isAdmin || userRole === 'admin') return true;
   if (!Array.isArray(allowedRoles) || allowedRoles.length === 0 || allowedRoles.includes('all')) {
@@ -134,7 +142,7 @@ export const loadAdminCardsConfig = async () => {
       localCfg = { overrides: {}, customScreenCards: [], cardMeta: {}, ...JSON.parse(raw) };
     }
   } catch {
-    // ignore
+    // ignore malformed localStorage
   }
 
   try {
@@ -181,45 +189,53 @@ export const saveAdminCardsConfig = async (config) => {
     sort_order: 999
   };
 
-  if (config.rowId) {
-    const { error } = await supabase
-      .from('church_public_content')
-      .update(dbPayload)
-      .eq('id', config.rowId);
-    if (error) throw new Error(error.message);
-    notifyCardsUpdated();
-    return { ...cleanPayload, rowId: config.rowId };
-  } else {
-    const { data: existing } = await supabase
+  const targetRowId = config.rowId || (
+    await supabase
       .from('church_public_content')
       .select('id')
       .eq('kind', ADMIN_CARDS_CONFIG_KIND)
       .limit(1)
-      .maybeSingle();
+      .maybeSingle()
+  )?.data?.id || null;
 
-    if (existing?.id) {
-      const { error } = await supabase
-        .from('church_public_content')
-        .update(dbPayload)
-        .eq('id', existing.id);
-      if (error) throw new Error(error.message);
-      notifyCardsUpdated();
-      return { ...cleanPayload, rowId: existing.id };
-    }
-
-    const { data, error } = await supabase
+  if (targetRowId) {
+    const { error } = await supabase
       .from('church_public_content')
-      .insert([dbPayload])
-      .select('id')
-      .single();
+      .update(dbPayload)
+      .eq('id', targetRowId);
     if (error) throw new Error(error.message);
     notifyCardsUpdated();
-    return { ...cleanPayload, rowId: data?.id || null };
+    return { ...cleanPayload, rowId: targetRowId };
   }
+
+  const { data, error } = await supabase
+    .from('church_public_content')
+    .insert([dbPayload])
+    .select('id')
+    .single();
+  if (error) throw new Error(error.message);
+  notifyCardsUpdated();
+  return { ...cleanPayload, rowId: data?.id || null };
 };
 
 const getScreenLabel = (screenKey) =>
   SCREEN_TARGETS.find(s => s.key === screenKey)?.label || 'لوحة الإدارة';
+
+const parseEntryPayload = (row) => {
+  try {
+    const parsed = JSON.parse(row.details || '{}');
+    if (parsed && typeof parsed === 'object' && ('text' in parsed || 'field_label' in parsed)) {
+      return {
+        text: parsed.text || '',
+        field_label: parsed.field_label || '',
+        field_value: parsed.field_value || ''
+      };
+    }
+  } catch {
+    // نص عادي
+  }
+  return { text: row.details || '', field_label: '', field_value: '' };
+};
 
 export default function NestedCardsBuilder({
   currentUser = null,
@@ -241,13 +257,9 @@ export default function NestedCardsBuilder({
   );
   const [screenFilter, setScreenFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [expandedCardKeys, setExpandedCardKeys] = useState(() => new Set());
 
-  const [cardsConfig, setCardsConfig] = useState({
-    rowId: null,
-    overrides: {},
-    customScreenCards: [],
-    cardMeta: {}
-  });
+  const [cardsConfig, setCardsConfig] = useState(EMPTY_CONFIG);
   const [nestedRows, setNestedRows] = useState([]);
   const [dynamicEntries, setDynamicEntries] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -259,6 +271,7 @@ export default function NestedCardsBuilder({
     placement_mode: 'screen',
     placement_screen: 'admin_hub',
     parent_key: '',
+    linked_card_key: '',
     allowed_roles: ['all'],
     title: '',
     subtitle: '',
@@ -289,6 +302,7 @@ export default function NestedCardsBuilder({
     placement_mode: 'screen',
     placement_screen: 'admin_hub',
     parent_key: '',
+    linked_card_key: '',
     allowed_roles: ['all'],
     isActive: true,
     sortOrder: 1
@@ -306,14 +320,14 @@ export default function NestedCardsBuilder({
   });
   const [savingEntry, setSavingEntry] = useState(false);
 
-  const triggerInstantSync = async () => {
+  const triggerInstantSync = useCallback(async () => {
     notifyCardsUpdated();
     if (onRefresh) {
       await onRefresh();
     }
-  };
+  }, [onRefresh]);
 
-  const fetchAll = async () => {
+  const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
       let query = supabase
@@ -346,11 +360,11 @@ export default function NestedCardsBuilder({
     } finally {
       setLoading(false);
     }
-  };
+  }, [isAdmin]);
 
   useEffect(() => {
     fetchAll();
-  }, [isAdmin]);
+  }, [fetchAll]);
 
   useEffect(() => {
     setCurrentParentKey(rootParentId ? `nested:${rootParentId}` : null);
@@ -392,6 +406,7 @@ export default function NestedCardsBuilder({
         placement_mode: placementMode,
         placement_screen: placementScreen,
         parent_key: effectiveParentKey,
+        linked_card_key: ov.linked_card_key || '',
         allowed_roles: Array.isArray(ov.allowed_roles) && ov.allowed_roles.length > 0 ? ov.allowed_roles : ['all'],
         target_action: 'screen',
         target_screen: raw.id,
@@ -403,7 +418,6 @@ export default function NestedCardsBuilder({
 
     (hubCards || []).forEach(c => addBuiltin(c, 'admin_hub'));
     (setupCards || []).forEach(c => addBuiltin(c, 'setup_hub'));
-
     DEFAULT_PRIEST_CARDS.forEach(pc => addBuiltin(pc, pc.screen || 'priest_hub'));
     DEFAULT_PRIEST_SUBCARDS.forEach(psc => addBuiltin(psc, psc.screen || 'priest_hub'));
 
@@ -431,6 +445,7 @@ export default function NestedCardsBuilder({
         placement_mode: placementMode,
         placement_screen: placementScreen,
         parent_key: parentKey,
+        linked_card_key: meta.linked_card_key || '',
         allowed_roles: Array.isArray(meta.allowed_roles) && meta.allowed_roles.length > 0 ? meta.allowed_roles : ['all'],
         target_action: meta.target_screen && row.target_action === 'info' && !row.description
           ? 'screen'
@@ -463,6 +478,7 @@ export default function NestedCardsBuilder({
         placement_mode: ov.parent_key ? 'card' : 'screen',
         placement_screen: ov.placement_screen || 'services',
         parent_key: ov.parent_key || null,
+        linked_card_key: ov.linked_card_key || '',
         allowed_roles: Array.isArray(ov.allowed_roles) && ov.allowed_roles.length > 0 ? ov.allowed_roles : ['all'],
         target_action: 'screen',
         target_screen: 'services',
@@ -491,6 +507,7 @@ export default function NestedCardsBuilder({
         placement_mode: ov.parent_key ? 'card' : 'screen',
         placement_screen: ov.placement_screen || 'services',
         parent_key: ov.parent_key || null,
+        linked_card_key: ov.linked_card_key || '',
         allowed_roles: Array.isArray(ov.allowed_roles) && ov.allowed_roles.length > 0 ? ov.allowed_roles : ['all'],
         target_action: 'screen',
         target_screen: 'services',
@@ -519,6 +536,7 @@ export default function NestedCardsBuilder({
         placement_mode: ov.parent_key ? 'card' : 'screen',
         placement_screen: ov.placement_screen || 'categories',
         parent_key: ov.parent_key || null,
+        linked_card_key: ov.linked_card_key || '',
         allowed_roles: Array.isArray(ov.allowed_roles) && ov.allowed_roles.length > 0 ? ov.allowed_roles : ['admin', 'priest'],
         target_action: 'screen',
         target_screen: 'categories',
@@ -547,6 +565,15 @@ export default function NestedCardsBuilder({
     return map;
   }, [unifiedCards]);
 
+  const entriesCountByCardId = useMemo(() => {
+    const map = {};
+    dynamicEntries.forEach(en => {
+      const idKey = String(en.card_id);
+      map[idKey] = (map[idKey] || 0) + 1;
+    });
+    return map;
+  }, [dynamicEntries]);
+
   const breadcrumbs = useMemo(() => {
     const trail = [];
     let cursor = currentParentKey ? itemByKey[currentParentKey] : null;
@@ -570,15 +597,16 @@ export default function NestedCardsBuilder({
       return children.filter(c => `${c.title} ${c.subtitle} ${c.description}`.toLowerCase().includes(q));
     }
 
-    const baseList = screenFilter === 'all'
-      ? unifiedCards
-      : (childrenByParentKey['__ROOT__'] || []).filter(item => {
-          if (screenFilter === 'nested_only') return item.kind === 'nested';
-          return item.placement_screen === screenFilter;
-        });
+    if (q) {
+      return unifiedCards.filter(c => `${c.title} ${c.subtitle} ${c.description}`.toLowerCase().includes(q));
+    }
 
-    if (!q) return baseList;
-    return baseList.filter(c => `${c.title} ${c.subtitle} ${c.description}`.toLowerCase().includes(q));
+    const rootList = childrenByParentKey['__ROOT__'] || [];
+    if (screenFilter === 'all') return rootList;
+    if (screenFilter === 'nested_only') {
+      return unifiedCards.filter(item => item.kind === 'nested');
+    }
+    return rootList.filter(item => item.placement_screen === screenFilter);
   }, [currentParentKey, childrenByParentKey, unifiedCards, screenFilter, searchQuery]);
 
   const collectDescendantKeys = (startKey) => {
@@ -602,6 +630,16 @@ export default function NestedCardsBuilder({
     return unifiedCards.filter(c => c.canNestInside && !blocked.has(c.key));
   }, [unifiedCards, editingNestedId, childrenByParentKey]);
 
+  const toggleExpandCard = (cardKey, e) => {
+    if (e) e.stopPropagation();
+    setExpandedCardKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(cardKey)) next.delete(cardKey);
+      else next.add(cardKey);
+      return next;
+    });
+  };
+
   const openCreateNestedModal = (presetParentKey = currentParentKey) => {
     if (!isAdmin) return alert('🔒 إضافة الكروت متاحة للسوبر أدمن فقط.');
 
@@ -617,6 +655,7 @@ export default function NestedCardsBuilder({
       placement_mode: presetParentKey ? 'card' : 'screen',
       placement_screen: defaultScreen,
       parent_key: presetParentKey || '',
+      linked_card_key: '',
       allowed_roles: ['all'],
       title: '',
       subtitle: '',
@@ -643,6 +682,7 @@ export default function NestedCardsBuilder({
         placement_mode: item.parent_key ? 'card' : 'screen',
         placement_screen: item.placement_screen || 'admin_hub',
         parent_key: item.parent_key || '',
+        linked_card_key: item.linked_card_key || '',
         allowed_roles: item.allowed_roles || ['all'],
         title: item.title || '',
         subtitle: item.subtitle || '',
@@ -690,6 +730,7 @@ export default function NestedCardsBuilder({
       placement_mode: item.parent_key ? 'card' : 'screen',
       placement_screen: item.placement_screen || 'admin_hub',
       parent_key: item.parent_key || '',
+      linked_card_key: item.linked_card_key || '',
       allowed_roles: item.allowed_roles || ['all'],
       isActive: item.isActive !== false,
       sortOrder: raw.sort_order || 1
@@ -769,6 +810,7 @@ export default function NestedCardsBuilder({
             placement_mode: nestedForm.placement_mode,
             placement_screen: nestedForm.placement_screen || 'admin_hub',
             parent_key: chosenParentKey,
+            linked_card_key: nestedForm.linked_card_key || '',
             allowed_roles: nestedForm.allowed_roles || ['all'],
             target_action: nestedForm.target_action,
             target_screen: nestedForm.target_screen || 'users'
@@ -815,6 +857,7 @@ export default function NestedCardsBuilder({
               is_active: Boolean(liveForm.isActive),
               placement_screen: liveForm.placement_screen || 'admin_hub',
               parent_key: chosenParentKey,
+              linked_card_key: liveForm.linked_card_key || '',
               allowed_roles: liveForm.allowed_roles || ['all']
             }
           }
@@ -893,6 +936,7 @@ export default function NestedCardsBuilder({
               icon: prevOv.icon || item.icon,
               placement_screen: prevOv.placement_screen || item.placement_screen,
               parent_key: prevOv.parent_key !== undefined ? prevOv.parent_key : item.parent_key,
+              linked_card_key: prevOv.linked_card_key || item.linked_card_key || '',
               allowed_roles: prevOv.allowed_roles || item.allowed_roles || ['all'],
               is_active: !(item.isActive !== false)
             }
@@ -965,22 +1009,6 @@ export default function NestedCardsBuilder({
       await fetchAll();
       await triggerInstantSync();
     }
-  };
-
-  const parseEntryPayload = (row) => {
-    try {
-      const parsed = JSON.parse(row.details || '{}');
-      if (parsed && typeof parsed === 'object' && ('text' in parsed || 'field_label' in parsed)) {
-        return {
-          text: parsed.text || '',
-          field_label: parsed.field_label || '',
-          field_value: parsed.field_value || ''
-        };
-      }
-    } catch {
-      // نص عادي
-    }
-    return { text: row.details || '', field_label: '', field_value: '' };
   };
 
   const handleSaveDynamicEntry = async (e) => {
@@ -1134,7 +1162,7 @@ export default function NestedCardsBuilder({
           onClick={() => setCurrentParentKey(rootParentId ? `nested:${rootParentId}` : null)}
           className={`px-2.5 py-1 rounded-lg cursor-pointer ${!currentParentKey ? 'bg-[#7a1c24] text-white' : 'hover:bg-gray-200'}`}
         >
-          🏠 المستوى الرئيسي (كل الكروت)
+          🏠 المستوى الرئيسي
         </button>
 
         {breadcrumbs.map((crumb) => (
@@ -1201,7 +1229,7 @@ export default function NestedCardsBuilder({
           <Search size={14} className="absolute right-3 top-2.5 text-gray-400" />
           <input
             type="text"
-            placeholder="ابحث في الكروت..."
+            placeholder="ابحث في كل الكروت والمستويات..."
             className="w-full pr-8 pl-3 py-1.5 bg-[#fbfaf7] border rounded-xl outline-none focus:border-[#7a1c24]"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
@@ -1219,7 +1247,7 @@ export default function NestedCardsBuilder({
           <div className="font-black text-sm text-gray-800">
             {currentParentItem
               ? `لا توجد كروت داخل "${currentParentItem.title}" حتى الآن`
-              : 'لا توجد كروت مطابقة للفلتر الحالي'}
+              : 'لا توجد كروت مطابقة للفلتر أو البحث الحالي'}
           </div>
           {isAdmin && (
             <button
@@ -1235,8 +1263,14 @@ export default function NestedCardsBuilder({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {visibleCards.map((item) => {
             const theme = COLOR_THEMES[item.accent] || COLOR_THEMES.red;
-            const innerCount = (childrenByParentKey[item.key] || []).length;
-            const entriesCount = dynamicEntries.filter(en => String(en.card_id) === String(item.id)).length;
+            const innerCards = childrenByParentKey[item.key] || [];
+            const innerCount = innerCards.length;
+            const entriesCount = entriesCountByCardId[String(item.id)] || 0;
+            const linkedCard = item.linked_card_key ? itemByKey[item.linked_card_key] : null;
+            const linkedChildrenCount = linkedCard ? (childrenByParentKey[linkedCard.key] || []).length : 0;
+            const linkedEntriesCount = linkedCard ? (entriesCountByCardId[String(linkedCard.id)] || 0) : 0;
+            const isExpanded = expandedCardKeys.has(item.key);
+
             const rolesLabel = item.allowed_roles.includes('all')
               ? 'للجميع'
               : item.allowed_roles.map(r => CARD_ROLE_OPTIONS.find(o => o.key === r)?.label || r).join('، ');
@@ -1247,7 +1281,7 @@ export default function NestedCardsBuilder({
                 onClick={() => handleOpenOrRunCard(item)}
                 className={`${theme.card} ${item.isActive === false ? 'opacity-60 border-dashed' : ''} border-2 p-4 rounded-2xl shadow-2xs hover:shadow-md transition flex flex-col justify-between gap-3 cursor-pointer`}
               >
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <div className="flex justify-between items-start gap-2">
                     <span className="text-2xl">{item.icon}</span>
                     <div className="flex items-center gap-1 flex-wrap justify-end">
@@ -1287,7 +1321,75 @@ export default function NestedCardsBuilder({
                     {item.description && (
                       <p className="text-[11px] text-gray-600 mt-1 line-clamp-2">{item.description}</p>
                     )}
-                    <div className="text-[10px] text-emerald-900 font-bold mt-1 flex items-center gap-1">
+
+                    {/* رؤية متبادلة لكارت آخر مرتبط */}
+                    {linkedCard && (
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCurrentParentKey(linkedCard.key);
+                        }}
+                        className="mt-2 p-2 rounded-xl bg-sky-50/80 border border-sky-200 text-[10px] text-sky-950 space-y-1 hover:bg-sky-100/70 transition"
+                        title="اضغط للانتقال إلى الكارت المرتبط"
+                      >
+                        <div className="flex items-center justify-between gap-1 font-black">
+                          <span className="flex items-center gap-1">
+                            <Link2 size={11} /> يرى الكارت: {linkedCard.icon} {linkedCard.title}
+                          </span>
+                          <span className={`px-1.5 py-0.5 rounded-md ${linkedCard.isActive !== false ? 'bg-emerald-100 text-emerald-900' : 'bg-red-100 text-red-800'}`}>
+                            {linkedCard.isActive !== false ? 'نشط' : 'متوقف'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-sky-800 font-bold">
+                          <span>داخله: {linkedChildrenCount} كروت • {linkedEntriesCount} عناصر</span>
+                          <span className="flex items-center gap-0.5 underline">
+                            <Eye size={10} /> معاينة
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* عرض الكروت الداخلية مباشرة داخل الكارت الأب عند التوسيع */}
+                    {innerCount > 0 && (
+                      <div onClick={(e) => e.stopPropagation()} className="mt-2 space-y-1.5">
+                        <button
+                          type="button"
+                          onClick={(e) => toggleExpandCard(item.key, e)}
+                          className="w-full px-2.5 py-1.5 bg-[#fbfaf7] hover:bg-gray-100 border rounded-xl text-[11px] font-black text-gray-800 flex items-center justify-between cursor-pointer"
+                        >
+                          <span>{isExpanded ? 'إخفاء الكروت الداخلية' : `عرض الكروت الداخلية (${innerCount})`}</span>
+                          {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                        </button>
+
+                        {isExpanded && (
+                          <div className="space-y-1 pl-1 border-r-2 border-[#7a1c24]/30 pr-2">
+                            {innerCards.map(child => (
+                              <div
+                                key={child.key}
+                                onClick={() => handleOpenOrRunCard(child)}
+                                className="p-2 bg-white border rounded-xl hover:border-[#7a1c24] flex items-center justify-between gap-2 cursor-pointer"
+                              >
+                                <div className="min-w-0">
+                                  <div className="font-black text-gray-900 truncate">
+                                    {child.icon} {child.title}
+                                  </div>
+                                  {child.subtitle && (
+                                    <div className="text-[10px] text-gray-500 truncate">{child.subtitle}</div>
+                                  )}
+                                </div>
+                                <span className="text-[10px] font-black text-[#7a1c24] shrink-0">
+                                  {(childrenByParentKey[child.key] || []).length > 0
+                                    ? `${(childrenByParentKey[child.key] || []).length} فرعي`
+                                    : 'فتح'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="text-[10px] text-emerald-900 font-bold mt-1.5 flex items-center gap-1">
                       <ShieldCheck size={11} /> الصلاحية: {rolesLabel}
                     </div>
                   </div>
@@ -1461,6 +1563,22 @@ export default function NestedCardsBuilder({
                     </optgroup>
                   </select>
                 )}
+              </div>
+
+              <div className="bg-sky-50/70 p-3 rounded-2xl border border-sky-200 space-y-1.5">
+                <label className="block text-sky-950 font-black">🔗 رؤية وربط كارت آخر (اختياري):</label>
+                <select
+                  className="w-full p-2.5 border rounded-xl bg-white"
+                  value={nestedForm.linked_card_key || ''}
+                  onChange={e => setNestedForm({ ...nestedForm, linked_card_key: e.target.value })}
+                >
+                  <option value="">-- بدون ربط بكارت آخر --</option>
+                  {unifiedCards
+                    .filter(c => `nested:${editingNestedId}` !== c.key)
+                    .map(c => (
+                      <option key={c.key} value={c.key}>{c.icon} {c.title}</option>
+                    ))}
+                </select>
               </div>
 
               <div className="bg-emerald-50/50 p-3 rounded-2xl border border-emerald-200 space-y-2">
@@ -1706,6 +1824,22 @@ export default function NestedCardsBuilder({
                           ))}
                       </select>
                     )}
+                  </div>
+
+                  <div className="bg-sky-50/70 p-3 rounded-2xl border border-sky-200 space-y-1.5">
+                    <label className="block text-sky-950 font-black">🔗 رؤية وربط كارت آخر (اختياري):</label>
+                    <select
+                      className="w-full p-2.5 border rounded-xl bg-white"
+                      value={liveForm.linked_card_key || ''}
+                      onChange={e => setLiveForm({ ...liveForm, linked_card_key: e.target.value })}
+                    >
+                      <option value="">-- بدون ربط بكارت آخر --</option>
+                      {unifiedCards
+                        .filter(c => `builtin:${liveForm.id}` !== c.key)
+                        .map(c => (
+                          <option key={c.key} value={c.key}>{c.icon} {c.title}</option>
+                        ))}
+                    </select>
                   </div>
 
                   <div className="bg-emerald-50/50 p-3 rounded-2xl border border-emerald-200 space-y-1.5">
