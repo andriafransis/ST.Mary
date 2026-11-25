@@ -9,13 +9,16 @@ import JosephArimatheaManager from '../components/JosephArimatheaManager';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
 import ServiceGroupFeed, { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/ServiceGroupFeed';
 import ServiceDrillDownCards from '../components/ServiceDrillDownCards';
-import NestedCardsBuilder, { loadAdminCardsConfig } from '../components/NestedCardsBuilder';
+import NestedCardsBuilder, {
+  loadAdminCardsConfig,
+  CARDS_UPDATED_EVENT
+} from '../components/NestedCardsBuilder';
 import PermissionsPage from './PermissionsPage';
 import {
   UserPlus, Edit3, Trash2, CalendarPlus, BookOpen,
   Search, RefreshCw, FolderEdit, Sparkles, ArrowRight,
   Users, Settings, Save, Upload, ShieldCheck, Lock, Layers, X, UserCheck, ArrowLeftRight,
-  Eye, EyeOff, RotateCcw
+  Eye, EyeOff, RotateCcw, Plus
 } from 'lucide-react';
 
 export const DEACON_RANKS = [
@@ -105,6 +108,22 @@ const emptyGroup = {
   sort_order: 1
 };
 
+const emptyNestedCardForm = {
+  id: null,
+  parent_id: '',
+  title: '',
+  subtitle: '',
+  description: '',
+  icon: '🗂️',
+  badge_text: '',
+  target_action: 'children',
+  target_url: '',
+  target_screen: 'deacon_hub',
+  placement_screen: 'deacon_hub',
+  sort_order: 1,
+  is_active: true
+};
+
 const ROLE_LABELS = {
   admin: 'سوبر أدمن',
   priest: 'أب كاهن',
@@ -171,8 +190,10 @@ export default function AdminDashboard({
   const [adminCardsConfig, setAdminCardsConfig] = useState({ rowId: null, overrides: {}, customScreenCards: [], cardMeta: {} });
   const [activeNestedRows, setActiveNestedRows] = useState([]);
 
-  // تحكم مباشر في الكروت وتعديلها وإظهارها/إخفائها
-  const [cardManagerFilter, setCardManagerFilter] = useState('all'); // 'all' | 'hidden' | 'priest'
+  // إدارة إضافة / تعديل / حذف كارت متداخل أو كارت جوه كارت مباشرة
+  const [nestedCrudForm, setNestedCrudForm] = useState(emptyNestedCardForm);
+  const [savingNestedCrud, setSavingNestedCrud] = useState(false);
+
   const [editingBuiltinKey, setEditingBuiltinKey] = useState(null);
   const [builtinEditForm, setBuiltinEditForm] = useState({
     title: '',
@@ -183,7 +204,6 @@ export default function AdminDashboard({
     parent_key: ''
   });
 
-  // كروت الكاهن المحلية كبديل أو دعم لو الـ prop مش بيحدث فوراً
   const [localPriestCards, setLocalPriestCards] = useState(customCards || []);
   useEffect(() => {
     setLocalPriestCards(customCards || []);
@@ -266,6 +286,14 @@ export default function AdminDashboard({
       return false;
     }
     return true;
+  };
+
+  const emitCardsChanged = () => {
+    try {
+      window.dispatchEvent(new CustomEvent(CARDS_UPDATED_EVENT));
+    } catch {
+      // ignore
+    }
   };
 
   const loadRoleTemplates = async () => {
@@ -460,7 +488,6 @@ export default function AdminDashboard({
     }
   };
 
-  // حفظ تعديل كارت أساسي أو إظهاره/إخفائه في admin_cards_config
   const saveBuiltinCardOverride = async (cardId, nextOvPatch) => {
     if (!requireAdminGuard()) return;
     const currentOv = adminCardsConfig.overrides?.[cardId] || {};
@@ -503,6 +530,7 @@ export default function AdminDashboard({
 
       setAdminCardsConfig(prev => ({ ...prev, rowId, overrides: nextOverrides }));
       setEditingBuiltinKey(null);
+      emitCardsChanged();
       if (onRefresh) await onRefresh();
     } catch (err) {
       alert('تعذر حفظ تعديل الكارت: ' + err.message);
@@ -527,22 +555,132 @@ export default function AdminDashboard({
       }
       setAdminCardsConfig(prev => ({ ...prev, overrides: nextOverrides }));
       setEditingBuiltinKey(null);
+      emitCardsChanged();
       if (onRefresh) await onRefresh();
     } catch (err) {
       alert('تعذر استعادة الكارت: ' + err.message);
     }
   };
 
+  const handleSaveNestedCardDirect = async (e) => {
+    e.preventDefault();
+    if (!requireAdminGuard()) return;
+    if (!nestedCrudForm.title.trim()) return alert('اكتب عنوان الكارت');
+
+    setSavingNestedCrud(true);
+    try {
+      const chosenParentId = nestedCrudForm.parent_id || null;
+      const baseRowPayload = {
+        parent_id: chosenParentId,
+        title: nestedCrudForm.title.trim(),
+        subtitle: nestedCrudForm.subtitle.trim(),
+        description: nestedCrudForm.description.trim(),
+        icon: nestedCrudForm.icon.trim() || '🗂️',
+        badge_text: nestedCrudForm.badge_text.trim(),
+        target_action: nestedCrudForm.target_action || 'children',
+        target_url: nestedCrudForm.target_url.trim(),
+        sort_order: Number(nestedCrudForm.sort_order || activeNestedRows.length + 1),
+        is_active: Boolean(nestedCrudForm.is_active)
+      };
+
+      let savedRow = null;
+      if (nestedCrudForm.id) {
+        const { data, error } = await supabase
+          .from('nested_cards')
+          .update(baseRowPayload)
+          .eq('id', nestedCrudForm.id)
+          .select()
+          .single();
+        if (error) throw new Error(error.message);
+        savedRow = data;
+      } else {
+        const { data, error } = await supabase
+          .from('nested_cards')
+          .insert([baseRowPayload])
+          .select()
+          .single();
+        if (error) throw new Error(error.message);
+        savedRow = data;
+      }
+
+      if (savedRow?.id) {
+        const nextMeta = {
+          ...(adminCardsConfig.cardMeta || {}),
+          [savedRow.id]: {
+            ...((adminCardsConfig.cardMeta || {})[savedRow.id] || {}),
+            placement_screen: chosenParentId ? '' : (nestedCrudForm.placement_screen || 'deacon_hub'),
+            parent_key: chosenParentId ? `nested:${chosenParentId}` : null,
+            target_action: nestedCrudForm.target_action || 'children',
+            target_screen: nestedCrudForm.target_screen || 'schedule',
+            allowed_roles: ['all']
+          }
+        };
+
+        const payloadBody = {
+          overrides: adminCardsConfig.overrides || {},
+          customScreenCards: adminCardsConfig.customScreenCards || [],
+          cardMeta: nextMeta
+        };
+
+        let rowId = adminCardsConfig.rowId;
+        if (!rowId) {
+          const { data: existing } = await supabase
+            .from('church_public_content')
+            .select('id')
+            .eq('kind', 'admin_cards_config')
+            .limit(1)
+            .maybeSingle();
+          rowId = existing?.id || null;
+        }
+
+        if (rowId) {
+          await supabase
+            .from('church_public_content')
+            .update({ body: JSON.stringify(payloadBody) })
+            .eq('id', rowId);
+        } else {
+          const { data: ins } = await supabase
+            .from('church_public_content')
+            .insert([{ kind: 'admin_cards_config', title: 'admin_cards_config', body: JSON.stringify(payloadBody), sort_order: 99 }])
+            .select()
+            .single();
+          rowId = ins?.id || null;
+        }
+
+        setAdminCardsConfig(prev => ({ ...prev, rowId, cardMeta: nextMeta }));
+        setActiveNestedRows(prev => {
+          const without = prev.filter(r => r.id !== savedRow.id);
+          return [...without, savedRow].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+        });
+      }
+
+      setNestedCrudForm({
+        ...emptyNestedCardForm,
+        placement_screen: nestedCrudForm.placement_screen || 'deacon_hub',
+        parent_id: chosenParentId || ''
+      });
+      emitCardsChanged();
+      if (onRefresh) await onRefresh();
+    } catch (err) {
+      alert('تعذر حفظ الكارت: ' + err.message);
+    } finally {
+      setSavingNestedCrud(false);
+    }
+  };
+
   const handleDeleteNestedRowDirect = async (row) => {
     if (!requireAdminGuard()) return;
-    if (!confirm(`حذف الكارت "${row.title}" نهائياً؟`)) return;
+    if (!confirm(`حذف الكارت "${row.title}" وكل ما بداخله؟`)) return;
     const { error } = await supabase.from('nested_cards').delete().eq('id', row.id);
     if (error) return alert('خطأ أثناء الحذف: ' + error.message);
-    setActiveNestedRows(prev => prev.filter(r => r.id !== row.id));
+    setActiveNestedRows(prev => prev.filter(r => r.id !== row.id && r.parent_id !== row.id));
+    if (nestedCrudForm.id === row.id) {
+      setNestedCrudForm(emptyNestedCardForm);
+    }
+    emitCardsChanged();
     if (onRefresh) await onRefresh();
   };
 
-  // إضافة / تعديل / حذف كروت الكاهن بوضوح
   const handleSavePriestCard = async (e) => {
     e.preventDefault();
     if (!requireAdminGuard()) return;
@@ -1284,9 +1422,9 @@ export default function AdminDashboard({
     {
       id: 'nested_cards',
       icon: '🧩',
-      title: 'إضافة وتعديل كروت',
-      desc: 'كروت جوا كروت + صلاحية مكان الظهور (في شاشة كذا أم جوا كارت كذا) + صلاحية الأدوار',
-      count: `${activeNestedRows.length} كارت مضاف`,
+      title: 'الكروت المتداخلة',
+      desc: 'إضافة وتعديل وحذف الكروت وإضافة كارت جوه كارت لكل تابة بدون خلط شاشات أخرى',
+      count: `${activeNestedRows.length} كارت`,
       color: 'border-rose-300 bg-rose-50/30'
     },
     ...(isAdmin ? [{
@@ -1304,7 +1442,7 @@ export default function AdminDashboard({
       id: 'setup_hub',
       icon: '🛠️',
       title: 'الإعدادات SETUP',
-      desc: 'حسابات الكنيسة، الصلاحيات، التصميم، الإعدادات، إضافة وتعديل كروت، وسجل النشاط',
+      desc: 'حسابات الكنيسة، الصلاحيات، التصميم، الإعدادات، الكروت المتداخلة، وسجل النشاط',
       count: `${rawSetupCards.length} كروت`,
       color: 'border-rose-300 bg-rose-50/40'
     },
@@ -1406,55 +1544,6 @@ export default function AdminDashboard({
   const visibleAdminCards = useMemo(() => resolveScreenCards('admin_hub'), [rawAdminCards, rawSetupCards, adminCardsConfig, activeNestedRows, effectiveUser?.role]);
   const visibleSetupCards = useMemo(() => resolveScreenCards('setup_hub'), [rawAdminCards, rawSetupCards, adminCardsConfig, activeNestedRows, effectiveUser?.role]);
 
-  // قائمة مجمعة لكل الكروت عشان الأدمن يشوفها ويعدلها أو يظهرها أو يحذفها بسهولة
-  const allManagedCardsList = useMemo(() => {
-    const overrides = adminCardsConfig.overrides || {};
-    const builtins = [
-      ...rawAdminCards.map(c => ({ ...c, defaultScreen: 'admin_hub' })),
-      ...rawSetupCards.map(c => ({ ...c, defaultScreen: 'setup_hub' }))
-    ].map(c => {
-      const ov = overrides[c.id] || {};
-      return {
-        key: c.id,
-        type: 'builtin',
-        icon: ov.icon || c.icon,
-        title: ov.title || c.title,
-        desc: ov.desc !== undefined ? ov.desc : c.desc,
-        isActive: ov.is_active !== undefined ? ov.is_active : true,
-        screen: ov.placement_screen || c.defaultScreen,
-        rawOv: ov,
-        rawCard: c
-      };
-    });
-
-    const nested = activeNestedRows.map(r => ({
-      key: `nested:${r.id}`,
-      type: 'nested',
-      icon: r.icon || '🗂️',
-      title: r.title,
-      desc: r.description || r.subtitle || '',
-      isActive: r.is_active !== false,
-      screen: adminCardsConfig.cardMeta?.[r.id]?.placement_screen || 'nested',
-      rawRow: r
-    }));
-
-    const priest = localPriestCards.map(pc => {
-      const pObj = priestsList.find(p => p.id === pc.priest_id);
-      return {
-        key: `priest:${pc.id}`,
-        type: 'priest',
-        icon: pc.card_icon || '📌',
-        title: pc.card_title,
-        desc: pc.description || '',
-        isActive: true,
-        screen: pObj ? `الكاهن: ${pObj.full_name}` : 'صفحة الكاهن (الكل)',
-        rawPriestCard: pc
-      };
-    });
-
-    return [...builtins, ...nested, ...priest];
-  }, [rawAdminCards, rawSetupCards, adminCardsConfig, activeNestedRows, localPriestCards, priestsList]);
-
   const cardsInsideCurrentScreen = useMemo(() => {
     if (!activeCard || activeCard === 'hub' || activeCard === 'setup_hub' || activeCard === 'nested_cards') return [];
     const targetKey = `builtin:${activeCard}`;
@@ -1521,6 +1610,7 @@ export default function AdminDashboard({
     setActiveCard(card.id);
   };
 
+  // بدون زر "كل الكروت" المجمع — كل تابة تفتح كروتها فقط
   const quickNavTabs = [
     { id: 'hub', label: '🏠 الإدارة' },
     { id: 'setup_hub', label: '🛠️ SETUP' },
@@ -1628,162 +1718,259 @@ export default function AdminDashboard({
     </div>
   );
 
-  // لوحة تحكم سريعة بالكروت (إظهار المخفي + تعديل الأسماء/الأماكن + تعديل/حذف كروت الكاهن)
-  const renderQuickCardsControlPanel = () => {
+  // لوحة إدارة الكروت المتداخلة + كارت جوه كارت + تعديل وحذف لكل تابة فقط
+  const renderTabScopedNestedManager = (defaultScreenKey = 'deacon_hub') => {
     if (!isAdmin) return null;
 
-    const filteredManageList = allManagedCardsList.filter(item => {
-      if (cardManagerFilter === 'hidden') return item.isActive === false;
-      if (cardManagerFilter === 'priest') return item.type === 'priest';
-      return true;
+    const currentScreenFilter = nestedCrudForm.placement_screen || defaultScreenKey;
+    const screenNestedList = activeNestedRows.filter(row => {
+      if (row.parent_id) return true; // نعرض الأبناء تحت كروتهم أو في القائمة لسهولة التعديل والحذف
+      const metaScreen = adminCardsConfig.cardMeta?.[row.id]?.placement_screen || 'admin_hub';
+      return metaScreen === currentScreenFilter;
     });
 
     return (
-      <div className="bg-white p-4 rounded-3xl border-2 border-amber-200 shadow-2xs space-y-3 text-xs">
+      <div className="bg-white p-4 rounded-3xl border-2 border-amber-200 shadow-2xs space-y-4 text-xs">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2.5">
           <div>
-            <h3 className="text-sm font-black text-[#7a1c24]">🎛️ تحكم سريع في كل الكروت (إظهار / تعديل / حذف / كروت الكاهن)</h3>
-            <p className="text-[11px] text-gray-500">هنا تقدر تشوف أي كارت مخفي وتظهره، تعدل أي كارت، أو تدخل تعدل/تحذف كروت صفحة الكاهن مباشرة.</p>
+            <h3 className="text-sm font-black text-[#7a1c24]">
+              🧩 إضافة وتعديل وحذف الكروت (وكارت جوه كارت) في التابة المختارة
+            </h3>
+            <p className="text-[11px] text-gray-500">
+              يتم عرض وإدارة كروت التابة المختارة فقط، مع إمكانية إنشاء كارت جديد أو وضع كارت داخل كارت أب موجود.
+            </p>
           </div>
           <div className="flex flex-wrap gap-1.5 font-bold">
-            <button
-              type="button"
-              onClick={() => setCardManagerFilter('all')}
-              className={`px-2.5 py-1.5 rounded-xl cursor-pointer ${cardManagerFilter === 'all' ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700'}`}
-            >
-              الكل ({allManagedCardsList.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setCardManagerFilter('hidden')}
-              className={`px-2.5 py-1.5 rounded-xl cursor-pointer ${cardManagerFilter === 'hidden' ? 'bg-amber-700 text-white' : 'bg-amber-50 text-amber-900 border border-amber-200'}`}
-            >
-              المخفية ({allManagedCardsList.filter(i => !i.isActive).length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setCardManagerFilter('priest')}
-              className={`px-2.5 py-1.5 rounded-xl cursor-pointer ${cardManagerFilter === 'priest' ? 'bg-purple-800 text-white' : 'bg-purple-50 text-purple-900 border border-purple-200'}`}
-            >
-              كروت الكاهن ({localPriestCards.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveCard('custom_cards')}
-              className="px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 font-black cursor-pointer"
-            >
-              + إضافة / إدارة كروت الكاهن
-            </button>
+            {[
+              { key: 'deacon_hub', label: '🕯️ شاشة الشماس' },
+              { key: 'admin_hub', label: '🛡️ لوحة الإدارة' },
+              { key: 'setup_hub', label: '🛠️ SETUP' }
+            ].map(sc => (
+              <button
+                key={sc.key}
+                type="button"
+                onClick={() => setNestedCrudForm(prev => ({ ...prev, placement_screen: sc.key, parent_id: '' }))}
+                className={`px-3 py-1.5 rounded-xl cursor-pointer ${
+                  currentScreenFilter === sc.key ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {sc.label}
+              </button>
+            ))}
           </div>
         </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-          {filteredManageList.map(item => (
-            <div key={item.key} className={`p-3 rounded-2xl border flex flex-col justify-between gap-2 ${item.isActive ? 'bg-[#fbfaf7]' : 'bg-red-50/40 border-red-200'}`}>
-              <div className="space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 font-black text-gray-900">
-                    <span className="text-lg">{item.icon}</span>
-                    <span>{item.title}</span>
-                  </div>
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${item.isActive ? 'bg-emerald-100 text-emerald-900' : 'bg-red-100 text-red-800'}`}>
-                    {item.isActive ? 'ظاهر' : 'مخفي'}
-                  </span>
-                </div>
-                <div className="text-[10px] text-gray-500">المكان: <strong>{item.screen}</strong></div>
-                {item.desc && <p className="text-[11px] text-gray-600 line-clamp-2">{item.desc}</p>}
-              </div>
+        <form onSubmit={handleSaveNestedCardDirect} className="bg-[#fbfaf7] p-4 rounded-2xl border space-y-3 font-bold">
+          <div className="font-black text-[#7a1c24] flex items-center gap-1.5">
+            <Plus size={14} /> {nestedCrudForm.id ? '✏️ تعديل الكارت' : '➕ إضافة كارت جديد / كارت جوه كارت'}
+          </div>
 
-              <div className="flex flex-wrap gap-1.5 pt-1 border-t">
-                {item.type === 'builtin' && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingBuiltinKey(item.key);
-                        setBuiltinEditForm({
-                          title: item.title,
-                          desc: item.desc || '',
-                          icon: item.icon || '📌',
-                          is_active: item.isActive,
-                          placement_screen: item.screen || 'admin_hub',
-                          parent_key: item.rawOv?.parent_key || ''
-                        });
-                      }}
-                      className="px-2.5 py-1 bg-white hover:bg-amber-100 border rounded-xl font-bold flex items-center gap-1 cursor-pointer"
-                    >
-                      <Edit3 size={11} /> تعديل
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => saveBuiltinCardOverride(item.key, { is_active: !item.isActive })}
-                      className="px-2.5 py-1 bg-white hover:bg-gray-100 border rounded-xl font-bold flex items-center gap-1 cursor-pointer"
-                    >
-                      {item.isActive ? <><EyeOff size={11} /> إخفاء</> : <><Eye size={11} /> إظهار</>}
-                    </button>
-                    {adminCardsConfig.overrides?.[item.key] && (
-                      <button
-                        type="button"
-                        onClick={() => resetBuiltinCardOverride(item.key)}
-                        className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 rounded-xl font-bold flex items-center gap-1 cursor-pointer"
-                        title="استعادة الإعداد الأصلي"
-                      >
-                        <RotateCcw size={11} />
-                      </button>
-                    )}
-                  </>
-                )}
-
-                {item.type === 'nested' && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => { setNestedRootId(null); setActiveCard('nested_cards'); }}
-                      className="px-2.5 py-1 bg-white hover:bg-amber-100 border rounded-xl font-bold flex items-center gap-1 cursor-pointer"
-                    >
-                      <Edit3 size={11} /> تعديل
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteNestedRowDirect(item.rawRow)}
-                      className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold flex items-center gap-1 cursor-pointer"
-                    >
-                      <Trash2 size={11} /> حذف
-                    </button>
-                  </>
-                )}
-
-                {item.type === 'priest' && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const pc = item.rawPriestCard;
-                        setEditingPriestCardId(pc.id);
-                        setCardForm({
-                          priest_id: pc.priest_id || '',
-                          card_title: pc.card_title || '',
-                          card_icon: pc.card_icon || '📌',
-                          description: pc.description || ''
-                        });
-                        setActiveCard('custom_cards');
-                      }}
-                      className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-950 border border-purple-200 rounded-xl font-bold flex items-center gap-1 cursor-pointer"
-                    >
-                      <Edit3 size={11} /> تعديل كارت الكاهن
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeletePriestCardDirect(item.rawPriestCard.id)}
-                      className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold flex items-center gap-1 cursor-pointer"
-                    >
-                      <Trash2 size={11} /> حذف
-                    </button>
-                  </>
-                )}
-              </div>
+          <div className="grid sm:grid-cols-3 gap-2">
+            <div>
+              <label className="block mb-1 text-[10px] text-gray-600">التابة / الشاشة</label>
+              <select
+                className="w-full p-2 border rounded-xl bg-white"
+                value={nestedCrudForm.placement_screen}
+                onChange={e => setNestedCrudForm(prev => ({ ...prev, placement_screen: e.target.value, parent_id: '' }))}
+              >
+                <option value="deacon_hub">🕯️ شاشة الشماس (deacon_hub)</option>
+                <option value="admin_hub">🛡️ لوحة الإدارة (admin_hub)</option>
+                <option value="setup_hub">🛠️ الإعدادات (setup_hub)</option>
+              </select>
             </div>
-          ))}
+
+            <div>
+              <label className="block mb-1 text-[10px] text-gray-600">إضافة داخل كارت أب (اختياري = كارت جوه كارت)</label>
+              <select
+                className="w-full p-2 border rounded-xl bg-white"
+                value={nestedCrudForm.parent_id || ''}
+                onChange={e => setNestedCrudForm(prev => ({ ...prev, parent_id: e.target.value }))}
+              >
+                <option value="">-- كارت رئيسي في التابة --</option>
+                {activeNestedRows
+                  .filter(r => r.id !== nestedCrudForm.id)
+                  .map(parent => (
+                    <option key={parent.id} value={parent.id}>
+                      {parent.icon || '🗂️'} {parent.title}
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block mb-1 text-[10px] text-gray-600">نوع فتح الكارت</label>
+              <select
+                className="w-full p-2 border rounded-xl bg-white"
+                value={nestedCrudForm.target_action}
+                onChange={e => setNestedCrudForm(prev => ({ ...prev, target_action: e.target.value }))}
+              >
+                <option value="children">🗂️ فتح كروت فرعية بداخله</option>
+                <option value="info">📝 نافذة سجلات وملاحظات</option>
+                <option value="screen">📱 الانتقال لقسم داخل الشاشة</option>
+                <option value="link">🔗 فتح رابط خارجي</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid sm:grid-cols-4 gap-2">
+            <div>
+              <label className="block mb-1 text-[10px] text-gray-600">الأيقونة</label>
+              <input
+                className="w-full p-2 border rounded-xl bg-white text-center"
+                value={nestedCrudForm.icon}
+                onChange={e => setNestedCrudForm(prev => ({ ...prev, icon: e.target.value }))}
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block mb-1 text-[10px] text-gray-600">عنوان الكارت *</label>
+              <input
+                required
+                placeholder="مثال: ألحان القداس / توزيع الشمامسة..."
+                className="w-full p-2 border rounded-xl bg-white"
+                value={nestedCrudForm.title}
+                onChange={e => setNestedCrudForm(prev => ({ ...prev, title: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="block mb-1 text-[10px] text-gray-600">شارة صغيرة (اختياري)</label>
+              <input
+                placeholder="مثال: جديد"
+                className="w-full p-2 border rounded-xl bg-white"
+                value={nestedCrudForm.badge_text}
+                onChange={e => setNestedCrudForm(prev => ({ ...prev, badge_text: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          {nestedCrudForm.target_action === 'link' && (
+            <input
+              placeholder="https://..."
+              className="w-full p-2 border rounded-xl bg-white font-normal"
+              value={nestedCrudForm.target_url}
+              onChange={e => setNestedCrudForm(prev => ({ ...prev, target_url: e.target.value }))}
+            />
+          )}
+
+          {nestedCrudForm.target_action === 'screen' && (
+            <select
+              className="w-full p-2 border rounded-xl bg-white"
+              value={nestedCrudForm.target_screen}
+              onChange={e => setNestedCrudForm(prev => ({ ...prev, target_screen: e.target.value }))}
+            >
+              <option value="schedule">📅 جدول التوزيع والخدمات</option>
+              <option value="agpeya">🙏 الأجبية المقدسة</option>
+              <option value="katameros">📖 القطمارس السنوي</option>
+              <option value="liturgy">⛪ القداس الإلهي</option>
+              <option value="euchologion">📘 كتاب الخولاجي</option>
+              <option value="rituals">🕯️ الطقوس الكنسية</option>
+            </select>
+          )}
+
+          <input
+            placeholder="وصف مختصر للكارت..."
+            className="w-full p-2 border rounded-xl bg-white font-normal"
+            value={nestedCrudForm.description}
+            onChange={e => setNestedCrudForm(prev => ({ ...prev, description: e.target.value }))}
+          />
+
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={nestedCrudForm.is_active}
+                onChange={e => setNestedCrudForm(prev => ({ ...prev, is_active: e.target.checked }))}
+              />
+              الكارت نشط وظاهر
+            </label>
+            <div className="flex gap-2">
+              {nestedCrudForm.id && (
+                <button
+                  type="button"
+                  onClick={() => setNestedCrudForm({ ...emptyNestedCardForm, placement_screen: currentScreenFilter })}
+                  className="px-3 py-2 border rounded-xl bg-white cursor-pointer"
+                >
+                  إلغاء التعديل
+                </button>
+              )}
+              <button
+                type="submit"
+                disabled={savingNestedCrud}
+                className="px-4 py-2 bg-[#7a1c24] text-white rounded-xl cursor-pointer shadow"
+              >
+                {savingNestedCrud ? 'جاري الحفظ...' : nestedCrudForm.id ? '💾 حفظ التعديل' : '+ إضافة الكارت'}
+              </button>
+            </div>
+          </div>
+        </form>
+
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+          {screenNestedList.map(row => {
+            const parentRow = row.parent_id ? activeNestedRows.find(p => p.id === row.parent_id) : null;
+            return (
+              <div key={row.id} className="p-3 rounded-2xl border bg-[#fbfaf7] flex flex-col justify-between gap-2">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <strong className="text-gray-900 flex items-center gap-1.5">
+                      <span>{row.icon || '🗂️'}</span>
+                      <span>{row.title}</span>
+                    </strong>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] ${row.is_active !== false ? 'bg-emerald-100 text-emerald-900' : 'bg-red-100 text-red-800'}`}>
+                      {row.is_active !== false ? 'ظاهر' : 'مخفي'}
+                    </span>
+                  </div>
+                  {parentRow && (
+                    <div className="text-[10px] text-indigo-800 font-bold">
+                      ↳ داخل كارت: {parentRow.title}
+                    </div>
+                  )}
+                  {row.description && <p className="text-[11px] text-gray-600 line-clamp-2 font-normal">{row.description}</p>}
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 pt-1 border-t font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setNestedCrudForm({
+                      ...emptyNestedCardForm,
+                      id: row.id,
+                      parent_id: row.parent_id || '',
+                      title: row.title || '',
+                      subtitle: row.subtitle || '',
+                      description: row.description || '',
+                      icon: row.icon || '🗂️',
+                      badge_text: row.badge_text || '',
+                      target_action: adminCardsConfig.cardMeta?.[row.id]?.target_action || row.target_action || 'children',
+                      target_url: row.target_url || '',
+                      target_screen: adminCardsConfig.cardMeta?.[row.id]?.target_screen || 'schedule',
+                      placement_screen: adminCardsConfig.cardMeta?.[row.id]?.placement_screen || currentScreenFilter,
+                      sort_order: row.sort_order || 1,
+                      is_active: row.is_active !== false
+                    })}
+                    className="px-2.5 py-1 bg-white hover:bg-amber-100 border rounded-lg flex items-center gap-1 cursor-pointer"
+                  >
+                    <Edit3 size={11} /> تعديل
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNestedCrudForm({
+                      ...emptyNestedCardForm,
+                      parent_id: row.id,
+                      placement_screen: adminCardsConfig.cardMeta?.[row.id]?.placement_screen || currentScreenFilter
+                    })}
+                    className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 rounded-lg flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus size={11} /> كارت جواه
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteNestedRowDirect(row)}
+                    className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 size={11} /> حذف
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -1796,18 +1983,9 @@ export default function AdminDashboard({
         <div className="bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-4 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
           <div>
             <h2 className="text-lg font-black text-amber-200">🛡️ لوحة الإدارة — {churchName}</h2>
-            <p className="text-xs text-white/85 mt-0.5">اختر الكارت المطلوب للإدارة أو عدّل الكروت وكروت الكاهن من الأسفل مباشرة</p>
+            <p className="text-xs text-white/85 mt-0.5">اختر الكارت المطلوب للإدارة أو افتح الكروت المتداخلة لكل تابة على حدة</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={() => setActiveCard('custom_cards')}
-                className="px-3.5 py-2 bg-amber-400/20 hover:bg-amber-400/30 border border-amber-300/40 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer"
-              >
-                📌 تعديل وحذف كروت الكاهن
-              </button>
-            )}
             {isAdmin && (
               <button
                 type="button"
@@ -1885,8 +2063,6 @@ export default function AdminDashboard({
             </div>
           ))}
         </div>
-
-        {renderQuickCardsControlPanel()}
 
         {activeCustomInfoCard && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
@@ -2045,12 +2221,13 @@ export default function AdminDashboard({
       <div className="space-y-3">
         {activeCard === 'nested_cards' && (
           <div className="space-y-3">
-            {renderTopBack('🧩 إضافة وتعديل كروت (كروت جوا كروت وصلاحيات الظهور)')}
+            {renderTopBack('🧩 الكروت المتداخلة (إضافة / تعديل / حذف / كارت جوه كارت)')}
+            {renderTabScopedNestedManager('deacon_hub')}
             <NestedCardsBuilder
               currentUser={effectiveUser}
               isAdmin={isAdmin}
               rootParentId={nestedRootId}
-              title="إدارة الكروت المتداخلة وصلاحيات الظهور"
+              title="إدارة الكروت المتداخلة حسب التابة"
               hubCards={rawAdminCards}
               setupCards={rawSetupCards}
               serviceGroups={effectiveGroups}
