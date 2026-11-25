@@ -589,25 +589,32 @@ export default function NestedCardsBuilder({
   const currentParentItem = currentParentKey ? itemByKey[currentParentKey] : null;
 
   const visibleCards = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+  const q = searchQuery.trim().toLowerCase();
 
-    if (currentParentKey) {
-      const children = childrenByParentKey[currentParentKey] || [];
-      if (!q) return children;
-      return children.filter(c => `${c.title} ${c.subtitle} ${c.description}`.toLowerCase().includes(q));
-    }
+  if (currentParentKey) {
+    const children = childrenByParentKey[currentParentKey] || [];
+    if (!q) return children;
+    return children.filter(c => `${c.title} ${c.subtitle} ${c.description}`.toLowerCase().includes(q));
+  }
 
-    if (q) {
-      return unifiedCards.filter(c => `${c.title} ${c.subtitle} ${c.description}`.toLowerCase().includes(q));
-    }
+  if (q) {
+    return unifiedCards.filter(c => `${c.title} ${c.subtitle} ${c.description}`.toLowerCase().includes(q));
+  }
 
-    const rootList = childrenByParentKey['__ROOT__'] || [];
-    if (screenFilter === 'all') return rootList;
-    if (screenFilter === 'nested_only') {
-      return unifiedCards.filter(item => item.kind === 'nested');
-    }
-    return rootList.filter(item => item.placement_screen === screenFilter);
-  }, [currentParentKey, childrenByParentKey, unifiedCards, screenFilter, searchQuery]);
+  if (screenFilter === 'all') {
+    return childrenByParentKey['__ROOT__'] || [];
+  }
+
+  if (screenFilter === 'nested_only') {
+    return unifiedCards.filter(item => item.kind === 'nested');
+  }
+
+  // عند اختيار شاشة محددة (مثل service_hub أو confessions أو cases):
+  // نعرض كروت هذه الشاشة سواء كانت في الجذر أو فرعية تحت كارت في نفس الشاشة
+  return unifiedCards.filter(item =>
+    item.placement_screen === screenFilter || item.raw?.screen === screenFilter
+  );
+}, [currentParentKey, childrenByParentKey, unifiedCards, screenFilter, searchQuery]);
 
   const collectDescendantKeys = (startKey) => {
     const collected = new Set([startKey]);
