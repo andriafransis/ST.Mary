@@ -16,9 +16,9 @@ import NestedCardsBuilder, {
 import PermissionsPage from './PermissionsPage';
 import {
   UserPlus, Edit3, Trash2, CalendarPlus, BookOpen,
-  Search, RefreshCw, FolderEdit, Sparkles, ArrowRight,
+  Search, RefreshCw, FolderEdit, ArrowRight,
   Users, Settings, Save, Upload, ShieldCheck, Lock, Layers, X, UserCheck, ArrowLeftRight,
-  Eye, EyeOff, RotateCcw, Plus
+  Plus
 } from 'lucide-react';
 
 export const DEACON_RANKS = [
@@ -168,15 +168,14 @@ const splitList = (val) =>
     .filter(Boolean);
 
 export default function AdminDashboard({
-  users = [], events = [], services = [], serviceGroups = [], caseCategories = [], customCards = [],
+  users = [], events = [], services = [], serviceGroups = [], caseCategories = [],
   familiesTree = [], roleScreens = [], currentUserId, currentUser = null,
   churchName = 'كنيسة السيدة العذراء مريم بالمطرية',
   onRefresh,
   onAddUser, onUpdateUser, onDeleteUser,
   onAddEvent, onUpdateEvent, onDeleteEvent,
   onAddService, onUpdateService, onDeleteService,
-  onAddCategory, onUpdateCategory, onDeleteCategory,
-  onAddCustomCard, onUpdateCustomCard, onDeleteCustomCard
+  onAddCategory, onUpdateCategory, onDeleteCategory
 }) {
   const effectiveUser = currentUser || users.find(u => u.id === currentUserId) || null;
   const isAdmin = effectiveUser?.role === 'admin';
@@ -187,10 +186,15 @@ export default function AdminDashboard({
   const [servicesSubTab, setServicesSubTab] = useState('browse');
   const [nestedRootId, setNestedRootId] = useState(null);
   const [activeCustomInfoCard, setActiveCustomInfoCard] = useState(null);
-  const [adminCardsConfig, setAdminCardsConfig] = useState({ rowId: null, overrides: {}, customScreenCards: [], cardMeta: {} });
+  const [adminCardsConfig, setAdminCardsConfig] = useState({
+    rowId: null,
+    overrides: {},
+    customScreenCards: [],
+    cardMeta: {},
+    deletedCardIds: []
+  });
   const [activeNestedRows, setActiveNestedRows] = useState([]);
 
-  // إدارة إضافة / تعديل / حذف كارت متداخل أو كارت جوه كارت مباشرة
   const [nestedCrudForm, setNestedCrudForm] = useState(emptyNestedCardForm);
   const [savingNestedCrud, setSavingNestedCrud] = useState(false);
 
@@ -203,13 +207,6 @@ export default function AdminDashboard({
     placement_screen: 'admin_hub',
     parent_key: ''
   });
-
-  const [localPriestCards, setLocalPriestCards] = useState(customCards || []);
-  useEffect(() => {
-    setLocalPriestCards(customCards || []);
-  }, [customCards]);
-
-  const [editingPriestCardId, setEditingPriestCardId] = useState(null);
 
   const [userSubTab, setUserSubTab] = useState(null);
   const [searchQ, setSearchQ] = useState('');
@@ -262,8 +259,6 @@ export default function AdminDashboard({
   const [catForm, setCatForm] = useState({ name: '', icon: '📂' });
   const [editingCat, setEditingCat] = useState(null);
 
-  const [cardForm, setCardForm] = useState({ priest_id: '', card_title: '', card_icon: '📌', description: '' });
-
   const [roleTemplatesCount, setRoleTemplatesCount] = useState(0);
 
   const [logoRowId, setLogoRowId] = useState(null);
@@ -296,6 +291,44 @@ export default function AdminDashboard({
     }
   };
 
+  const persistCardsConfigBody = async (nextConfig) => {
+    const payloadBody = {
+      overrides: nextConfig.overrides || {},
+      customScreenCards: nextConfig.customScreenCards || [],
+      cardMeta: nextConfig.cardMeta || {},
+      deletedCardIds: nextConfig.deletedCardIds || []
+    };
+
+    let rowId = nextConfig.rowId;
+    if (!rowId) {
+      const { data: existing } = await supabase
+        .from('church_public_content')
+        .select('id')
+        .eq('kind', 'admin_cards_config')
+        .limit(1)
+        .maybeSingle();
+      rowId = existing?.id || null;
+    }
+
+    if (rowId) {
+      const { error } = await supabase
+        .from('church_public_content')
+        .update({ body: JSON.stringify(payloadBody) })
+        .eq('id', rowId);
+      if (error) throw new Error(error.message);
+    } else {
+      const { data: inserted, error } = await supabase
+        .from('church_public_content')
+        .insert([{ kind: 'admin_cards_config', title: 'admin_cards_config', body: JSON.stringify(payloadBody), sort_order: 99 }])
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      rowId = inserted?.id || null;
+    }
+
+    return rowId;
+  };
+
   const loadRoleTemplates = async () => {
     const { data } = await supabase
       .from('church_public_content')
@@ -316,15 +349,37 @@ export default function AdminDashboard({
   };
 
   const loadCardsState = async () => {
-    const [cfg, nestedRes] = await Promise.all([
+    const [cfg, nestedRes, rawCfgRow] = await Promise.all([
       loadAdminCardsConfig(),
       supabase
         .from('nested_cards')
         .select('*')
         .order('sort_order', { ascending: true })
-        .order('created_at', { ascending: true })
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('church_public_content')
+        .select('id, body')
+        .eq('kind', 'admin_cards_config')
+        .limit(1)
+        .maybeSingle()
     ]);
-    setAdminCardsConfig(cfg);
+
+    let parsedDeletedIds = [];
+    try {
+      const parsed = rawCfgRow?.data?.body ? JSON.parse(rawCfgRow.data.body) : {};
+      if (Array.isArray(parsed?.deletedCardIds)) parsedDeletedIds = parsed.deletedCardIds;
+    } catch {
+      parsedDeletedIds = [];
+    }
+
+    setAdminCardsConfig({
+      rowId: cfg?.rowId || rawCfgRow?.data?.id || null,
+      overrides: cfg?.overrides || {},
+      customScreenCards: cfg?.customScreenCards || [],
+      cardMeta: cfg?.cardMeta || {},
+      deletedCardIds: parsedDeletedIds
+    });
+
     if (!nestedRes.error) setActiveNestedRows(nestedRes.data || []);
   };
 
@@ -493,41 +548,10 @@ export default function AdminDashboard({
     const currentOv = adminCardsConfig.overrides?.[cardId] || {};
     const mergedOv = { ...currentOv, ...nextOvPatch };
     const nextOverrides = { ...(adminCardsConfig.overrides || {}), [cardId]: mergedOv };
-
-    const payloadBody = {
-      overrides: nextOverrides,
-      customScreenCards: adminCardsConfig.customScreenCards || [],
-      cardMeta: adminCardsConfig.cardMeta || {}
-    };
+    const nextConfig = { ...adminCardsConfig, overrides: nextOverrides };
 
     try {
-      let rowId = adminCardsConfig.rowId;
-      if (!rowId) {
-        const { data: existing } = await supabase
-          .from('church_public_content')
-          .select('id')
-          .eq('kind', 'admin_cards_config')
-          .limit(1)
-          .maybeSingle();
-        rowId = existing?.id || null;
-      }
-
-      if (rowId) {
-        const { error } = await supabase
-          .from('church_public_content')
-          .update({ body: JSON.stringify(payloadBody) })
-          .eq('id', rowId);
-        if (error) throw new Error(error.message);
-      } else {
-        const { data: inserted, error } = await supabase
-          .from('church_public_content')
-          .insert([{ kind: 'admin_cards_config', title: 'admin_cards_config', body: JSON.stringify(payloadBody), sort_order: 99 }])
-          .select()
-          .single();
-        if (error) throw new Error(error.message);
-        rowId = inserted?.id || null;
-      }
-
+      const rowId = await persistCardsConfigBody(nextConfig);
       setAdminCardsConfig(prev => ({ ...prev, rowId, overrides: nextOverrides }));
       setEditingBuiltinKey(null);
       emitCardsChanged();
@@ -537,28 +561,33 @@ export default function AdminDashboard({
     }
   };
 
-  const resetBuiltinCardOverride = async (cardId) => {
+  const handleDeleteAdminOrSetupCard = async (card) => {
     if (!requireAdminGuard()) return;
-    const nextOverrides = { ...(adminCardsConfig.overrides || {}) };
-    delete nextOverrides[cardId];
-    const payloadBody = {
-      overrides: nextOverrides,
-      customScreenCards: adminCardsConfig.customScreenCards || [],
-      cardMeta: adminCardsConfig.cardMeta || {}
-    };
+    if (!confirm(`هل تريد حذف الكارت "${card.title}"؟`)) return;
+
     try {
-      if (adminCardsConfig.rowId) {
-        await supabase
-          .from('church_public_content')
-          .update({ body: JSON.stringify(payloadBody) })
-          .eq('id', adminCardsConfig.rowId);
+      if (card.isNestedRoot && card.nestedData?.id) {
+        const rowId = card.nestedData.id;
+        const { error } = await supabase.from('nested_cards').delete().eq('id', rowId);
+        if (error) throw new Error(error.message);
+
+        const nextMeta = { ...(adminCardsConfig.cardMeta || {}) };
+        delete nextMeta[rowId];
+        const savedCfgId = await persistCardsConfigBody({ ...adminCardsConfig, cardMeta: nextMeta });
+
+        setActiveNestedRows(prev => prev.filter(r => r.id !== rowId && r.parent_id !== rowId));
+        setAdminCardsConfig(prev => ({ ...prev, rowId: savedCfgId, cardMeta: nextMeta }));
+        if (nestedCrudForm.id === rowId) setNestedCrudForm(emptyNestedCardForm);
+      } else {
+        const nextDeletedIds = [...new Set([...(adminCardsConfig.deletedCardIds || []), card.id])];
+        const savedCfgId = await persistCardsConfigBody({ ...adminCardsConfig, deletedCardIds: nextDeletedIds });
+        setAdminCardsConfig(prev => ({ ...prev, rowId: savedCfgId, deletedCardIds: nextDeletedIds }));
       }
-      setAdminCardsConfig(prev => ({ ...prev, overrides: nextOverrides }));
-      setEditingBuiltinKey(null);
+
       emitCardsChanged();
       if (onRefresh) await onRefresh();
     } catch (err) {
-      alert('تعذر استعادة الكارت: ' + err.message);
+      alert('تعذر حذف الكارت: ' + err.message);
     }
   };
 
@@ -616,36 +645,7 @@ export default function AdminDashboard({
           }
         };
 
-        const payloadBody = {
-          overrides: adminCardsConfig.overrides || {},
-          customScreenCards: adminCardsConfig.customScreenCards || [],
-          cardMeta: nextMeta
-        };
-
-        let rowId = adminCardsConfig.rowId;
-        if (!rowId) {
-          const { data: existing } = await supabase
-            .from('church_public_content')
-            .select('id')
-            .eq('kind', 'admin_cards_config')
-            .limit(1)
-            .maybeSingle();
-          rowId = existing?.id || null;
-        }
-
-        if (rowId) {
-          await supabase
-            .from('church_public_content')
-            .update({ body: JSON.stringify(payloadBody) })
-            .eq('id', rowId);
-        } else {
-          const { data: ins } = await supabase
-            .from('church_public_content')
-            .insert([{ kind: 'admin_cards_config', title: 'admin_cards_config', body: JSON.stringify(payloadBody), sort_order: 99 }])
-            .select()
-            .single();
-          rowId = ins?.id || null;
-        }
+        const rowId = await persistCardsConfigBody({ ...adminCardsConfig, cardMeta: nextMeta });
 
         setAdminCardsConfig(prev => ({ ...prev, rowId, cardMeta: nextMeta }));
         setActiveNestedRows(prev => {
@@ -679,57 +679,6 @@ export default function AdminDashboard({
     }
     emitCardsChanged();
     if (onRefresh) await onRefresh();
-  };
-
-  const handleSavePriestCard = async (e) => {
-    e.preventDefault();
-    if (!requireAdminGuard()) return;
-    const payload = {
-      priest_id: cardForm.priest_id || null,
-      card_title: cardForm.card_title.trim(),
-      card_icon: cardForm.card_icon.trim() || '📌',
-      description: cardForm.description.trim()
-    };
-    if (!payload.card_title) return alert('اكتب عنوان الكارت');
-
-    if (editingPriestCardId) {
-      if (onUpdateCustomCard) {
-        await onUpdateCustomCard({ ...payload, id: editingPriestCardId });
-      } else {
-        const { error } = await supabase.from('priest_custom_cards').update(payload).eq('id', editingPriestCardId);
-        if (error) return alert('تعذر تعديل كارت الكاهن: ' + error.message);
-        if (onRefresh) await onRefresh();
-      }
-      setLocalPriestCards(prev => prev.map(c => (c.id === editingPriestCardId ? { ...c, ...payload } : c)));
-      setEditingPriestCardId(null);
-    } else {
-      if (onAddCustomCard) {
-        await onAddCustomCard(payload);
-      } else {
-        const { data, error } = await supabase.from('priest_custom_cards').insert([payload]).select().single();
-        if (error) return alert('تعذر إضافة كارت الكاهن: ' + error.message);
-        if (data) setLocalPriestCards(prev => [...prev, data]);
-        if (onRefresh) await onRefresh();
-      }
-    }
-    setCardForm({ priest_id: '', card_title: '', card_icon: '📌', description: '' });
-  };
-
-  const handleDeletePriestCardDirect = async (cardId) => {
-    if (!requireAdminGuard()) return;
-    if (!confirm('حذف كارت الكاهن ده؟')) return;
-    if (onDeleteCustomCard) {
-      await onDeleteCustomCard(cardId);
-    } else {
-      const { error } = await supabase.from('priest_custom_cards').delete().eq('id', cardId);
-      if (error) return alert('تعذر حذف الكارت: ' + error.message);
-      if (onRefresh) await onRefresh();
-    }
-    setLocalPriestCards(prev => prev.filter(c => c.id !== cardId));
-    if (editingPriestCardId === cardId) {
-      setEditingPriestCardId(null);
-      setCardForm({ priest_id: '', card_title: '', card_icon: '📌', description: '' });
-    }
   };
 
   const getPriestCoverage = (priestId) => {
@@ -1385,6 +1334,7 @@ export default function AdminDashboard({
     userSubTab === 'parents' ? 'إضافة ولي أمر / عامل' : 'إضافة شخص جديد';
 
   const isSetupChildCard = SETUP_SUB_CARDS.includes(activeCard);
+  const deletedCardIdSet = useMemo(() => new Set(adminCardsConfig.deletedCardIds || []), [adminCardsConfig.deletedCardIds]);
 
   const rawSetupCards = useMemo(() => [
     {
@@ -1459,9 +1409,8 @@ export default function AdminDashboard({
     { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل، المواد، الأسعار، حضور الطلاب والمدرسين، وشيت المحاسبة', count: 'إدارة الدروس', color: 'border-indigo-200 bg-white' },
     { id: 'joseph_arimathea', icon: '🕊️', title: 'خدمة يوسف الرامي', desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، خط سير السائق، ومتابعة المرافقين', count: 'خدمة المنتقلين', color: 'border-slate-300 bg-white' },
     { id: 'burial_and_caskets', icon: '⚰️', title: 'أماكن الدفن والصناديق وألحان يوسف الرامي', desc: 'جدول أماكن الدفن بالترقيم المتسلسل ورسوم الانتقال + مخزون الصناديق + ألحان يوسف الرامي وسلايدر الصوت', count: 'جداول وألحان', color: 'border-cyan-200 bg-white' },
-    { id: 'categories', icon: '📂', title: 'كروت بحث الحالة', desc: 'تعديل وإضافة تصنيفات الأسر في مكتب الكاهن', count: `${caseCategories.length} تصنيف`, color: 'border-emerald-200 bg-white' },
-    { id: 'custom_cards', icon: '📌', title: 'كروت إضافية للكاهن', desc: 'إنشاء وتعديل وحذف كروت تظهر داخل شاشة الأب الكاهن', count: `${localPriestCards.length} كارت`, color: 'border-purple-200 bg-white' }
-  ], [rawSetupCards.length, canExtractSheet, users.length, events.length, dbServiceGroups.length, services.length, caseCategories.length, localPriestCards.length]);
+    { id: 'categories', icon: '📂', title: 'كروت بحث الحالة', desc: 'تعديل وإضافة تصنيفات الأسر في مكتب الكاهن', count: `${caseCategories.length} تصنيف`, color: 'border-emerald-200 bg-white' }
+  ], [rawSetupCards.length, canExtractSheet, users.length, events.length, dbServiceGroups.length, services.length, caseCategories.length]);
 
   const isRoleAllowedForCard = (allowedRoles) => {
     if (!Array.isArray(allowedRoles) || allowedRoles.length === 0 || allowedRoles.includes('all')) return true;
@@ -1487,7 +1436,7 @@ export default function AdminDashboard({
     const allBuiltins = [
       ...rawAdminCards.map(c => ({ ...c, defaultScreen: 'admin_hub' })),
       ...rawSetupCards.map(c => ({ ...c, defaultScreen: 'setup_hub' }))
-    ];
+    ].filter(c => !deletedCardIdSet.has(c.id));
 
     const builtinsForScreen = allBuiltins
       .map(c => {
@@ -1541,8 +1490,8 @@ export default function AdminDashboard({
     return [...builtinsForScreen, ...nestedForScreen];
   };
 
-  const visibleAdminCards = useMemo(() => resolveScreenCards('admin_hub'), [rawAdminCards, rawSetupCards, adminCardsConfig, activeNestedRows, effectiveUser?.role]);
-  const visibleSetupCards = useMemo(() => resolveScreenCards('setup_hub'), [rawAdminCards, rawSetupCards, adminCardsConfig, activeNestedRows, effectiveUser?.role]);
+  const visibleAdminCards = useMemo(() => resolveScreenCards('admin_hub'), [rawAdminCards, rawSetupCards, adminCardsConfig, activeNestedRows, effectiveUser?.role, deletedCardIdSet]);
+  const visibleSetupCards = useMemo(() => resolveScreenCards('setup_hub'), [rawAdminCards, rawSetupCards, adminCardsConfig, activeNestedRows, effectiveUser?.role, deletedCardIdSet]);
 
   const cardsInsideCurrentScreen = useMemo(() => {
     if (!activeCard || activeCard === 'hub' || activeCard === 'setup_hub' || activeCard === 'nested_cards') return [];
@@ -1563,7 +1512,7 @@ export default function AdminDashboard({
       }));
 
     const builtinsInside = [...rawAdminCards, ...rawSetupCards]
-      .filter(c => overrides[c.id]?.parent_key === targetKey && overrides[c.id]?.is_active !== false && isRoleAllowedForCard(overrides[c.id]?.allowed_roles))
+      .filter(c => !deletedCardIdSet.has(c.id) && overrides[c.id]?.parent_key === targetKey && overrides[c.id]?.is_active !== false && isRoleAllowedForCard(overrides[c.id]?.allowed_roles))
       .map(c => ({
         ...c,
         title: overrides[c.id]?.title || c.title,
@@ -1572,7 +1521,7 @@ export default function AdminDashboard({
       }));
 
     return [...builtinsInside, ...nestedInside];
-  }, [activeCard, activeNestedRows, adminCardsConfig, rawAdminCards, rawSetupCards, effectiveUser?.role]);
+  }, [activeCard, activeNestedRows, adminCardsConfig, rawAdminCards, rawSetupCards, effectiveUser?.role, deletedCardIdSet]);
 
   const handleLaunchAdminOrSetupCard = (card) => {
     if (card.isNestedRoot && card.nestedData) {
@@ -1610,14 +1559,12 @@ export default function AdminDashboard({
     setActiveCard(card.id);
   };
 
-  // بدون زر "كل الكروت" المجمع — كل تابة تفتح كروتها فقط
   const quickNavTabs = [
     { id: 'hub', label: '🏠 الإدارة' },
     { id: 'setup_hub', label: '🛠️ SETUP' },
     { id: 'users', label: '👥 الحسابات' },
     { id: 'services', label: '🏫 الخدمات' },
     { id: 'events', label: '⛪ القداسات' },
-    { id: 'custom_cards', label: '📌 كروت الكاهن' },
     { id: 'nested_cards', label: '🧩 الكروت المتداخلة' },
     { id: 'roles_permissions', label: '🔐 الصلاحيات' },
     { id: 'page_designer', label: '🎨 التصميم' },
@@ -1718,13 +1665,47 @@ export default function AdminDashboard({
     </div>
   );
 
-  // لوحة إدارة الكروت المتداخلة + كارت جوه كارت + تعديل وحذف لكل تابة فقط
+  const renderCardActionButtons = (card, defaultScreen) => {
+    if (!isAdmin) return null;
+    return (
+      <div className="flex items-center justify-end gap-1.5 pt-2 border-t text-[11px] font-bold">
+        {!card.isNestedRoot && (
+          <button
+            type="button"
+            onClick={() => {
+              setEditingBuiltinKey(card.id);
+              const ov = adminCardsConfig.overrides?.[card.id] || {};
+              setBuiltinEditForm({
+                title: card.title,
+                desc: card.desc || '',
+                icon: card.icon || '📌',
+                is_active: card.is_active !== false,
+                placement_screen: ov.placement_screen || defaultScreen,
+                parent_key: ov.parent_key || ''
+              });
+            }}
+            className="px-2.5 py-1 bg-gray-100 hover:bg-amber-100 text-gray-800 rounded-lg flex items-center gap-1 cursor-pointer"
+          >
+            <Edit3 size={11} /> تعديل الكارت
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => handleDeleteAdminOrSetupCard(card)}
+          className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg flex items-center gap-1 cursor-pointer"
+        >
+          <Trash2 size={11} /> حذف
+        </button>
+      </div>
+    );
+  };
+
   const renderTabScopedNestedManager = (defaultScreenKey = 'deacon_hub') => {
     if (!isAdmin) return null;
 
     const currentScreenFilter = nestedCrudForm.placement_screen || defaultScreenKey;
     const screenNestedList = activeNestedRows.filter(row => {
-      if (row.parent_id) return true; // نعرض الأبناء تحت كروتهم أو في القائمة لسهولة التعديل والحذف
+      if (row.parent_id) return true;
       const metaScreen = adminCardsConfig.cardMeta?.[row.id]?.placement_screen || 'admin_hub';
       return metaScreen === currentScreenFilter;
     });
@@ -2031,35 +2012,7 @@ export default function AdminDashboard({
                 </div>
               </button>
 
-              {isAdmin && !c.isNestedRoot && (
-                <div className="flex items-center justify-end gap-1.5 pt-2 border-t text-[11px] font-bold">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingBuiltinKey(c.id);
-                      const ov = adminCardsConfig.overrides?.[c.id] || {};
-                      setBuiltinEditForm({
-                        title: c.title,
-                        desc: c.desc || '',
-                        icon: c.icon || '📌',
-                        is_active: c.is_active !== false,
-                        placement_screen: ov.placement_screen || 'admin_hub',
-                        parent_key: ov.parent_key || ''
-                      });
-                    }}
-                    className="px-2.5 py-1 bg-gray-100 hover:bg-amber-100 text-gray-800 rounded-lg flex items-center gap-1 cursor-pointer"
-                  >
-                    <Edit3 size={11} /> تعديل الكارت
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => saveBuiltinCardOverride(c.id, { is_active: false })}
-                    className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg flex items-center gap-1 cursor-pointer"
-                  >
-                    <EyeOff size={11} /> إخفاء
-                  </button>
-                </div>
-              )}
+              {renderCardActionButtons(c, 'admin_hub')}
             </div>
           ))}
         </div>
@@ -2132,35 +2085,7 @@ export default function AdminDashboard({
                 </div>
               </button>
 
-              {isAdmin && !c.isNestedRoot && (
-                <div className="flex items-center justify-end gap-1.5 pt-2 border-t text-[11px] font-bold">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingBuiltinKey(c.id);
-                      const ov = adminCardsConfig.overrides?.[c.id] || {};
-                      setBuiltinEditForm({
-                        title: c.title,
-                        desc: c.desc || '',
-                        icon: c.icon || '📌',
-                        is_active: c.is_active !== false,
-                        placement_screen: ov.placement_screen || 'setup_hub',
-                        parent_key: ov.parent_key || ''
-                      });
-                    }}
-                    className="px-2.5 py-1 bg-gray-100 hover:bg-amber-100 text-gray-800 rounded-lg flex items-center gap-1 cursor-pointer"
-                  >
-                    <Edit3 size={11} /> تعديل الكارت
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => saveBuiltinCardOverride(c.id, { is_active: false })}
-                    className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg flex items-center gap-1 cursor-pointer"
-                  >
-                    <EyeOff size={11} /> إخفاء
-                  </button>
-                </div>
-              )}
+              {renderCardActionButtons(c, 'setup_hub')}
             </div>
           ))}
         </div>
@@ -2233,7 +2158,6 @@ export default function AdminDashboard({
               serviceGroups={effectiveGroups}
               services={services}
               caseCategories={caseCategories}
-              customCards={localPriestCards}
               priests={priestsList}
               onNavigateScreen={(screenId) => setActiveCard(screenId)}
               onExit={nestedRootId ? () => { setNestedRootId(null); setActiveCard('hub'); } : undefined}
@@ -3301,96 +3225,6 @@ export default function AdminDashboard({
           </div>
         )}
 
-        {activeCard === 'custom_cards' && (
-          <div className="space-y-3 text-xs">
-            {renderTopBack('📌 كروت إضافية للكاهن (إضافة وتعديل وحذف)')}
-            {isAdmin && (
-              <form
-                onSubmit={handleSavePriestCard}
-                className="bg-white p-4 rounded-2xl border space-y-2.5 font-bold shadow-2xs"
-              >
-                <h3 className="text-sm font-extrabold flex items-center gap-1 text-[#7a1c24]">
-                  <Sparkles size={15} /> {editingPriestCardId ? '✏️ تعديل كارت الكاهن' : 'إنشاء كارت جديد في صفحة الأب الكاهن'}
-                </h3>
-                <div className="grid md:grid-cols-4 gap-2">
-                  <select className="p-2 border rounded-xl" value={cardForm.priest_id} onChange={e => setCardForm({ ...cardForm, priest_id: e.target.value })}>
-                    <option value="">لكل الآباء الكهنة</option>
-                    {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-                  </select>
-                  <input required placeholder="عنوان الكارت (مثال: الرحلات / صلاة الطشت) *" className="p-2 border rounded-xl" value={cardForm.card_title} onChange={e => setCardForm({ ...cardForm, card_title: e.target.value })} />
-                  <input placeholder="الأيقونة (📌)" className="p-2 border rounded-xl" value={cardForm.card_icon} onChange={e => setCardForm({ ...cardForm, card_icon: e.target.value })} />
-                  <div className="flex gap-1.5">
-                    <button type="submit" className="flex-1 bg-[#7a1c24] text-white rounded-xl p-2 cursor-pointer">
-                      {editingPriestCardId ? 'حفظ التعديل' : 'إنشاء الكارت'}
-                    </button>
-                    {editingPriestCardId && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingPriestCardId(null);
-                          setCardForm({ priest_id: '', card_title: '', card_icon: '📌', description: '' });
-                        }}
-                        className="px-3 border rounded-xl cursor-pointer"
-                      >
-                        إلغاء
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <input placeholder="وصف مختصر للكارت..." className="w-full p-2 border rounded-xl" value={cardForm.description} onChange={e => setCardForm({ ...cardForm, description: e.target.value })} />
-              </form>
-            )}
-
-            <div className="grid md:grid-cols-2 gap-2.5">
-              {localPriestCards.length === 0 ? (
-                <div className="bg-white p-6 rounded-2xl border text-center text-gray-400 md:col-span-2">
-                  لا توجد كروت مضافة لصفحة الكاهن حالياً
-                </div>
-              ) : (
-                localPriestCards.map(cc => {
-                  const targetPriest = priestsList.find(p => p.id === cc.priest_id);
-                  return (
-                    <div key={cc.id} className="bg-white p-3.5 rounded-2xl border flex justify-between items-center shadow-2xs gap-2">
-                      <div>
-                        <span className="text-xl ml-2">{cc.card_icon}</span>
-                        <strong className="text-sm">{cc.card_title}</strong>
-                        <span className="mr-2 px-2 py-0.5 bg-amber-50 text-amber-900 rounded text-[10px] font-bold">{targetPriest ? targetPriest.full_name : 'لكل الكهنة'}</span>
-                        <p className="text-gray-500 mt-0.5">{cc.description}</p>
-                      </div>
-                      {isAdmin && (
-                        <div className="flex gap-1.5 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingPriestCardId(cc.id);
-                              setCardForm({
-                                priest_id: cc.priest_id || '',
-                                card_title: cc.card_title || '',
-                                card_icon: cc.card_icon || '📌',
-                                description: cc.description || ''
-                              });
-                            }}
-                            className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-200 rounded-xl font-bold flex items-center gap-1 cursor-pointer"
-                          >
-                            <Edit3 size={12} /> تعديل
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeletePriestCardDirect(cc.id)}
-                            className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold flex items-center gap-1 cursor-pointer"
-                          >
-                            <Trash2 size={12} /> حذف
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        )}
-
         {activeCard === 'logs' && isAdmin && (
           <div className="space-y-3 text-xs">
             {renderTopBack('📊 سجل النشاط واللوجات والواتساب')}
@@ -3482,7 +3316,6 @@ export default function AdminDashboard({
         )}
       </div>
 
-      {/* مودال تعديل أي كارت أساسي أو إظهاره/نقل مكانه */}
       {editingBuiltinKey && isAdmin && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-3xl w-full max-w-md p-6 space-y-3 text-xs font-bold">
