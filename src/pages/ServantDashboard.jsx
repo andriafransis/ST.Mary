@@ -2,15 +2,16 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Phone, Search, UserPlus, Calendar, MessageSquareText, Layers,
-  MessageCircle, AlertTriangle, Users, MapPin, X, FileSpreadsheet,
-  ArrowRight, BookOpen, Plus, Pencil, Trash2, Check, LayoutGrid, List,
-  ClipboardCheck, HeartHandshake, CheckCircle2, SlidersHorizontal, Camera, Cake, Award
+  MessageCircle, Users, MapPin, X, FileSpreadsheet,
+  Plus, Pencil, LayoutGrid, List,
+  CheckCircle2, SlidersHorizontal, Camera, Cake, Award, MailPlus
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BirthdayBanner from '../components/BirthdayBanner';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
 import { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/ServiceGroupFeed';
 import MonthlyAnalyticsAndRewards from '../components/MonthlyAnalyticsAndRewards';
+import PriestInvitationModal from '../components/PriestInvitationModal';
 
 const STAGE_OPTIONS = [
   'حضانة',
@@ -255,11 +256,6 @@ export default function ServantDashboard({
   });
 
   const [showItemsManager, setShowItemsManager] = useState(false);
-  const [newNoteTagInput, setNewNoteTagInput] = useState('');
-  const [newActivityTypeInput, setNewActivityTypeInput] = useState('');
-  const [newStatusLabelInput, setNewStatusLabelInput] = useState('');
-  const [newStatusEmojiInput, setNewStatusEmojiInput] = useState('📌');
-  const [newStatusAttendedInput, setNewStatusAttendedInput] = useState(true);
 
   const persistCustomItems = async (
     nextNoteTags,
@@ -349,76 +345,6 @@ export default function ServantDashboard({
       active = false;
     };
   }, []);
-
-  const handleAddNoteTagItem = (e) => {
-    e.preventDefault();
-    const trimmed = newNoteTagInput.trim();
-    if (!trimmed) return;
-    if (noteTags.includes(trimmed)) {
-      setNewNoteTagInput('');
-      return;
-    }
-    const updated = [...noteTags, trimmed];
-    setNoteTags(updated);
-    setNewNoteTagInput('');
-    persistCustomItems(updated, activityTypes, attendanceStatuses);
-  };
-
-  const handleRemoveNoteTagItem = (tagToRemove) => {
-    if (noteTags.length <= 1) return alert('يجب الإبقاء على بند واحد على الأقل.');
-    const updated = noteTags.filter(t => t !== tagToRemove);
-    setNoteTags(updated);
-    if (selectedCaseTagFilter === tagToRemove) setSelectedCaseTagFilter('الكل');
-    if (newNoteTag === tagToRemove) setNewNoteTag(updated[0]);
-    persistCustomItems(updated, activityTypes, attendanceStatuses);
-  };
-
-  const handleAddActivityTypeItem = (e) => {
-    e.preventDefault();
-    const trimmed = newActivityTypeInput.trim();
-    if (!trimmed) return;
-    if (activityTypes.includes(trimmed)) {
-      setNewActivityTypeInput('');
-      return;
-    }
-    const updated = [...activityTypes, trimmed];
-    setActivityTypes(updated);
-    setNewActivityTypeInput('');
-    persistCustomItems(noteTags, updated, attendanceStatuses);
-  };
-
-  const handleRemoveActivityTypeItem = (typeToRemove) => {
-    if (activityTypes.length <= 1) return alert('يجب الإبقاء على نوع واحد على الأقل.');
-    const updated = activityTypes.filter(t => t !== typeToRemove);
-    setActivityTypes(updated);
-    persistCustomItems(noteTags, updated, attendanceStatuses);
-  };
-
-  const handleAddAttendanceStatusItem = (e) => {
-    e.preventDefault();
-    const label = newStatusLabelInput.trim();
-    if (!label) return;
-    const code = `custom_${Date.now()}`;
-    const updated = [
-      ...attendanceStatuses,
-      {
-        code,
-        label,
-        emoji: (newStatusEmojiInput || '📌').trim(),
-        attended: Boolean(newStatusAttendedInput)
-      }
-    ];
-    setAttendanceStatuses(updated);
-    setNewStatusLabelInput('');
-    persistCustomItems(noteTags, activityTypes, updated);
-  };
-
-  const handleRemoveAttendanceStatusItem = (codeToRemove) => {
-    if (attendanceStatuses.length <= 1) return alert('يجب الإبقاء على حالة واحدة على الأقل.');
-    const updated = attendanceStatuses.filter(s => s.code !== codeToRemove);
-    setAttendanceStatuses(updated);
-    persistCustomItems(noteTags, activityTypes, updated);
-  };
 
   const triggerMemberPhotoCapture = (member) => {
     if (!member?.id) return;
@@ -547,9 +473,6 @@ export default function ServantDashboard({
 
   const [localGroups, setLocalGroups] = useState(baseGroups);
   const [localServices, setLocalServices] = useState(Array.isArray(services) ? services : []);
-  const [customGroupYears, setCustomGroupYears] = useState({});
-  const [deletedYearsByGroup, setDeletedYearsByGroup] = useState({});
-  const [renamedYearsMap, setRenamedYearsMap] = useState({});
 
   useEffect(() => {
     setLocalGroups(Array.isArray(serviceGroups) && serviceGroups.length > 0 ? serviceGroups : DEFAULT_SERVICE_GROUPS);
@@ -634,14 +557,6 @@ export default function ServantDashboard({
   const [editMode, setEditMode] = useState(false);
 
   const [newGroupName, setNewGroupName] = useState('');
-  const [editingGroupOriginal, setEditingGroupOriginal] = useState('');
-  const [editingGroupValue, setEditingGroupValue] = useState('');
-
-  const [newYearName, setNewYearName] = useState('');
-  const [editingYearOriginal, setEditingYearOriginal] = useState('');
-  const [editingYearValue, setEditingYearValue] = useState('');
-
-  const [newClassName, setNewClassName] = useState('');
 
   const defaultGenderScope = (() => {
     const saved = servant?.permissions?.service_gender_scope;
@@ -653,8 +568,6 @@ export default function ServantDashboard({
   })();
 
   const [selectedGenderFilter, setSelectedGenderFilter] = useState(defaultGenderScope);
-
-  // التاب النشط: 'search' (كشف وبحث المخدومين) | 'attendance' (تسجيل الحضور الفوري) | 'followup' (افتقاد وغياب) | 'cases' (متابعة وملاحظات) | 'analytics' (تحليلات ومكافآت الشهر) | 'birthdays' (أعياد ميلاد)
   const [activeTab, setActiveTab] = useState('search');
   const [selectedCaseTagFilter, setSelectedCaseTagFilter] = useState('الكل');
 
@@ -773,20 +686,15 @@ export default function ServantDashboard({
   const getScopeStructure = (scope) => {
     const matchedGroup = effectiveGroups.find(g => g.group_name === scope) || null;
     const rawGroupStages = matchedGroup ? normalizeGroupStages(matchedGroup.stages) : [];
-    const addedYears = customGroupYears[scope] || [];
-    const deletedYears = deletedYearsByGroup[scope] || [];
-    const scopeRenames = renamedYearsMap[scope] || {};
 
     const groupClasses = localServices.filter(
       s =>
         s.stage_name === scope ||
         rawGroupStages.includes(s.stage_name) ||
-        addedYears.includes(s.stage_name) ||
-        Object.values(scopeRenames).includes(s.stage_name) ||
         (matchedGroup && s.stage_name === matchedGroup.group_name)
     );
 
-    const inferredYears = new Set([...rawGroupStages, ...addedYears]);
+    const inferredYears = new Set([...rawGroupStages]);
     groupClasses.forEach(cls => {
       if (cls.stage_name && cls.stage_name !== scope && !matchedGroup?.group_name?.includes(cls.stage_name)) {
         inferredYears.add(cls.stage_name);
@@ -797,10 +705,7 @@ export default function ServantDashboard({
       });
     });
 
-    const filteredYears = [...inferredYears]
-      .filter(Boolean)
-      .filter(yr => !deletedYears.includes(yr))
-      .map(yr => scopeRenames[yr] || yr);
+    const filteredYears = [...inferredYears].filter(Boolean);
 
     const years = [...new Set(filteredYears)].map(yrName => {
       const classesForYr = groupClasses.filter(
@@ -815,12 +720,6 @@ export default function ServantDashboard({
       groupClasses,
       years
     };
-  };
-
-  const isBoundToSpecificService = (scope) => {
-    if (!scope) return false;
-    if (servantBoundMainGroups.includes(scope)) return true;
-    return rawBoundTargets.some(t => resolveParentGroupName(t) === scope);
   };
 
   const memberMatchesScope = (m, scope, genderFilter = 'الكل', yearFilter = '', classFilter = '') => {
@@ -891,179 +790,40 @@ export default function ServantDashboard({
     setNewGroupName('');
   };
 
-  const handleSaveGroupRename = (oldName) => {
-    const trimmed = editingGroupValue.trim();
-    if (!trimmed || trimmed === oldName) {
-      setEditingGroupOriginal('');
-      return;
-    }
-    const exists = localGroups.some(g => g.group_name === oldName);
-    const nextGroups = exists
-      ? localGroups.map(g => (g.group_name === oldName ? { ...g, group_name: trimmed } : g))
-      : [...localGroups, { id: `grp-${Date.now()}`, group_name: trimmed, icon: '⛪', stages: [] }];
-
-    const nextServices = localServices.map(s =>
-      s.stage_name === oldName ? { ...s, stage_name: trimmed } : s
-    );
-
-    setCustomGroupYears(prev => {
-      const copy = { ...prev };
-      if (copy[oldName]) {
-        copy[trimmed] = copy[oldName];
-        delete copy[oldName];
-      }
-      return copy;
-    });
-
-    notifyStructureChange(nextGroups, nextServices, { type: 'rename_group', oldName, newName: trimmed });
-    if (selectedScope === oldName) setSelectedScope(trimmed);
-    setEditingGroupOriginal('');
-  };
-
-  const handleDeleteGroup = (groupName) => {
-    if (!window.confirm(`هل أنت متأكد من حذف الخدمة "${groupName}"؟`)) return;
-    const nextGroups = localGroups.filter(g => g.group_name !== groupName);
-    const nextServices = localServices.filter(s => s.stage_name !== groupName);
-    notifyStructureChange(nextGroups, nextServices, { type: 'delete_group', groupName });
-    if (selectedScope === groupName) {
-      const fallback = nextGroups[0]?.group_name || CORE_SERVICE_GROUPS[0];
-      setSelectedScope(fallback);
-      setSelectedYearFilter('');
-      setSelectedClassFilter('');
-    }
-  };
-
-  const handleAddYearToScope = () => {
-    const trimmed = newYearName.trim();
-    if (!trimmed || !selectedScope) return;
-
-    setCustomGroupYears(prev => ({
-      ...prev,
-      [selectedScope]: [...new Set([...(prev[selectedScope] || []), trimmed])]
-    }));
-    setDeletedYearsByGroup(prev => ({
-      ...prev,
-      [selectedScope]: (prev[selectedScope] || []).filter(y => y !== trimmed)
-    }));
-
-    const existsInGroups = localGroups.some(g => g.group_name === selectedScope);
-    const nextGroups = existsInGroups
-      ? localGroups.map(g => {
-          if (g.group_name !== selectedScope) return g;
-          const currentStages = normalizeGroupStages(g.stages);
-          if (currentStages.includes(trimmed)) return g;
-          return { ...g, stages: [...currentStages, trimmed] };
-        })
-      : [
-          ...localGroups,
-          {
-            id: `grp-${Date.now()}`,
-            group_name: selectedScope,
-            icon: '🏫',
-            stages: [trimmed]
-          }
-        ];
-
-    notifyStructureChange(nextGroups, localServices, { type: 'add_year', scope: selectedScope, yearName: trimmed });
-    setSelectedYearFilter(trimmed);
-    setSelectedClassFilter('');
-    setNewYearName('');
-  };
-
-  const handleSaveYearRename = (oldYear) => {
-    const trimmed = editingYearValue.trim();
-    if (!trimmed || trimmed === oldYear) {
-      setEditingYearOriginal('');
-      return;
-    }
-
-    setRenamedYearsMap(prev => ({
-      ...prev,
-      [selectedScope]: {
-        ...(prev[selectedScope] || {}),
-        [oldYear]: trimmed
-      }
-    }));
-
-    const existsInGroups = localGroups.some(g => g.group_name === selectedScope);
-    const nextGroups = existsInGroups
-      ? localGroups.map(g => {
-          if (g.group_name !== selectedScope) return g;
-          const currentStages = normalizeGroupStages(g.stages);
-          const updated = currentStages.includes(oldYear)
-            ? currentStages.map(st => (st === oldYear ? trimmed : st))
-            : [...currentStages, trimmed];
-          return { ...g, stages: [...new Set(updated)] };
-        })
-      : [
-          ...localGroups,
-          {
-            id: `grp-${Date.now()}`,
-            group_name: selectedScope,
-            icon: '🏫',
-            stages: [trimmed]
-          }
-        ];
-
-    const nextServices = localServices.map(s =>
-      s.stage_name === oldYear ? { ...s, stage_name: trimmed } : s
-    );
-
-    notifyStructureChange(nextGroups, nextServices, { type: 'rename_year', scope: selectedScope, oldYear, newYear: trimmed });
-    if (selectedYearFilter === oldYear) setSelectedYearFilter(trimmed);
-    setEditingYearOriginal('');
-  };
-
-  const handleDeleteYear = (yearName) => {
-    if (!window.confirm(`هل تريد حذف "${yearName}" من ${selectedScope}؟`)) return;
-
-    setDeletedYearsByGroup(prev => ({
-      ...prev,
-      [selectedScope]: [...new Set([...(prev[selectedScope] || []), yearName])]
-    }));
-
-    const nextGroups = localGroups.map(g => {
-      if (g.group_name !== selectedScope) return g;
-      return { ...g, stages: normalizeGroupStages(g.stages).filter(st => st !== yearName) };
-    });
-    const nextServices = localServices.filter(s => s.stage_name !== yearName);
-    notifyStructureChange(nextGroups, nextServices, { type: 'delete_year', scope: selectedScope, yearName });
-    if (selectedYearFilter === yearName) {
-      setSelectedYearFilter('');
-      setSelectedClassFilter('');
-    }
-  };
-
-  const handleAddClassToCurrentLevel = () => {
-    const trimmed = newClassName.trim();
-    if (!trimmed) return;
-    const targetStage = selectedYearFilter || selectedScope;
-    const createdClass = {
-      id: `cls-${Date.now()}`,
-      stage_name: targetStage,
-      class_name: trimmed
-    };
-    const nextServices = [...localServices, createdClass];
-    notifyStructureChange(localGroups, nextServices, { type: 'add_class', classItem: createdClass });
-    setSelectedClassFilter(trimmed);
-    setNewClassName('');
-  };
-
-  const handleDeleteClass = (classItem) => {
-    if (!window.confirm(`هل تريد حذف الفصل "${classItem.class_name}"؟`)) return;
-    const nextServices = localServices.filter(s => s.id !== classItem.id);
-    notifyStructureChange(localGroups, nextServices, { type: 'delete_class', classItem });
-    if (selectedClassFilter === classItem.class_name) {
-      setSelectedClassFilter('');
-    }
-  };
-
   const displayedServiceTabs = showAllChurchServices
     ? availableServicesList
     : (servantBoundMainGroups.length > 0 ? servantBoundMainGroups : availableServicesList);
 
   const allMembers = users.filter(u => u.role === 'member');
   const allServants = users.filter(u => u.role && u.role !== 'member');
+
+  const resolveGuardianInfo = (member) => {
+    const linkedParent = users.find(
+      u =>
+        (member.parent_id && u.id === member.parent_id) ||
+        (member.father_id && u.id === member.father_id) ||
+        (member.mother_id && u.id === member.mother_id)
+    );
+    const name =
+      linkedParent?.full_name ||
+      member.guardian_name ||
+      member.father_full_name ||
+      member.mother_full_name ||
+      'غير مسجل';
+    const phone =
+      linkedParent?.phone ||
+      member.father_phone ||
+      member.mother_phone ||
+      '';
+    const relationLabel = linkedParent
+      ? (linkedParent.guardian_type === 'mother' ? 'ولي الأمر (الأم)' : 'ولي الأمر المربوط')
+      : member.father_full_name
+        ? 'ولي الأمر (الأب)'
+        : member.mother_full_name
+          ? 'ولي الأمر (الأم)'
+          : 'ولي الأمر';
+    return { name, phone, relationLabel, isLinkedAccount: Boolean(linkedParent) };
+  };
 
   const currentMonth = new Date().getMonth() + 1;
   const currentToday = new Date().getDate();
@@ -1242,14 +1002,19 @@ export default function ServantDashboard({
 
   const displayedMembers = searchQuery.trim() === ''
     ? modulePool
-    : modulePool.filter(m => (
-      (m.full_name || '') + ' ' +
-      (m.phone || '') + ' ' +
-      (m.father_full_name || '') + ' ' +
-      (m.mother_full_name || '') + ' ' +
-      (m.address || '') + ' ' +
-      (m.assigned_class || '')
-    ).toLowerCase().includes(searchQuery.toLowerCase()));
+    : modulePool.filter(m => {
+      const guardian = resolveGuardianInfo(m);
+      return (
+        (m.full_name || '') + ' ' +
+        (m.phone || '') + ' ' +
+        guardian.name + ' ' +
+        guardian.phone + ' ' +
+        (m.father_full_name || '') + ' ' +
+        (m.mother_full_name || '') + ' ' +
+        (m.address || '') + ' ' +
+        (m.assigned_class || '')
+      ).toLowerCase().includes(searchQuery.toLowerCase());
+    });
 
   const buildActivityPayload = (formObj, reasonText = '') => {
     const statusObj =
@@ -1521,7 +1286,8 @@ export default function ServantDashboard({
     { id: 'followup', label: '⚠️ افتقاد وغياب', badge: followUpMembers.length },
     { id: 'cases', label: '🤝 المتابعة وملاحظات الحالة', badge: caseTrackingMembers.length },
     { id: 'analytics', label: '📊 تحليلات ومكافآت الشهر' },
-    { id: 'birthdays', label: `🎂 أعياد الميلاد (${activeBirthdayList.length})` }
+    { id: 'birthdays', label: `🎂 أعياد الميلاد (${activeBirthdayList.length})` },
+    { id: 'invite', label: '💌 دعوة لأبونا لمناسبة' }
   ];
 
   return (
@@ -1537,7 +1303,6 @@ export default function ServantDashboard({
 
       <BirthdayBanner birthdays={scopeBirthdays} />
 
-      {/* هيدر الخدمة وشيت التسلسل */}
       <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1552,6 +1317,13 @@ export default function ServantDashboard({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab('invite')}
+            className="px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl font-black flex items-center gap-1.5 cursor-pointer shadow"
+          >
+            <MailPlus size={15} /> دعوة لأبونا
+          </button>
           {canExtractSheet && (
             <button
               type="button"
@@ -1675,7 +1447,6 @@ export default function ServantDashboard({
         </div>
       )}
 
-      {/* كارت اختيار الخدمة والمرحلة والفصل وتصفية النوع */}
       <div className="bg-white p-4 rounded-3xl border border-gray-200 shadow-2xs space-y-3">
         <div className="flex flex-wrap justify-between items-center gap-2">
           <div className="flex items-center gap-1.5 font-black text-gray-800">
@@ -1771,7 +1542,6 @@ export default function ServantDashboard({
           })}
         </div>
 
-        {/* السنوات والفصول وتصفية النوع */}
         <div className="bg-[#fbfaf7] p-3 rounded-2xl border border-gray-200/80 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-1.5 font-black text-[11px]">
@@ -1863,18 +1633,12 @@ export default function ServantDashboard({
         </div>
       </div>
 
-      {/* شريط التابات الداخلية المنظمة */}
       <div className="bg-white p-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto font-black">
         {tabsList.map(tab => (
           <button
             key={tab.id}
             type="button"
-            onClick={() => {
-              setActiveTab(tab.id);
-              if (['search', 'attendance', 'followup', 'cases'].includes(tab.id)) {
-                setActiveServiceModule(tab.id);
-              }
-            }}
+            onClick={() => setActiveTab(tab.id)}
             className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 transition ${
               activeTab === tab.id
                 ? 'bg-[#7a1c24] text-white shadow-2xs'
@@ -1893,14 +1657,13 @@ export default function ServantDashboard({
         ))}
       </div>
 
-      {/* شريط البحث الموحد وأزرار الإضافة والتنسيق (يظهر مع تابات المخدومين) */}
       {['search', 'attendance', 'followup', 'cases'].includes(activeTab) && (
         <div className="bg-white p-3 rounded-2xl border border-gray-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
           <div className="relative flex-1">
             <Search size={16} className="absolute right-3.5 top-2.5 text-[#7a1c24]" />
             <input
               type="text"
-              placeholder="ابحث بالاسم، الأب، الأم، التليفون، أو العنوان..."
+              placeholder="ابحث بالاسم، اسم ولي الأمر، الأب، الأم، التليفون، أو العنوان..."
               className="w-full pr-10 pl-8 py-2 bg-[#fbfaf7] border border-gray-200 rounded-xl text-xs font-bold outline-none focus:border-[#7a1c24] focus:bg-white"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
@@ -1951,9 +1714,7 @@ export default function ServantDashboard({
         </div>
       )}
 
-      {/* حاوية الـ Scroll المنظمة لمحتوى التاب المختار */}
       <div ref={scrollBoxRef} className="max-h-[calc(100vh-270px)] overflow-y-auto pr-1 space-y-3">
-        {/* TAB 1: التحليلات الشهرية والمكافآت */}
         {activeTab === 'analytics' && (
           <MonthlyAnalyticsAndRewards
             servant={servant}
@@ -1967,7 +1728,6 @@ export default function ServantDashboard({
           />
         )}
 
-        {/* TAB 2: أعياد ميلاد الشهر */}
         {activeTab === 'birthdays' && (
           <div className="bg-white p-4 sm:p-5 rounded-3xl border border-pink-200 space-y-3">
             <div className="flex items-center justify-between gap-2 border-b pb-2.5">
@@ -2047,7 +1807,14 @@ export default function ServantDashboard({
           </div>
         )}
 
-        {/* TABS (search, attendance, followup, cases) */}
+        {activeTab === 'invite' && (
+          <PriestInvitationModal
+            inline={true}
+            currentUser={servant}
+            defaultRoleLabel="خادم"
+          />
+        )}
+
         {['search', 'attendance', 'followup', 'cases'].includes(activeTab) && (
           <>
             {activeTab === 'cases' && (
@@ -2088,7 +1855,8 @@ export default function ServantDashboard({
                   const mActs = activities.filter(a => a.member_id === m.id);
                   const mNotes = getMemberActiveNotes(m.id);
                   const insights = getMemberInsights(m.id);
-                  const callPhone = m.phone || m.father_phone || m.mother_phone;
+                  const guardian = resolveGuardianInfo(m);
+                  const callPhone = m.phone || guardian.phone || m.father_phone || m.mother_phone;
                   const memberPhoto = getMemberPhoto(m);
 
                   return (
@@ -2153,7 +1921,6 @@ export default function ServantDashboard({
                                   })
                                 }
                                 className="px-2 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 rounded-lg text-[10px] font-black cursor-pointer inline-flex items-center gap-1"
-                                title="مواظب ومتميز — اضغط لتسجيل رحلة أو مكافأة"
                               >
                                 <Award size={11} /> مواظب ({insights.attendedCount}) — رحلة/مكافأة
                               </button>
@@ -2163,6 +1930,17 @@ export default function ServantDashboard({
                                 ❓❓ تكرار تأخير/انصراف ({insights.irregularCount}) — متابعة
                               </span>
                             )}
+                          </div>
+
+                          {/* توضيح اسم ولي أمر المخدوم */}
+                          <div className="bg-blue-50/70 border border-blue-200 px-2.5 py-1.5 rounded-xl flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                            <span className="font-black text-blue-950">
+                              👤 {guardian.relationLabel}: <strong className="text-[#7a1c24]">{guardian.name}</strong>
+                              {guardian.isLinkedAccount && (
+                                <span className="mr-1.5 px-1.5 py-0.5 bg-emerald-100 text-emerald-900 rounded text-[9px]">حساب مربوط ✓</span>
+                              )}
+                            </span>
+                            {guardian.phone && <span className="text-blue-900 font-bold">📞 {guardian.phone}</span>}
                           </div>
 
                           <div className="text-gray-600 space-y-1 text-[11px]">
@@ -2400,13 +2178,7 @@ export default function ServantDashboard({
                 <input
                   type="text"
                   autoFocus
-                  placeholder={
-                    quickStatusModal.statusCode === 'early_leave'
-                      ? 'مثلاً: عنده مشوار / ظرف أسري...'
-                      : quickStatusModal.statusCode === 'late'
-                      ? 'مثلاً: مواصلات / زحمة / صحى متأخر...'
-                      : 'مثلاً: مسافر / تعبان / امتحان...'
-                  }
+                  placeholder="اكتب السبب..."
                   className="w-full p-2.5 border rounded-xl bg-white"
                   value={quickStatusModal.reason}
                   onChange={e => setQuickStatusModal(prev => ({ ...prev, reason: e.target.value }))}
