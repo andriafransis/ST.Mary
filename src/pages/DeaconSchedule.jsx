@@ -1,10 +1,17 @@
-
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLogger';
 import { toCopticDate, getCopticMonthAndDay, COPTIC_MONTHS } from '../utils/copticDate';
+import {
+  loadAdminCardsConfig,
+  isCardAllowedForRole,
+  CARDS_UPDATED_EVENT
+} from '../components/NestedCardsBuilder';
 import AgpeyaPanel from '../components/AgpeyaPanel';
-import { Calendar, Plus, Trash2, Edit3, BookOpen, HeartHandshake, Save, ArrowRight, Church, ScrollText, Upload, BookMarked } from 'lucide-react';
+import {
+  Calendar, Plus, Trash2, Edit3, BookOpen, HeartHandshake, Save,
+  ArrowRight, Church, ScrollText, Upload, BookMarked, X
+} from 'lucide-react';
 
 const PRAYER_HOURS = [
   'صلاة عشية', 'صلاة باكر', 'الساعة الثالثة', 'الساعة السادسة', 'القداس الإلهي',
@@ -49,11 +56,46 @@ export const normalizeDeaconRank = (rank) => {
   return clean;
 };
 
+const parseDynamicEntry = (row) => {
+  try {
+    const parsed = JSON.parse(row.details || '{}');
+    if (parsed && typeof parsed === 'object' && ('text' in parsed || 'field_label' in parsed)) {
+      return {
+        text: parsed.text || '',
+        field_label: parsed.field_label || '',
+        field_value: parsed.field_value || ''
+      };
+    }
+  } catch {
+    // نص عادي
+  }
+  return { text: row.details || '', field_label: '', field_value: '' };
+};
+
 export default function DeaconSchedule({ deacons = [], currentUser, canEdit = false }) {
   const [activeCard, setActiveCard] = useState('hub');
   const [schedules, setSchedules] = useState([]);
   const [visitations, setVisitations] = useState([]);
   const [liturgyBooks, setLiturgyBooks] = useState([]);
+
+  const [cardsConfig, setCardsConfig] = useState({
+    rowId: null,
+    overrides: {},
+    customScreenCards: [],
+    cardMeta: {}
+  });
+  const [nestedCardsRows, setNestedCardsRows] = useState([]);
+  const [selectedNestedParentKey, setSelectedNestedParentKey] = useState(null);
+  const [customEntries, setCustomEntries] = useState([]);
+  const [activeDynamicCard, setActiveDynamicCard] = useState(null);
+  const [dynamicEntryForm, setDynamicEntryForm] = useState({
+    id: null,
+    title: '',
+    entry_date: '',
+    details: '',
+    field_label: '',
+    field_value: ''
+  });
 
   const [selectedBookKey, setSelectedBookKey] = useState('mass_basil');
   const [bookText, setBookText] = useState('');
@@ -85,23 +127,362 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
   });
 
   const loadDeaconData = async () => {
-    const [ds, vs, kt, lb] = await Promise.all([
+    const [ds, vs, kt, lb, nCardsRes, cfgData, ceRes] = await Promise.all([
       supabase.from('deacon_schedules').select('*').order('service_date', { ascending: true }),
       supabase.from('church_visitations').select('*').eq('category', 'افتقاد شمامسة').order('visit_date', { ascending: false }),
       supabase.from('katameros_readings').select('*'),
-      supabase.from('liturgy_books').select('*')
+      supabase.from('liturgy_books').select('*'),
+      supabase.from('nested_cards').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true }),
+      loadAdminCardsConfig(),
+      supabase.from('priest_custom_entries').select('*').order('created_at', { ascending: false })
     ]);
     if (ds.data) setSchedules(ds.data);
     if (vs.data) setVisitations(vs.data);
     if (kt.data) setKatamerosAll(kt.data);
     if (lb.data) setLiturgyBooks(lb.data);
+    if (!nCardsRes.error && nCardsRes.data) setNestedCardsRows(nCardsRes.data);
+    if (cfgData) setCardsConfig(cfgData);
+    if (ceRes?.data) setCustomEntries(ceRes.data);
   };
 
   useEffect(() => {
     loadDeaconData();
   }, []);
 
+  // مزامنة فورية عند أي تعديل/إضافة/نقل/إيقاف/حذف من الكروت المتداخلة
+  useEffect(() => {
+    const syncCardsNow = () => {
+      loadDeaconData();
+    };
+    window.addEventListener(CARDS_UPDATED_EVENT, syncCardsNow);
+    window.addEventListener('storage', syncCardsNow);
+    return () => {
+      window.removeEventListener(CARDS_UPDATED_EVENT, syncCardsNow);
+      window.removeEventListener('storage', syncCardsNow);
+    };
+  }, []);
+
+  const applyCardOverride = (baseCard, defaultScreen = 'deacon_hub') => {
+    const ov = (cardsConfig.overrides || {})[baseCard.id] || {};
+    return {
+      ...baseCard,
+      title: ov.title || baseCard.title,
+      desc: ov.desc !== undefined ? ov.desc : baseCard.desc,
+      icon: ov.icon || baseCard.icon,
+      isActive: ov.is_active !== undefined ? ov.is_active : true,
+      placementScreen: ov.placement_screen || defaultScreen,
+      parentKey: ov.parent_key || null,
+      allowedRoles: Array.isArray(ov.allowed_roles) && ov.allowed_roles.length > 0 ? ov.allowed_roles : ['all']
+    };
+  };
+
+  const allowedNestedCards = useMemo(() => {
+    const metaMap = cardsConfig.cardMeta || {};
+    return (nestedCardsRows || [])
+      .filter(row => row.is_active !== false)
+      .map(row => {
+        const meta = metaMap[row.id] || {};
+        const parentKey = row.parent_id ? `nested:${row.parent_id}` : (meta.parent_key || null);
+        const placementScreen = meta.placement_screen || 'admin_hub';
+        const allowedRoles = Array.isArray(meta.allowed_roles) && meta.allowed_roles.length > 0 ? meta.allowed_roles : ['all'];
+        const targetAction = meta.target_screen && row.target_action === 'info' && !row.description
+          ? 'screen'
+          : (meta.target_action || row.target_action || 'children');
+
+        return {
+          ...row,
+          key: `nested:${row.id}`,
+          parent_key: parentKey,
+          placement_screen: placementScreen,
+          allowed_roles: allowedRoles,
+          target_action: targetAction,
+          target_screen: meta.target_screen || 'schedule'
+        };
+      })
+      .filter(nc => isCardAllowedForRole(nc.allowed_roles, currentUser?.role || 'deacon', currentUser?.role === 'admin'));
+  }, [nestedCardsRows, cardsConfig, currentUser?.role]);
+
+  const navigateByTargetScreen = (targetScreen) => {
+    if (!targetScreen) return;
+    if (['hub', 'schedule', 'agpeya', 'katameros', 'liturgy', 'euchologion', 'rituals', 'visitations'].includes(targetScreen)) {
+      setSelectedNestedParentKey(null);
+      if (targetScreen === 'liturgy') setSelectedBookKey('mass_basil');
+      if (targetScreen === 'euchologion') setSelectedBookKey('euchologion_vespers_matins');
+      if (targetScreen === 'rituals') setSelectedBookKey('ritual_funeral');
+      setActiveCard(targetScreen);
+    }
+  };
+
+  const handleOpenNestedCard = (nc) => {
+    if (nc.target_action === 'link' && nc.target_url) {
+      window.open(nc.target_url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (nc.target_action === 'screen' && nc.target_screen) {
+      navigateByTargetScreen(nc.target_screen);
+      return;
+    }
+    if (nc.target_action === 'info') {
+      setDynamicEntryForm({ id: null, title: '', entry_date: '', details: '', field_label: '', field_value: '' });
+      setActiveDynamicCard(nc);
+      return;
+    }
+    setSelectedNestedParentKey(nc.key);
+  };
+
+  const handleSaveDynamicCardEntry = async (e) => {
+    e.preventDefault();
+    if (!activeDynamicCard || !dynamicEntryForm.title.trim()) return;
+    const encodedDetails = JSON.stringify({
+      text: (dynamicEntryForm.details || '').trim(),
+      field_label: (dynamicEntryForm.field_label || '').trim(),
+      field_value: (dynamicEntryForm.field_value || '').trim()
+    });
+
+    if (dynamicEntryForm.id) {
+      const { data, error } = await supabase
+        .from('priest_custom_entries')
+        .update({
+          title: dynamicEntryForm.title.trim(),
+          entry_date: dynamicEntryForm.entry_date || null,
+          details: encodedDetails
+        })
+        .eq('id', dynamicEntryForm.id)
+        .select()
+        .single();
+      if (!error && data) {
+        setCustomEntries(prev => prev.map(x => (x.id === data.id ? data : x)));
+      }
+    } else {
+      const { data, error } = await supabase
+        .from('priest_custom_entries')
+        .insert([{
+          card_id: activeDynamicCard.id,
+          priest_id: currentUser?.id || null,
+          title: dynamicEntryForm.title.trim(),
+          entry_date: dynamicEntryForm.entry_date || null,
+          details: encodedDetails
+        }])
+        .select()
+        .single();
+      if (!error && data) {
+        setCustomEntries(prev => [data, ...prev]);
+      }
+    }
+    setDynamicEntryForm({ id: null, title: '', entry_date: '', details: '', field_label: '', field_value: '' });
+  };
+
+  const handleDeleteDynamicCardEntry = async (entryId) => {
+    if (!confirm('حذف هذا العنصر؟')) return;
+    const { error } = await supabase.from('priest_custom_entries').delete().eq('id', entryId);
+    if (!error) {
+      setCustomEntries(prev => prev.filter(x => x.id !== entryId));
+    }
+  };
+
+  const renderNestedCardsSection = (screenKey, parentKey = null) => {
+    const matching = allowedNestedCards.filter(nc => {
+      if (parentKey) return nc.parent_key === parentKey;
+      return !nc.parent_key && nc.placement_screen === screenKey;
+    });
+
+    if (matching.length === 0) return null;
+
+    return (
+      <div className="bg-white/85 p-4 rounded-3xl border border-amber-200 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <strong className="text-xs md:text-sm font-black text-[#7a1c24]">
+            {parentKey ? '🗂️ كروت فرعية متداخلة داخل هذا الكارت' : '✨ كروت إضافية / متداخلة مخصصة لهذه الشاشة'}
+          </strong>
+          {parentKey && (
+            <button
+              type="button"
+              onClick={() => setSelectedNestedParentKey(null)}
+              className="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-xl text-xs font-bold cursor-pointer"
+            >
+              ← رجوع
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {matching.map(nc => {
+            const subCount = allowedNestedCards.filter(x => x.parent_key === nc.key).length;
+            const entriesCount = customEntries.filter(en => String(en.card_id) === String(nc.id)).length;
+            return (
+              <button
+                key={nc.key}
+                type="button"
+                onClick={() => handleOpenNestedCard(nc)}
+                className="bg-white border-2 border-amber-200 hover:border-[#7a1c24] p-4 rounded-2xl text-right shadow-2xs hover:shadow-md transition flex flex-col justify-between gap-2 cursor-pointer"
+              >
+                <div className="flex justify-between items-start w-full">
+                  <span className="text-2xl">{nc.icon || '🗂️'}</span>
+                  <div className="flex gap-1">
+                    {nc.badge_text && (
+                      <span className="px-2 py-0.5 bg-amber-100 text-amber-950 rounded-full text-[10px] font-black">{nc.badge_text}</span>
+                    )}
+                    {subCount > 0 && (
+                      <span className="px-2 py-0.5 bg-[#f9ecee] text-[#7a1c24] rounded-full text-[10px] font-black">{subCount} فرعي</span>
+                    )}
+                    {nc.target_action === 'info' && (
+                      <span className="px-2 py-0.5 bg-indigo-100 text-indigo-900 rounded-full text-[10px] font-black">{entriesCount} عنصر</span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <strong className="text-sm font-black text-gray-900 block">{nc.title}</strong>
+                  {nc.subtitle && <span className="text-[11px] font-bold text-[#7a1c24] block mt-0.5">{nc.subtitle}</span>}
+                  {nc.description && <p className="text-xs text-gray-600 mt-1 line-clamp-2">{nc.description}</p>}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderDynamicCardModal = () => {
+    if (!activeDynamicCard) return null;
+    return (
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50" dir="rtl">
+        <div className="bg-white rounded-3xl w-full max-w-2xl p-6 space-y-4 text-xs font-bold max-h-[90vh] overflow-y-auto">
+          <div className="flex items-center justify-between border-b pb-3">
+            <div>
+              <h3 className="text-sm md:text-base font-black text-[#7a1c24]">
+                {activeDynamicCard.icon || '📄'} {activeDynamicCard.title}
+              </h3>
+              {activeDynamicCard.subtitle && (
+                <p className="text-[11px] text-gray-500 mt-0.5">{activeDynamicCard.subtitle}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveDynamicCard(null)}
+              className="p-1.5 bg-gray-100 rounded-xl text-gray-600 cursor-pointer"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          {activeDynamicCard.description && (
+            <div className="p-3 bg-[#fbfaf7] border rounded-2xl text-gray-700 whitespace-pre-line">
+              {activeDynamicCard.description}
+            </div>
+          )}
+
+          {canEdit && (
+            <form onSubmit={handleSaveDynamicCardEntry} className="bg-amber-50/50 border border-amber-200 p-4 rounded-2xl space-y-2.5">
+              <div className="font-black text-[#7a1c24] flex items-center gap-1">
+                <Plus size={14} /> {dynamicEntryForm.id ? 'تعديل سجل داخل الشاشة' : 'إضافة سجل / متابعة داخل الشاشة'}
+              </div>
+              <div className="grid sm:grid-cols-2 gap-2">
+                <input
+                  required
+                  placeholder="العنوان *"
+                  className="p-2.5 border rounded-xl bg-white"
+                  value={dynamicEntryForm.title}
+                  onChange={e => setDynamicEntryForm({ ...dynamicEntryForm, title: e.target.value })}
+                />
+                <input
+                  type="date"
+                  className="p-2.5 border rounded-xl bg-white"
+                  value={dynamicEntryForm.entry_date}
+                  onChange={e => setDynamicEntryForm({ ...dynamicEntryForm, entry_date: e.target.value })}
+                />
+              </div>
+              <div className="grid sm:grid-cols-2 gap-2">
+                <input
+                  placeholder="اسم حقل إضافي"
+                  className="p-2.5 border rounded-xl bg-white"
+                  value={dynamicEntryForm.field_label}
+                  onChange={e => setDynamicEntryForm({ ...dynamicEntryForm, field_label: e.target.value })}
+                />
+                <input
+                  placeholder="القيمة"
+                  className="p-2.5 border rounded-xl bg-white"
+                  value={dynamicEntryForm.field_value}
+                  onChange={e => setDynamicEntryForm({ ...dynamicEntryForm, field_value: e.target.value })}
+                />
+              </div>
+              <textarea
+                rows={2}
+                placeholder="التفاصيل..."
+                className="w-full p-2.5 border rounded-xl bg-white"
+                value={dynamicEntryForm.details}
+                onChange={e => setDynamicEntryForm({ ...dynamicEntryForm, details: e.target.value })}
+              />
+              <div className="flex justify-end gap-2">
+                {dynamicEntryForm.id && (
+                  <button
+                    type="button"
+                    onClick={() => setDynamicEntryForm({ id: null, title: '', entry_date: '', details: '', field_label: '', field_value: '' })}
+                    className="px-3 py-1.5 border rounded-xl bg-white cursor-pointer"
+                  >
+                    إلغاء
+                  </button>
+                )}
+                <button type="submit" className="px-4 py-1.5 bg-[#7a1c24] text-white rounded-xl cursor-pointer">
+                  {dynamicEntryForm.id ? 'حفظ التعديل' : '+ إضافة'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          <div className="space-y-2 max-h-60 overflow-y-auto">
+            {customEntries.filter(en => String(en.card_id) === String(activeDynamicCard.id)).map(en => {
+              const parsed = parseDynamicEntry(en);
+              return (
+                <div key={en.id} className="p-3 bg-[#fbfaf7] border rounded-2xl flex justify-between items-start gap-2">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <strong className="text-gray-900">{en.title}</strong>
+                      {en.entry_date && <span className="text-[11px] text-gray-500">({en.entry_date})</span>}
+                      {parsed.field_label && parsed.field_value && (
+                        <span className="px-2 py-0.5 bg-indigo-100 text-indigo-900 rounded-lg text-[10px]">
+                          {parsed.field_label}: {parsed.field_value}
+                        </span>
+                      )}
+                    </div>
+                    {parsed.text && <p className="text-gray-700 whitespace-pre-line font-normal">{parsed.text}</p>}
+                  </div>
+                  {canEdit && (
+                    <div className="flex gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setDynamicEntryForm({
+                          id: en.id,
+                          title: en.title || '',
+                          entry_date: en.entry_date || '',
+                          details: parsed.text || '',
+                          field_label: parsed.field_label || '',
+                          field_value: parsed.field_value || ''
+                        })}
+                        className="p-1.5 bg-gray-100 rounded-lg text-gray-800 cursor-pointer"
+                      >
+                        <Edit3 size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteDynamicCardEntry(en.id)}
+                        className="p-1.5 bg-red-50 rounded-lg text-red-700 cursor-pointer"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const openCard = (cardId, label) => {
+    setSelectedNestedParentKey(null);
     setActiveCard(cardId);
     if (cardId === 'liturgy') setSelectedBookKey('mass_basil');
     if (cardId === 'euchologion') setSelectedBookKey('euchologion_vespers_matins');
@@ -263,7 +644,11 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
   const renderTopBar = (title) => (
     <div className="bg-white p-4 rounded-2xl border shadow-2xs flex flex-wrap justify-between items-center gap-2">
       <div className="flex items-center gap-3 flex-wrap">
-        <button type="button" onClick={() => setActiveCard('hub')} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer">
+        <button
+          type="button"
+          onClick={() => { setSelectedNestedParentKey(null); setActiveCard('hub'); }}
+          className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer"
+        >
           <ArrowRight size={15} /> رجوع لكروت الشماس
         </button>
         <h2 className="text-base md:text-lg font-black text-[#7a1c24]">{title}</h2>
@@ -277,7 +662,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
   );
 
   if (activeCard === 'hub') {
-    const cards = [
+    const rawCards = [
       { id: 'schedule', icon: '📅', title: 'جدول التوزيع والخدمات', desc: canEdit ? 'توزيع الشمامسة على المذبح والقراءات' : 'عرض مواعيد خدمتك وتوزيعك (قراءة فقط)', count: `${displayedSchedules.length} ميعاد`, color: 'border-red-200 bg-white' },
       { id: 'agpeya', icon: '🙏', title: 'الأجبية المقدسة', desc: 'صلوات السواعي السبع وصلاة الستار والمقدمة', count: 'قراءة', color: 'border-blue-200 bg-white' },
       { id: 'katameros', icon: '📖', title: 'القطمارس السنوي', desc: 'قراءات الـ 13 شهر قبطي والسنكسار والإنجيل', count: `${toCopticDate(todayISO)}`, color: 'border-amber-300 bg-white' },
@@ -286,8 +671,17 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
       { id: 'rituals', icon: '🕯️', title: 'الطقوس الكنسية الخاصة', desc: 'الطقس الحزايني، طقس صلوات اللقان، صلاة الثالث، والمعمودية', count: 'الطقوس', color: 'border-purple-200 bg-white' }
     ];
     if (canEdit) {
-      cards.push({ id: 'visitations', icon: '🕊️', title: 'افتقاد الشمامسة', desc: 'متابعة وافتقاد الشمامسة', count: `${visitations.length}`, color: 'border-amber-200 bg-white' });
+      rawCards.push({ id: 'visitations', icon: '🕊️', title: 'افتقاد الشمامسة', desc: 'متابعة وافتقاد الشمامسة', count: `${visitations.length}`, color: 'border-amber-200 bg-white' });
     }
+
+    const effectiveCards = rawCards
+      .map(c => applyCardOverride(c, 'deacon_hub'))
+      .filter(c => {
+        if (!c.isActive) return false;
+        if (c.parentKey) return false;
+        if (c.placementScreen && c.placementScreen !== 'deacon_hub') return false;
+        return isCardAllowedForRole(c.allowedRoles, currentUser?.role || 'deacon', currentUser?.role === 'admin');
+      });
 
     return (
       <div className="space-y-4 text-xs md:text-sm" dir="rtl">
@@ -301,7 +695,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {cards.map(c => (
+          {effectiveCards.map(c => (
             <button
               key={c.id}
               type="button"
@@ -319,6 +713,9 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
             </button>
           ))}
         </div>
+
+        {renderNestedCardsSection('deacon_hub', selectedNestedParentKey)}
+        {renderDynamicCardModal()}
       </div>
     );
   }
@@ -327,7 +724,9 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
     return (
       <div className="space-y-4 text-xs" dir="rtl">
         {renderTopBar('🙏 الأجبية المقدسة')}
+        {renderNestedCardsSection('agpeya', selectedNestedParentKey)}
         <AgpeyaPanel canEdit={canEdit} />
+        {renderDynamicCardModal()}
       </div>
     );
   }
@@ -352,6 +751,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
     return (
       <div className="space-y-4 text-xs md:text-sm" dir="rtl">
         {renderTopBar(topBarTitle)}
+        {renderNestedCardsSection(activeCard, selectedNestedParentKey)}
 
         <div className="bg-white p-4 rounded-3xl border shadow-sm space-y-3">
           <div className="flex flex-wrap justify-between items-center gap-2">
@@ -425,6 +825,8 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
             )}
           </div>
         )}
+
+        {renderDynamicCardModal()}
       </div>
     );
   }
@@ -433,6 +835,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
     return (
       <div className="space-y-4 text-xs" dir="rtl">
         {renderTopBar('📖 القطمارس السنوي (الـ 13 شهر قبطي)')}
+        {renderNestedCardsSection('katameros', selectedNestedParentKey)}
 
         <div className="bg-white p-4 rounded-3xl border shadow-sm space-y-3">
           <div className="flex flex-wrap justify-between items-center gap-2">
@@ -539,6 +942,8 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
 
           <div><label className="block mb-1 text-[#7a1c24]">✝ المزمور وإنجيل القداس</label><textarea disabled={!canEdit} rows="4" className="w-full p-2.5 border rounded-xl font-normal" value={katForm.liturgy_psalm_gospel} onChange={e => setKatForm({ ...katForm, liturgy_psalm_gospel: e.target.value })} /></div>
         </form>
+
+        {renderDynamicCardModal()}
       </div>
     );
   }
@@ -547,6 +952,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
     return (
       <div className="space-y-4 text-xs" dir="rtl">
         {renderTopBar('📅 جدول التوزيع والمواعيد')}
+        {renderNestedCardsSection('schedule', selectedNestedParentKey)}
 
         {canEdit && (
           <form onSubmit={handleSaveSchedule} className="bg-white p-4 rounded-3xl border space-y-3 font-bold shadow-sm">
@@ -623,6 +1029,8 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
             );
           })}
         </div>
+
+        {renderDynamicCardModal()}
       </div>
     );
   }
@@ -631,6 +1039,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
     return (
       <div className="space-y-4 text-xs" dir="rtl">
         {renderTopBar('🕊️ افتقاد الشمامسة')}
+        {renderNestedCardsSection('visitations', selectedNestedParentKey)}
         <form onSubmit={handleAddVisitation} className="bg-white p-4 rounded-3xl border space-y-3 font-bold">
           <div className="grid md:grid-cols-4 gap-2">
             <select className="p-2 border rounded-xl" value={visitForm.target_user_id} onChange={e => { const d = deacons.find(x => x.id === e.target.value); setVisitForm({ ...visitForm, target_user_id: e.target.value, target_name: d?.full_name || '' }); }}>
@@ -657,6 +1066,8 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
             </div>
           ))}
         </div>
+
+        {renderDynamicCardModal()}
       </div>
     );
   }
