@@ -29,6 +29,7 @@ import CertificatesRegistry from './pages/CertificatesRegistry';
 import { LogOut, Bell, BellRing, GraduationCap, HeartHandshake, Menu, X } from 'lucide-react';
 
 const SAVED_USER_KEY = 'church_app_logged_user_id';
+const PENDING_APPROVAL_KEY = 'church_pending_approval_user';
 const DEFAULT_CHURCH_NAME = 'كنيسة السيدة العذراء مريم بالمطرية';
 const DEFAULT_TAGLINE = 'مواعيد القداسات، مكتب الرحلات العامة، أخبار الكنيسة، والآباء الكهنة';
 
@@ -153,7 +154,7 @@ export default function App() {
   const [unreadSystemNotifications, setUnreadSystemNotifications] = useState([]);
   const [pendingInvitesList, setPendingInvitesList] = useState([]);
   const [pendingJosephCount, setPendingJosephCount] = useState(0);
-  const [todayPriestBookingsCount, setTodayPriestBookingsCount] = useState(0);
+  const [todayPriestBookings, setTodayPriestBookings] = useState([]);
   const [notifPermission, setNotifPermission] = useState(() =>
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
   );
@@ -246,8 +247,8 @@ export default function App() {
       const jCasesCnt = !jcRes?.error && jcRes?.data ? jcRes.data.length : 0;
       const jMemCnt = !jmRes?.error && jmRes?.data ? jmRes.data.length : 0;
       setPendingJosephCount(jCasesCnt + jMemCnt);
-      if (!todayBkRes?.error && todayBkRes?.data) {
-        setTodayPriestBookingsCount(todayBkRes.data);
+      if (!todayBkRes?.error && Array.isArray(todayBkRes?.data)) {
+        setTodayPriestBookings(todayBkRes.data);
       }
 
       if (!allNotifsRes?.error && Array.isArray(allNotifsRes?.data)) {
@@ -301,7 +302,6 @@ export default function App() {
     }
   }, [currentUser, roleScreens, roleTemplates]);
 
-  // حساب إجمالي الإشعارات الفعلية لهذا المستخدم
   const pendingCount = useMemo(() => users.filter(u => u.status === 'pending').length, [users]);
 
   const myPendingChildRequests = useMemo(
@@ -312,6 +312,7 @@ export default function App() {
     [childLinkRequests, currentUser]
   );
 
+  // حساب إجمالي الإشعارات الفعلية للمستخدم الحالي
   const notificationStats = useMemo(() => {
     if (!currentUser) return { total: 0, items: [] };
 
@@ -337,9 +338,7 @@ export default function App() {
       if (myInvites > 0) {
         items.push({ label: `دعوات مناسبات واردة (${myInvites})`, count: myInvites, target: 'priest_panel' });
       }
-      const myTodayBookings = Array.isArray(todayPriestBookingsCount)
-        ? todayPriestBookingsCount.filter(b => b.priest_id === currentUser.id).length
-        : 0;
+      const myTodayBookings = todayPriestBookings.filter(b => b.priest_id === currentUser.id).length;
       if (myTodayBookings > 0) {
         items.push({ label: `حجوزات اعتراف اليوم (${myTodayBookings})`, count: myTodayBookings, target: 'priest_panel' });
       }
@@ -384,7 +383,7 @@ export default function App() {
     unreadSystemNotifications,
     pendingInvitesList,
     pendingJosephCount,
-    todayPriestBookingsCount,
+    todayPriestBookings,
     myPendingChildRequests,
     memberNotes
   ]);
@@ -410,7 +409,7 @@ export default function App() {
         { event: 'INSERT', schema: 'public', table: 'church_users' },
         async ({ new: newUser }) => {
           await fetchData();
-          if (currentUser.role === 'admin' && newUser?.status === 'pending') {
+          if ((currentUser.role === 'admin' || currentUser.role === 'priest') && newUser?.status === 'pending') {
             await showMobileNotification({
               title: '✅ طلب انضمام جديد',
               body: `طلب جديد من: ${newUser.full_name}`,
@@ -507,13 +506,24 @@ export default function App() {
 
     if (user && !error) {
       if (user.status === 'pending') {
-        setLoginError('⏳ حسابك قيد المراجعة وفي انتظار موافقة أدمن الكنيسة لتفعيل دخولك.');
+        try {
+          localStorage.setItem(PENDING_APPROVAL_KEY, JSON.stringify({
+            id: user.id,
+            username: user.username,
+            password: user.password,
+            full_name: user.full_name
+          }));
+        } catch {
+          // ignore
+        }
+        setLoginError('⏳ حسابك قيد المراجعة وفي انتظار موافقة أدمن الكنيسة لتفعيل دخولك. سيصلك إشعار فور القبول.');
         return;
       }
       if (user.status === 'rejected') {
         setLoginError('❌ تم رفض طلب انضمام هذا الحساب. يرجى مراجعة إدارة الكنيسة.');
         return;
       }
+      localStorage.removeItem(PENDING_APPROVAL_KEY);
       localStorage.setItem(SAVED_USER_KEY, user.id);
       setCurrentUser(user);
       setExtraScreen('');
@@ -630,13 +640,23 @@ export default function App() {
     const { data, error } = await supabase.from('church_users').insert([payload]).select().single();
     if (!error && data) {
       setUsers(prev => [...prev, data]);
+      try {
+        localStorage.setItem(PENDING_APPROVAL_KEY, JSON.stringify({
+          id: data.id,
+          username: data.username,
+          password: data.password,
+          full_name: data.full_name
+        }));
+      } catch {
+        // ignore
+      }
       const guardianLabel =
         payload.guardian_type === 'father'
           ? ' (ولي الأمر: الأب)'
           : payload.guardian_type === 'mother'
             ? ' (ولي الأمر: الأم)'
             : '';
-      setRegisterMessage(`✅ تم إرسال طلب الاشتراك بنجاح${guardianLabel} وهو قيد مراجعة الإدارة.`);
+      setRegisterMessage(`✅ تم إرسال طلب الاشتراك بنجاح${guardianLabel} وهو قيد مراجعة الإدارة. سيصلك إشعار باليوزر والباسورد فور القبول.`);
       return true;
     } else {
       setLoginError('خطأ في تسجيل الاشتراك: ' + (error?.message || 'تأكد من عدم تكرار اسم الدخول'));
@@ -1113,7 +1133,6 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0 relative">
-              {/* زر تفعيل إشعارات الموبايل (إذا لم تكن مفعلة بعد) */}
               {notifPermission === 'default' && (
                 <button
                   type="button"
@@ -1127,7 +1146,6 @@ export default function App() {
                 </button>
               )}
 
-              {/* جرس الإشعارات الفعلي المربوط برقم الـ Badge الخارجي */}
               <button
                 type="button"
                 onClick={() => setShowNotifSummary(prev => !prev)}
@@ -1170,7 +1188,6 @@ export default function App() {
                 {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
               </button>
 
-              {/* نافذة منبثقة بملخص الإشعارات الفعلية */}
               {showNotifSummary && (
                 <div className="absolute left-0 top-12 w-72 sm:w-80 bg-white text-gray-900 rounded-2xl shadow-2xl border border-amber-300 p-3.5 space-y-2 z-50 text-xs">
                   <div className="flex justify-between items-center border-b pb-2">
