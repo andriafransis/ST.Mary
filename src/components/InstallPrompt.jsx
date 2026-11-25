@@ -1,9 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Download, X, Share, PlusSquare } from 'lucide-react';
 
-const DISMISS_KEY = 'church_install_prompt_dismissed_at';
-const SNOOZE_DAYS = 7;
-
 const isStandalone = () =>
   (typeof window !== 'undefined' &&
     window.matchMedia &&
@@ -19,15 +16,6 @@ const isIOS = () => {
 const isMobile = () =>
   /android|iphone|ipad|ipod|mobile/i.test(window.navigator.userAgent || '') || isIOS();
 
-const recentlyDismissed = () => {
-  try {
-    const at = Number(localStorage.getItem(DISMISS_KEY) || 0);
-    return at && Date.now() - at < SNOOZE_DAYS * 24 * 60 * 60 * 1000;
-  } catch {
-    return false;
-  }
-};
-
 // شريط تحميل التطبيق: بيظهر من تحت أول ما الصفحة تفتح على الموبايل
 export default function InstallPrompt({ appName = 'تطبيق الكنيسة' }) {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -36,7 +24,7 @@ export default function InstallPrompt({ appName = 'تطبيق الكنيسة' })
   const ios = typeof window !== 'undefined' && isIOS();
 
   useEffect(() => {
-    if (isStandalone() || !isMobile() || recentlyDismissed()) return;
+    if (isStandalone() || !isMobile()) return;
 
     // آيفون: مفيش prompt تلقائي، فبنعرض الشريط على طول مع الخطوات
     if (isIOS()) {
@@ -62,14 +50,8 @@ export default function InstallPrompt({ appName = 'تطبيق الكنيسة' })
     };
   }, []);
 
-  const dismiss = () => {
-    try {
-      localStorage.setItem(DISMISS_KEY, String(Date.now()));
-    } catch {
-      // ignore
-    }
-    setVisible(false);
-  };
+  // الإغلاق للجلسة دي بس: الشريط بيرجع يظهر كل ما الصفحة تتفتح من جديد لحد ما التطبيق يتثبت
+  const dismiss = () => setVisible(false);
 
   const install = async () => {
     if (ios) {

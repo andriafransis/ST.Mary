@@ -20,7 +20,13 @@ import TripsOfficePage from './pages/TripsOfficePage';
 import HiddenFamiliesPage from './pages/HiddenFamiliesPage';
 import LoginPage from './pages/LoginPage';
 import InstallPrompt from './components/InstallPrompt';
-import { enableBiometric, verifyBiometric, getBiometricOwnerId } from './lib/biometricLock';
+import BiometricOffer from './components/BiometricOffer';
+import {
+  isBiometricSupported,
+  isBiometricDeclined,
+  verifyBiometric,
+  getBiometricOwnerId
+} from './lib/biometricLock';
 import AdminDashboard from './pages/AdminDashboard';
 import PriestDashboard from './pages/PriestDashboard';
 import ServantDashboard from './pages/ServantDashboard';
@@ -161,6 +167,7 @@ function AppInner() {
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
   );
   const [showNotifSummary, setShowNotifSummary] = useState(false);
+  const [showBioOffer, setShowBioOffer] = useState(false);
 
   const todayISO = new Date().toISOString().split('T')[0];
 
@@ -498,7 +505,7 @@ function AppInner() {
     }
   };
 
-  const handleLogin = async (username, password, enableBio = false) => {
+  const handleLogin = async (username, password) => {
     setLoginError('');
     setRegisterMessage('');
     const { data: user, error } = await supabase
@@ -525,13 +532,6 @@ function AppInner() {
         setLoginError('❌ تم رفض طلب انضمام هذا الحساب. يرجى مراجعة إدارة الكنيسة.');
         return;
       }
-      if (enableBio) {
-        try {
-          await enableBiometric(user);
-        } catch {
-          alert('لم يتم تفعيل البصمة على الجهاز. تأكد إن الموبايل عليه بصمة أو قفل شاشة، وإن الموقع على HTTPS.');
-        }
-      }
       localStorage.removeItem(PENDING_APPROVAL_KEY);
       localStorage.setItem(SAVED_USER_KEY, user.id);
       setCurrentUser(user);
@@ -539,6 +539,12 @@ function AppInner() {
       setMobileMenuOpen(false);
       setActiveScreen(getPostLoginScreen(user, roleScreens, roleTemplates));
       fetchData();
+      // اعرض سؤال تفعيل البصمة بعد أول دخول ناجح باليوزر والباسورد
+      isBiometricSupported().then(ok => {
+        if (ok && getBiometricOwnerId() !== String(user.id) && !isBiometricDeclined()) {
+          setShowBioOffer(true);
+        }
+      });
     } else {
       setLoginError('اسم المستخدم أو كلمة المرور غير صحيحة.');
     }
@@ -577,6 +583,8 @@ function AppInner() {
 
   const handleLogout = async () => {
     await endUserSession();
+    // عشان صفحة الدخول متطلبش البصمة تلقائي ترجّعه تاني بعد الخروج على طول
+    sessionStorage.setItem('church_skip_bio_auto', '1');
     localStorage.removeItem(SAVED_USER_KEY);
     updateAppIconBadge(0, churchName);
     setCurrentUser(null);
@@ -1514,6 +1522,10 @@ function AppInner() {
           )}
         </main>
       </div>
+
+      {showBioOffer && currentUser && (
+        <BiometricOffer user={currentUser} onClose={() => setShowBioOffer(false)} />
+      )}
 
       <ChurchGlobalFooter churchName={churchName} />
     </div>

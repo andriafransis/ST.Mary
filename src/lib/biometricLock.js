@@ -2,6 +2,7 @@
 const CRED_KEY = 'church_biometric_cred_id';
 const ENABLED_KEY = 'church_biometric_enabled';
 const OWNER_KEY = 'church_biometric_user_id';
+const DECLINED_KEY = 'church_biometric_declined';
 
 const toB64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
 const fromB64 = (str) => Uint8Array.from(atob(str), c => c.charCodeAt(0)).buffer;
@@ -30,7 +31,16 @@ export function getBiometricOwnerId() {
   return localStorage.getItem(OWNER_KEY) || null;
 }
 
+export function isBiometricDeclined() {
+  return localStorage.getItem(DECLINED_KEY) === '1';
+}
+
+export function declineBiometric() {
+  localStorage.setItem(DECLINED_KEY, '1');
+}
+
 export function disableBiometric() {
+  localStorage.removeItem(DECLINED_KEY);
   localStorage.removeItem(ENABLED_KEY);
   localStorage.removeItem(CRED_KEY);
   localStorage.removeItem(OWNER_KEY);
