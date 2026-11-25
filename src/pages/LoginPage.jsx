@@ -4,7 +4,8 @@ import {
   requestMobileNotificationPermission,
   showMobileNotification
 } from '../lib/mobileNotifications';
-import { ArrowRight, BellRing, CheckCircle2 } from 'lucide-react';
+import { ArrowRight, BellRing, CheckCircle2, Fingerprint } from 'lucide-react';
+import { isBiometricSupported, getBiometricOwnerId, disableBiometric } from '../lib/biometricLock';
 
 export const PENDING_APPROVAL_KEY = 'church_pending_approval_user';
 
@@ -14,10 +15,18 @@ export default function LoginPage({
   error,
   successMessage,
   onBackToPublic,
+  onBiometricLogin,
   churchName = 'كنيسة السيدة العذراء مريم بالمطرية'
 }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [bioSupported, setBioSupported] = useState(false);
+  const [bioReady, setBioReady] = useState(() => !!getBiometricOwnerId());
+  const [rememberBio, setRememberBio] = useState(false);
+
+  useEffect(() => {
+    isBiometricSupported().then(setBioSupported);
+  }, []);
 
   const [pendingInfo, setPendingInfo] = useState(() => {
     try {
@@ -119,7 +128,7 @@ export default function LoginPage({
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onLogin(username, password);
+    onLogin(username, password, rememberBio);
   };
 
   return (
@@ -190,6 +199,26 @@ export default function LoginPage({
           </div>
         )}
 
+        {bioReady && onBiometricLogin && (
+          <div className="mb-4 space-y-1.5">
+            <button
+              type="button"
+              onClick={onBiometricLogin}
+              className="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-black text-sm flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Fingerprint size={20} /> الدخول بالبصمة
+            </button>
+            <button
+              type="button"
+              onClick={() => { disableBiometric(); setBioReady(false); }}
+              className="block mx-auto text-[11px] font-bold text-gray-400 hover:text-red-700 cursor-pointer"
+            >
+              إلغاء الدخول بالبصمة على هذا الجهاز
+            </button>
+            <p className="text-center text-[11px] text-gray-400 font-bold">أو ادخل باليوزر والباسورد</p>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4 text-xs font-bold text-gray-700">
           <div>
             <label className="block mb-1">اسم المستخدم / Username</label>
@@ -212,6 +241,17 @@ export default function LoginPage({
               className="w-full p-3 border rounded-xl outline-none focus:border-[#7a1c24]"
             />
           </div>
+          {bioSupported && !bioReady && (
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={rememberBio}
+                onChange={e => setRememberBio(e.target.checked)}
+                className="w-4 h-4 accent-[#7a1c24]"
+              />
+              <span className="flex items-center gap-1"><Fingerprint size={14} /> فعّل الدخول بالبصمة على هذا الجهاز</span>
+            </label>
+          )}
           <button type="submit" className="w-full py-3 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-bold text-sm shadow transition cursor-pointer">
             تسجيل الدخول
           </button>

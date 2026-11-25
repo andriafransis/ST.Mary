@@ -24,6 +24,12 @@ export function isBiometricEnabledFor(userId) {
   );
 }
 
+// يرجّع id المستخدم اللي مفعّل البصمة على الجهاز ده (أو null)
+export function getBiometricOwnerId() {
+  if (localStorage.getItem(ENABLED_KEY) !== '1' || !localStorage.getItem(CRED_KEY)) return null;
+  return localStorage.getItem(OWNER_KEY) || null;
+}
+
 export function disableBiometric() {
   localStorage.removeItem(ENABLED_KEY);
   localStorage.removeItem(CRED_KEY);
