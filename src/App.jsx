@@ -19,6 +19,7 @@ import PermissionsPage from './pages/PermissionsPage';
 import TripsOfficePage from './pages/TripsOfficePage';
 import HiddenFamiliesPage from './pages/HiddenFamiliesPage';
 import LoginPage from './pages/LoginPage';
+import InstallPrompt from './components/InstallPrompt';
 import { enableBiometric, verifyBiometric, getBiometricOwnerId } from './lib/biometricLock';
 import AdminDashboard from './pages/AdminDashboard';
 import PriestDashboard from './pages/PriestDashboard';
@@ -120,7 +121,7 @@ function getPostLoginScreen(user, roleScreens, roleTemplates = []) {
   return nonPublicTab || defaultScreen || '';
 }
 
-export default function App() {
+function AppInner() {
   const [currentUser, setCurrentUser] = useState(null);
   const [authView, setAuthView] = useState('public');
   const [loginError, setLoginError] = useState('');
@@ -1516,5 +1517,14 @@ export default function App() {
 
       <ChurchGlobalFooter churchName={churchName} />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <>
+      <AppInner />
+      <InstallPrompt />
+    </>
   );
 }
