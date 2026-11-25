@@ -34,6 +34,7 @@ import MemberDashboard from './pages/MemberDashboard';
 import ParentDashboard from './pages/ParentDashboard';
 import DeaconSchedule from './pages/DeaconSchedule';
 import CertificatesRegistry from './pages/CertificatesRegistry';
+import SocialStatusPage from './pages/SocialStatusPage';
 import { LogOut, Bell, BellRing, GraduationCap, HeartHandshake, Menu, X } from 'lucide-react';
 
 const SAVED_USER_KEY = 'church_app_logged_user_id';
@@ -1056,6 +1057,7 @@ function AppInner() {
   const eduAccess = getScreenAccess(currentUser, 'edu_center', roleScreens, roleTemplates);
   const tripsAccess = getScreenAccess(currentUser, 'trips_office', roleScreens, roleTemplates);
   const deaconsAccess = getScreenAccess(currentUser, 'deacons', roleScreens, roleTemplates);
+  const socialAccess = getScreenAccess(currentUser, 'social_status', roleScreens, roleTemplates);
 
   const canEditPublic =
     isAdmin ||
@@ -1508,6 +1510,15 @@ function AppInner() {
               deacons={users.filter(u => u.is_deacon)}
               currentUser={currentUser}
               canEdit={isAdmin || isPriest || deaconsAccess.edit || Boolean(currentUser.permissions?.view_deacons)}
+            />
+          )}
+
+          {!extraScreen && currentScr === 'social_status' && (
+            <SocialStatusPage
+              users={users}
+              currentUser={currentUser}
+              canEdit={isAdmin || socialAccess.edit}
+              onRefresh={fetchData}
             />
           )}
 
