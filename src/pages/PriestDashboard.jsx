@@ -2293,7 +2293,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                             </div>
                           </div>
                           <div className="grid grid-cols-3 gap-2">
-                            <select className="p-2.5 border rounded-xl" value={newConfessor.marital_status} onChange={e => setNewConfessor({ ...newConfessor, marital_status: e.target.value })}><option value="أعزب">أعزب</option><option value="متزوج">متزوج</option><option value="أرمل">أرمل</option></select>
+                            <select className="p-2.5 border rounded-xl" value={newConfessor.marital_status} onChange={e => setNewConfessor({ ...newConfessor, marital_status: e.target.value })}><option value="أعزب">أعزب</option><option value="متزوج">متزوج</option><option value="مطلق">مطلق</option><option value="أرمل">أرمل</option></select>
                             <select className="p-2.5 border rounded-xl" value={newConfessor.housing_type} onChange={e => setNewConfessor({ ...newConfessor, housing_type: e.target.value })}><option value="تمليك">تمليك</option><option value="إيجار جديد">إيجار جديد</option><option value="إيجار قديم">إيجار قديم</option></select>
                             <input required placeholder="العنوان *" className="p-2.5 border rounded-xl" value={newConfessor.address} onChange={e => setNewConfessor({ ...newConfessor, address: e.target.value })} />
                           </div>
