@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Layers, Plus, Trash2, Users, Clock } from 'lucide-react';
+import { Layers, Plus, Trash2, Users, Clock, MessageCircle, Copy, Check, X } from 'lucide-react';
 
 export const DEFAULT_SERVICE_GROUPS = [
   { group_name: 'خدمة حضانة وطفولة', icon: '🧸', gender_target: 'عام', service_day: 'الجمعة', start_time: '09:00', end_time: '11:30', stages: ['حضانة'], sort_order: 1 },
@@ -33,7 +33,6 @@ export function resolveUserServiceGroups(user, services = [], groupsList = DEFAU
   const activeGroups = (groupsList && groupsList.length > 0) ? groupsList : DEFAULT_SERVICE_GROUPS;
   const activeGroupNames = activeGroups.map(g => g.group_name || g.groupName).filter(Boolean);
 
-  // إضافة أي خدمة موجودة في جدول الفصول وليست مطابقة لأي جروب بالاسم
   const extraStageNames = [...new Set(services.map(s => s.stage_name).filter(Boolean))]
     .filter(st => !activeGroupNames.some(gn => gn === st || gn.includes(st) || st.includes(gn)));
 
@@ -62,11 +61,9 @@ export function resolveUserServiceGroups(user, services = [], groupsList = DEFAU
     activeGroups.forEach(grp => {
       const gName = grp.group_name || grp.groupName;
       const stages = normalizeGroupStages(grp.stages);
-      // لو المستخدم محددله جروب معين (مثل إعدادي بنين) أو مرحلة فرعية داخل الجروب
       if (tok === gName) {
         matched.add(gName);
       } else if (stages.some(st => tok === st)) {
-        // مراعاة بنين / بنات إن وُجدت
         if (grp.gender_target === 'بنين' && user.gender === 'أنثى') return;
         if (grp.gender_target === 'بنات' && user.gender === 'ذكر') return;
         matched.add(gName);
@@ -84,11 +81,33 @@ export function resolveUserServiceGroups(user, services = [], groupsList = DEFAU
   return Array.from(matched);
 }
 
-export default function ServiceGroupFeed({ currentUser, services = [], groups = null, canPost = false }) {
+const formatWaAlertText = (post) => {
+  const lines = [
+    `✝ *تنبيه هام — ${post.group_name}*`,
+    `📌 *${post.post_type}:* ${post.title}`,
+    post.event_date ? `📅 *التاريخ:* ${post.event_date}` : '',
+    post.body ? `📝 ${post.body}` : '',
+    `🙏 صلوا لأجلنا — (${post.created_by_name || 'خادم الخدمة'})`
+  ].filter(Boolean);
+  return lines.join('\n');
+};
+
+export default function ServiceGroupFeed({ currentUser, services = [], groups = null, users = null, canPost = false }) {
   const [dbGroups, setDbGroups] = useState([]);
+  const [allUsers, setAllUsers] = useState(Array.isArray(users) ? users : []);
   const [posts, setPosts] = useState([]);
   const [selectedGroup, setSelectedGroup] = useState('');
-  const [form, setForm] = useState({ title: '', post_type: 'إعلان للخدمة', body: '', event_date: '' });
+  const [form, setForm] = useState({
+    title: '',
+    post_type: 'إعلان للخدمة',
+    body: '',
+    event_date: '',
+    sendWhatsAppAfterPost: true
+  });
+
+  const [waAlertModal, setWaAlertModal] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+  const [sentIds, setSentIds] = useState(() => new Set());
 
   useEffect(() => {
     if (Array.isArray(groups)) {
@@ -105,6 +124,20 @@ export default function ServiceGroupFeed({ currentUser, services = [], groups = 
         else setDbGroups(DEFAULT_SERVICE_GROUPS);
       });
   }, [groups]);
+
+  useEffect(() => {
+    if (Array.isArray(users)) {
+      setAllUsers(users);
+      return;
+    }
+    if (!canPost) return;
+    supabase
+      .from('church_users')
+      .select('id, full_name, role, phone, father_phone, mother_phone, gender, detailed_stage, service_stage, assigned_class, permissions')
+      .then(({ data }) => {
+        if (data) setAllUsers(data);
+      });
+  }, [users, canPost]);
 
   const effectiveGroups = dbGroups.length > 0 ? dbGroups : DEFAULT_SERVICE_GROUPS;
   const myGroups = resolveUserServiceGroups(currentUser, services, effectiveGroups);
@@ -129,6 +162,35 @@ export default function ServiceGroupFeed({ currentUser, services = [], groups = 
     loadPosts();
   }, [myGroups.join('|')]);
 
+  const getMembersInGroup = (groupName) => {
+    return allUsers.filter(u => {
+      if (u.role === 'admin' || u.role === 'priest') return false;
+      const phone = u.phone || u.father_phone || u.mother_phone;
+      if (!phone) return false;
+      const resolved = resolveUserServiceGroups(u, services, effectiveGroups);
+      return resolved.includes(groupName);
+    });
+  };
+
+  const openWhatsAppDispatch = (post) => {
+    setSentIds(new Set());
+    setWaAlertModal({
+      post,
+      text: formatWaAlertText(post),
+      recipients: getMembersInGroup(post.group_name)
+    });
+  };
+
+  const handleCopyText = async (text, key) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(key);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      alert('تعذر النسخ التلقائي — يمكنك تحديد النص ونسخه يدوياً.');
+    }
+  };
+
   const handlePublish = async (e) => {
     e.preventDefault();
     if (!selectedGroup || !form.title.trim()) return;
@@ -148,7 +210,11 @@ export default function ServiceGroupFeed({ currentUser, services = [], groups = 
 
     if (!error && data) {
       setPosts([data, ...posts]);
-      setForm({ title: '', post_type: 'إعلان للخدمة', body: '', event_date: '' });
+      const shouldSendWa = form.sendWhatsAppAfterPost;
+      setForm({ title: '', post_type: 'إعلان للخدمة', body: '', event_date: '', sendWhatsAppAfterPost: true });
+      if (shouldSendWa) {
+        openWhatsAppDispatch(data);
+      }
     } else if (error) {
       alert(error.message);
     }
@@ -170,9 +236,11 @@ export default function ServiceGroupFeed({ currentUser, services = [], groups = 
       <div className="flex flex-wrap justify-between items-center gap-2 border-b pb-3">
         <div>
           <h3 className="text-sm md:text-base font-black text-[#7a1c24] flex items-center gap-2">
-            <Layers size={18} /> كروت الخدمات العامة (كل خدمة تظهر لأفرادها بمواعيدها ومنشوراتها)
+            <Layers size={18} /> كروت الخدمات العامة وتنبيهات الواتساب
           </h3>
-          <p className="text-[11px] text-gray-500">كل كارت هنا خاص بأبناء وخدام الخدمة المسجلين فيها فقط</p>
+          <p className="text-[11px] text-gray-500">
+            كل كارت خاص بأبناء وخدام الخدمة المسجلين فيها مع إرسال تنبيهات الخدمة مباشرة عبر الواتساب
+          </p>
         </div>
       </div>
 
@@ -238,8 +306,16 @@ export default function ServiceGroupFeed({ currentUser, services = [], groups = 
                 <input required placeholder="العنوان *" className="p-2 border rounded-xl" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
                 <input type="date" className="p-2 border rounded-xl" value={form.event_date} onChange={e => setForm({ ...form, event_date: e.target.value })} />
               </div>
-              <div className="flex gap-2">
-                <input placeholder="التفاصيل..." className="flex-1 p-2 border rounded-xl font-normal" value={form.body} onChange={e => setForm({ ...form, body: e.target.value })} />
+              <div className="flex flex-wrap gap-2 items-center">
+                <input placeholder="التفاصيل..." className="flex-1 min-w-[200px] p-2 border rounded-xl font-normal" value={form.body} onChange={e => setForm({ ...form, body: e.target.value })} />
+                <label className="flex items-center gap-1.5 text-[11px] text-green-800 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.sendWhatsAppAfterPost}
+                    onChange={e => setForm({ ...form, sendWhatsAppAfterPost: e.target.checked })}
+                  />
+                  فتح إرسال الواتساب بعد النشر
+                </label>
                 <button type="submit" className="px-4 py-2 bg-[#7a1c24] text-white rounded-xl flex items-center gap-1 cursor-pointer shrink-0">
                   <Plus size={14} /> نشر
                 </button>
@@ -252,8 +328,8 @@ export default function ServiceGroupFeed({ currentUser, services = [], groups = 
           ) : (
             <div className="space-y-2">
               {activePosts.map(p => (
-                <div key={p.id} className="bg-white p-3.5 rounded-2xl border flex justify-between items-start gap-2 text-xs">
-                  <div className="space-y-1">
+                <div key={p.id} className="bg-white p-3.5 rounded-2xl border flex flex-wrap justify-between items-start gap-2 text-xs">
+                  <div className="space-y-1 flex-1 min-w-[200px]">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="px-2 py-0.5 bg-amber-100 text-amber-950 rounded text-[10px] font-bold">{p.post_type}</span>
                       <strong className="text-sm text-gray-900">{p.title}</strong>
@@ -262,15 +338,111 @@ export default function ServiceGroupFeed({ currentUser, services = [], groups = 
                     {p.body && <p className="text-gray-700 leading-relaxed">{p.body}</p>}
                     <span className="text-[10px] text-gray-400 block">بواسطة: {p.created_by_name}</span>
                   </div>
-                  {canPost && (p.created_by === currentUser?.id || currentUser?.role === 'admin' || currentUser?.role === 'priest') && (
-                    <button type="button" onClick={() => handleDelete(p.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer">
-                      <Trash2 size={14} />
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => openWhatsAppDispatch(p)}
+                      className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <MessageCircle size={13} /> إرسال على الواتس
                     </button>
-                  )}
+                    {canPost && (p.created_by === currentUser?.id || currentUser?.role === 'admin' || currentUser?.role === 'priest') && (
+                      <button type="button" onClick={() => handleDelete(p.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer">
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* مودال إرسال تنبيه الجروب على الواتساب */}
+      {waAlertModal && (
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50">
+          <div className="bg-white rounded-3xl w-full max-w-xl p-5 sm:p-6 space-y-4 text-xs font-bold max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b pb-2.5">
+              <div>
+                <h3 className="text-sm sm:text-base font-black text-green-800 flex items-center gap-1.5">
+                  <MessageCircle size={18} /> إرسال تنبيه ({waAlertModal.post.group_name}) على الواتساب
+                </h3>
+                <p className="text-[11px] text-gray-500 font-normal mt-0.5">
+                  يمكنك مشاركة الرسالة مباشرة على جروب الواتساب أو إرسالها لأفراد الخدمة.
+                </p>
+              </div>
+              <button type="button" onClick={() => setWaAlertModal(null)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-[11px] text-gray-600">نص رسالة التنبيه (قابل للتعديل):</label>
+              <textarea
+                rows={5}
+                className="w-full p-3 border rounded-2xl bg-[#fbfaf7] font-normal leading-relaxed"
+                value={waAlertModal.text}
+                onChange={e => setWaAlertModal(prev => ({ ...prev, text: e.target.value }))}
+              />
+              <div className="flex flex-wrap gap-2">
+                <a
+                  href={`https://wa.me/?text=${encodeURIComponent(waAlertModal.text)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex-1 py-2.5 px-4 bg-green-600 hover:bg-green-700 text-white rounded-xl font-black flex items-center justify-center gap-1.5"
+                >
+                  <MessageCircle size={15} /> فتح واتساب واختيار جروب الخدمة ↗
+                </a>
+                <button
+                  type="button"
+                  onClick={() => handleCopyText(waAlertModal.text, waAlertModal.post.id)}
+                  className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-900 rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
+                >
+                  {copiedId === waAlertModal.post.id ? <><Check size={14} className="text-green-700" /> تم النسخ</> : <><Copy size={14} /> نسخ النص</>}
+                </button>
+              </div>
+            </div>
+
+            <div className="border-t pt-3 space-y-2">
+              <strong className="text-xs text-gray-900 block">
+                👥 إرسال مباشر لأعضاء وخدام هذه الخدمة ({waAlertModal.recipients.length}):
+              </strong>
+              {waAlertModal.recipients.length === 0 ? (
+                <p className="text-[11px] text-gray-400 bg-[#fbfaf7] p-3 rounded-xl text-center">
+                  لا توجد أرقام هواتف مسجلة لأعضاء هذا الجروب حالياً — استخدم زر «فتح واتساب واختيار جروب الخدمة».
+                </p>
+              ) : (
+                <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                  {waAlertModal.recipients.map(rec => {
+                    const phone = rec.phone || rec.father_phone || rec.mother_phone || '';
+                    const cleanPhone = String(phone).replace(/\D/g, '');
+                    const isSent = sentIds.has(rec.id);
+                    return (
+                      <div key={rec.id} className="p-2.5 bg-[#fbfaf7] border rounded-xl flex justify-between items-center gap-2">
+                        <div>
+                          <strong className="text-gray-900 block">{rec.full_name}</strong>
+                          <span className="text-[11px] text-gray-500">📞 {phone}</span>
+                        </div>
+                        <a
+                          href={`https://wa.me/2${cleanPhone}?text=${encodeURIComponent(waAlertModal.text)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={() => setSentIds(prev => new Set([...prev, rec.id]))}
+                          className={`px-3 py-1.5 rounded-xl font-black text-[11px] flex items-center gap-1 ${
+                            isSent ? 'bg-emerald-100 text-emerald-900' : 'bg-green-600 hover:bg-green-700 text-white'
+                          }`}
+                        >
+                          {isSent ? <><Check size={12} /> تم الفتح</> : <><MessageCircle size={12} /> إرسال</>}
+                        </a>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

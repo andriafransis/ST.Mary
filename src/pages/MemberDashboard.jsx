@@ -1,9 +1,11 @@
+
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLogger';
+import PriestInvitationModal from '../components/PriestInvitationModal';
 import {
   Phone, AlertCircle, CheckCircle2, Calendar, BookOpen,
-  Clock, UserCheck, MessageCircle, Bus, MapPin, Layers, XCircle
+  Clock, UserCheck, MessageCircle, Bus, MapPin, Layers, XCircle, MailPlus
 } from 'lucide-react';
 
 const normalizeText = (val = '') =>
@@ -33,7 +35,7 @@ export default function MemberDashboard({
   priests = [],
   onMemberUpdated
 }) {
-  const [activeTab, setActiveTab] = useState('services'); // 'services' | 'confessions' | 'masses' | 'trips'
+  const [activeTab, setActiveTab] = useState('services'); // 'services' | 'confessions' | 'masses' | 'trips' | 'invite'
   const [selectedPriestId, setSelectedPriestId] = useState(member?.confession_father_id || '');
   const [savingFather, setSavingFather] = useState(false);
   const [filterPriestId, setFilterPriestId] = useState(member?.confession_father_id || 'all');
@@ -43,6 +45,7 @@ export default function MemberDashboard({
   const [publicTrips, setPublicTrips] = useState([]);
   const [myTripRegs, setMyTripRegs] = useState([]);
   const [tripBusy, setTripBusy] = useState(null);
+  const [confessionIntervalDays, setConfessionIntervalDays] = useState(45);
 
   const todayISO = new Date().toLocaleDateString('en-CA');
 
@@ -84,12 +87,20 @@ export default function MemberDashboard({
       supabase
         .from('trip_registrations')
         .select('*')
-        .eq('user_id', member.id)
-    ]).then(([cb, tr, reg]) => {
+        .eq('user_id', member.id),
+      supabase
+        .from('service_settings')
+        .select('value')
+        .eq('key', 'confession_interval_days')
+        .maybeSingle()
+    ]).then(([cb, tr, reg, intv]) => {
       if (cancelled) return;
       if (!cb.error && cb.data) setMyBookings(cb.data);
       if (!tr.error && tr.data) setPublicTrips(tr.data);
       if (!reg.error && reg.data) setMyTripRegs(reg.data);
+      if (!intv.error && intv.data?.value?.days) {
+        setConfessionIntervalDays(Number(intv.data.value.days) || 45);
+      }
     });
 
     return () => {
@@ -97,7 +108,6 @@ export default function MemberDashboard({
     };
   }, [member?.id]);
 
-  // بناء كارت مستقل لكل خدمة أو فصل مشترك فيه المخدوم
   const myServiceCards = useMemo(() => {
     if (!member) return [];
 
@@ -141,7 +151,6 @@ export default function MemberDashboard({
       });
     };
 
-    // 1) إذا كان للمخدوم service_id محدد
     if (member.service_id) {
       const exactSrv = services.find(s => s.id === member.service_id);
       if (exactSrv) {
@@ -159,7 +168,6 @@ export default function MemberDashboard({
       }
     }
 
-    // 2) كل فصل مسجل فيه المخدوم في assigned_class
     assignedClasses.forEach(clsName => {
       const normCls = normalizeText(clsName);
       const foundSrv = services.find(s => normalizeText(s.class_name) === normCls);
@@ -190,13 +198,11 @@ export default function MemberDashboard({
       }
     });
 
-    // 3) الخدمات الإضافية أو المراحل/الخدمات العامة المشترك بها
     const otherNames = [...new Set([...generalNames, ...extraServices, ...(assignedClasses.length === 0 ? detailedStages : [])])]
       .filter(n => n && normalizeText(n) !== 'شعب عام');
 
     otherNames.forEach(srvName => {
       const normName = normalizeText(srvName);
-      // لو نفس الاسم مغطى بالفعل عبر فصل محدد بنفس المرحلة وكان المخدوم في فصل محدد فقط، ما نكرروش إلا لو مشترك في خدمة إضافية/عامة مستقلة
       const isExplicitExtra = extraServices.some(ex => normalizeText(ex) === normName) || generalNames.some(gn => normalizeText(gn) === normName);
       if (assignedClasses.length > 0 && !isExplicitExtra && detailedStages.length <= 1) return;
 
@@ -428,9 +434,14 @@ export default function MemberDashboard({
     [myBookings]
   );
 
+  const intervalLabel = confessionIntervalDays === 45
+    ? 'كل شهر ونصف (45 يوم)'
+    : confessionIntervalDays === 60
+      ? 'كل شهرين (60 يوم)'
+      : `كل ${confessionIntervalDays} يوم`;
+
   return (
     <div className="space-y-3 text-xs" dir="rtl">
-      {/* كارت الترحيب */}
       <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-4">
         <div className="space-y-2">
           <h2 className="text-base sm:text-xl font-black text-amber-300">أهلاً بك، {member?.full_name}</h2>
@@ -459,10 +470,16 @@ export default function MemberDashboard({
               {myAtt.length > 0 ? `${Math.round((presentCount / myAtt.length) * 100)}%` : 'جديد'}
             </strong>
           </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('invite')}
+            className="col-span-2 sm:col-span-1 px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-2xl font-black flex items-center justify-center gap-1.5 cursor-pointer shadow"
+          >
+            <MailPlus size={15} /> دعوة لأبونا
+          </button>
         </div>
       </div>
 
-      {/* اختيار أب الاعتراف لأول مرة */}
       {!member?.confession_father_id && (
         <form onSubmit={handleChooseConfessionFather} className="bg-amber-50 border-2 border-amber-300 p-4 rounded-3xl space-y-2.5 shadow-sm">
           <strong className="text-sm text-amber-950 flex items-center gap-1.5">
@@ -491,7 +508,6 @@ export default function MemberDashboard({
         </form>
       )}
 
-      {/* شريط التابات المنظم */}
       <div className="bg-white p-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto font-black">
         <button
           type="button"
@@ -529,9 +545,17 @@ export default function MemberDashboard({
         >
           <Bus size={14} /> الرحلات ({publicTrips.length})
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('invite')}
+          className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'invite' ? 'bg-[#7a1c24] text-white' : 'bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-200'
+          }`}
+        >
+          <MailPlus size={14} /> دعوة لأبونا لمناسبة
+        </button>
       </div>
 
-      {/* محتوى التاب داخل حاوية Scroll */}
       <div className="max-h-[calc(100vh-260px)] overflow-y-auto pr-1 space-y-3">
         {activeTab === 'services' && (
           <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3.5">
@@ -621,6 +645,11 @@ export default function MemberDashboard({
 
         {activeTab === 'confessions' && (
           <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
+            <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl flex flex-wrap items-center justify-between gap-2 text-amber-950 font-bold">
+              <span>🙏 نظام الاعتراف بالكنيسة لكل الشعب: <strong>{intervalLabel}</strong></span>
+              <span className="text-[11px] text-[#7a1c24]">يرجى الحفاظ على ميعاد الاعتراف بانتظام</span>
+            </div>
+
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2.5 border-b border-gray-100 pb-3">
               <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5">
                 <Clock size={17} /> مواعيد الاعتراف للآباء الكهنة
@@ -854,6 +883,15 @@ export default function MemberDashboard({
               </div>
             )}
           </div>
+        )}
+
+        {activeTab === 'invite' && (
+          <PriestInvitationModal
+            inline={true}
+            currentUser={member}
+            priests={priests}
+            defaultRoleLabel="مخدوم"
+          />
         )}
       </div>
     </div>

@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { startUserSession, logActivity } from '../lib/activityLogger';
@@ -9,6 +10,8 @@ import {
 import WhatsAppComposerModal, { FALLBACK_WA_TEMPLATES, formatWaMessage } from '../components/priest/WhatsAppComposerModal';
 import BellNotificationsPanel from '../components/priest/BellNotificationsPanel';
 import ConfessorProfileModal from '../components/priest/ConfessorProfileModal';
+import PriestFamilyVisitation from '../components/priest/PriestFamilyVisitation';
+import CertificatesRegistry from '../components/CertificatesRegistry';
 import EducationalCenterManager from '../components/EducationalCenterManager';
 import JosephArimatheaManager from '../components/JosephArimatheaManager';
 import MasterCongregationSheet from '../components/MasterCongregationSheet';
@@ -113,6 +116,10 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   const [serviceGroups, setServiceGroups] = useState([]);
   const [masses, setMasses] = useState([]);
   const [personalItems, setPersonalItems] = useState([]);
+  const [invitations, setInvitations] = useState([]);
+  const [confessionIntervalDays, setConfessionIntervalDays] = useState(45);
+  const [savingInterval, setSavingInterval] = useState(false);
+
   const [families, setFamilies] = useState([]);
   const [familyAttachments, setFamilyAttachments] = useState([]);
   const [caseCategories, setCaseCategories] = useState([]);
@@ -235,7 +242,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     if (!priest?.id) return;
     const [
       us, sl, cb, sh, sn, vs, sr, ms, ps, fm, fa, cats, sb, uc, cc, ce, wt, jc, jm,
-      sg, commView, campRes, rewRes, notesRes, hidReqsRes, nCardsRes, cfgData
+      sg, commView, campRes, rewRes, notesRes, hidReqsRes, nCardsRes, cfgData, invRes, intvRes
     ] = await Promise.all([
       supabase.from('church_users').select('*').order('created_at', { ascending: true }),
       supabase.from('priest_confession_slots').select('*').eq('priest_id', priest.id).order('slot_date', { ascending: true }),
@@ -263,7 +270,9 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
       supabase.from('member_notes').select('*'),
       supabase.from('church_notifications').select('*').eq('type', 'hidden_family_edit_request').order('created_at', { ascending: false }),
       supabase.from('nested_cards').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true }),
-      loadAdminCardsConfig()
+      loadAdminCardsConfig(),
+      supabase.from('priest_invitations').select('*').or(`priest_id.is.null,priest_id.eq.${priest.id}`).order('created_at', { ascending: false }),
+      supabase.from('service_settings').select('value').eq('key', 'confession_interval_days').maybeSingle()
     ]);
 
     if (us.data) setLocalUsers(us.data);
@@ -302,13 +311,16 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     }
     if (!nCardsRes.error && nCardsRes.data) setNestedCardsRows(nCardsRes.data);
     if (cfgData) setCardsConfig(cfgData);
+    if (!invRes.error && invRes.data) setInvitations(invRes.data);
+    if (!intvRes.error && intvRes.data?.value?.days) {
+      setConfessionIntervalDays(Number(intvRes.data.value.days) || 45);
+    }
   };
 
   useEffect(() => {
     loadPriestData();
   }, [priest?.id]);
 
-  // مزامنة فورية عند أي تعديل/إضافة/نقل/إيقاف/حذف من الكروت المتداخلة
   useEffect(() => {
     if (!priest?.id) return;
     const syncCardsNow = () => {
@@ -393,8 +405,82 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   const pendingMemorialsCount = josephMemorials.filter(m => m.status === 'معلق').length;
   const totalJosephAlerts = pendingCasesCount + pendingMemorialsCount;
   const pendingHiddenReqsCount = hiddenEditRequests.filter(r => r.status !== 'done').length;
+  const pendingInvitesCount = invitations.filter(i => i.status === 'قيد الانتظار').length;
 
-  // دالة مساعدة لتطبيق overrides على أي كارت أساسي أو فرعي
+  const handleSaveConfessionInterval = async (daysVal) => {
+    const days = Math.max(7, Number(daysVal) || 45);
+    setConfessionIntervalDays(days);
+    setSavingInterval(true);
+    try {
+      await supabase
+        .from('service_settings')
+        .upsert(
+          { key: 'confession_interval_days', value: { days }, updated_at: new Date().toISOString() },
+          { onConflict: 'key' }
+        );
+      logActivity({
+        user: priest,
+        actionType: 'تحديد_مدة_الاعتراف_للشعب',
+        targetTable: 'service_settings',
+        description: `حدد مدة الاعتراف الدورية للشعب: كل ${days} يوم`
+      });
+    } finally {
+      setSavingInterval(false);
+    }
+  };
+
+  const handleRespondInvitation = async (inv, nextStatus) => {
+    const replyText = prompt(
+      nextStatus === 'مقبولة'
+        ? `رسالة تأكيد لـ (${inv.sender_name}) اختياري:`
+        : `سبب الاعتذار لـ (${inv.sender_name}):`,
+      nextStatus === 'مقبولة' ? 'تم القبول وإدراج الموعد بالجدول، الرب يبارككم ✝' : 'نعتذر لارتباط أبونا بموعد آخر'
+    );
+    if (replyText === null) return;
+
+    const { data, error } = await supabase
+      .from('priest_invitations')
+      .update({
+        status: nextStatus,
+        priest_reply: replyText,
+        priest_id: inv.priest_id || priest.id
+      })
+      .eq('id', inv.id)
+      .select()
+      .single();
+
+    if (error) return alert('تعذر تحديث الدعوة: ' + error.message);
+    if (data) {
+      setInvitations(prev => prev.map(x => (x.id === inv.id ? data : x)));
+      if (nextStatus === 'مقبولة') {
+        const { data: schedRow } = await supabase
+          .from('priest_personal_schedule')
+          .insert([{
+            priest_id: priest.id,
+            event_type: inv.event_type,
+            title: `${inv.title} (دعوة من: ${inv.sender_name})`,
+            event_date: inv.event_date,
+            event_time: inv.event_time || '',
+            location: inv.location || '',
+            is_public: false,
+            notes: `هاتف: ${inv.sender_phone || '—'} ${inv.notes ? '• ' + inv.notes : ''}`
+          }])
+          .select()
+          .single();
+        if (schedRow) {
+          setPersonalItems(prev => [...prev, schedRow]);
+        }
+      }
+      logActivity({
+        user: priest,
+        actionType: nextStatus === 'مقبولة' ? 'قبول_دعوة_مناسبة' : 'اعتذار_دعوة_مناسبة',
+        targetTable: 'priest_invitations',
+        targetId: inv.id,
+        description: `${nextStatus} لدعوة (${inv.title}) من ${inv.sender_name}`
+      });
+    }
+  };
+
   const applyCardOverride = (baseCard, defaultScreen = 'priest_hub') => {
     const ov = (cardsConfig.overrides || {})[baseCard.id] || {};
     return {
@@ -437,7 +523,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
 
   const navigateByTargetScreen = (targetScreen) => {
     if (!targetScreen) return;
-    if (['service_hub', 'confessions', 'masses', 'personal', 'cases', 'edu_center', 'joseph_arimathea', 'hub'].includes(targetScreen)) {
+    if (['service_hub', 'confessions', 'family_visitation', 'masses', 'personal', 'cases', 'certificates', 'edu_center', 'joseph_arimathea', 'hub'].includes(targetScreen)) {
       setSelectedNestedParentKey(null);
       setActiveCard(targetScreen);
       if (targetScreen === 'service_hub') setActiveServiceCard(null);
@@ -712,8 +798,10 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
       { id: 'hub', label: '🏠 الرئيسية' },
       { id: 'service_hub', label: '🏫 الخدمة' },
       { id: 'confessions', label: '🙏 الاعترافات' },
+      { id: 'family_visitation', label: '👨‍👩‍👧‍👦 افتقاد الأسر' },
+      { id: 'certificates', label: '📜 التوثيق وخلو الموانع' },
       { id: 'masses', label: '⛪ القداسات' },
-      { id: 'personal', label: '📅 الجدول الخاص' },
+      { id: 'personal', label: '📅 الجدول الخاص', badge: pendingInvitesCount },
       { id: 'cases', label: '🔍 بحث الحالة', badge: pendingHiddenReqsCount },
       { id: 'edu_center', label: '🎓 المركز التعليمي' },
       { id: 'joseph_arimathea', label: '🕊️ يوسف الرامي', badge: totalJosephAlerts }
@@ -1640,9 +1728,11 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   if (activeCard === 'hub') {
     const rawHubCards = [
       { id: 'service_hub', icon: '🏫', title: 'الخدمة ومدارس الأحد', desc: '3 كروت مستقلة: شيت التسلسل والافتقاد والترحيم • الالتزام والكفاءة والعروض والرحلات • جدول الخدمة', count: `${stagesMap.length} خدمة • ${localUsers.length} مسجل`, color: 'border-teal-300 bg-teal-50/40' },
-      { id: 'confessions', icon: '🙏', title: 'الاعترافات', desc: 'المواعيد بالمدة، المعترفون (داخل/خارج الكنيسة) والملف الروحي، والافتقاد', count: `${myConfessors.length} معترف • ${confessionSlots.length} موعد`, color: 'border-red-200 bg-white' },
+      { id: 'confessions', icon: '🙏', title: 'الاعترافات', desc: `المواعيد والمدة (${confessionIntervalDays} يوم)، المعترفون (داخل/خارج الكنيسة) والملف الروحي، والافتقاد`, count: `${myConfessors.length} معترف • ${confessionSlots.length} موعد`, color: 'border-red-200 bg-white' },
+      { id: 'family_visitation', icon: '👨‍👩‍👧‍👦', title: 'افتقاد أسر الكاهن', desc: 'تفاصيل الأسرة: الزوج والزوجة والأبناء والوالد والوالدة، تواريخ الميلاد، الحالة الاجتماعية والدراسية والوظائف، وسجل الزيارات', count: 'سجل الأسر', color: 'border-rose-200 bg-rose-50/30' },
+      { id: 'certificates', icon: '📜', title: 'التوثيق والشهادات وخلو الموانع', desc: 'شهادات المعمودية والشمامسة، وكارت خلو الموانع (تسلسل رقمي + الرقم القومي كمفتاح أساسي)', count: 'خلو الموانع والتوثيق', color: 'border-amber-300 bg-amber-50/40' },
       { id: 'masses', icon: '⛪', title: 'جدول القداسات', desc: 'اسم القداس، كاهن خادم أو شريك، والفئات', count: `${masses.length} قداس`, color: 'border-blue-200 bg-white' },
-      { id: 'personal', icon: '📅', title: 'الجدول الخاص بالكاهن', desc: 'صلاة طشت، خطوبة، أكاليل، رحلات ومؤتمرات بالأقساط والأتوبيسات وطباعة الكشوفات', count: `${personalItems.length} موعد`, color: 'border-purple-200 bg-white' },
+      { id: 'personal', icon: '📅', title: 'الجدول الخاص بالكاهن والدعوات', desc: 'استقبال دعوات الشعب، صلاة طشت، خطوبة، أكاليل، رحلات ومؤتمرات بالأقساط والأتوبيسات', count: pendingInvitesCount > 0 ? `💌 ${pendingInvitesCount} دعوة • ${personalItems.length} موعد` : `${personalItems.length} موعد`, color: pendingInvitesCount > 0 ? 'border-purple-400 bg-purple-50/40' : 'border-purple-200 bg-white' },
       { id: 'cases', icon: '🔍', title: 'بحث الحالة / العيلة', desc: 'البحث، التصنيفات، الإضافة، المرفقات (بطاقة/إيجار/تحاليل)، وطلبات الأسر المستترة وطباعة PDF', count: pendingHiddenReqsCount > 0 ? `📩 ${pendingHiddenReqsCount} طلب • ${families.length} أسرة` : `${families.length} أسرة`, color: pendingHiddenReqsCount > 0 ? 'border-amber-400 bg-amber-50/40' : 'border-emerald-200 bg-white' },
       { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل التعليمية، المواد الدراسية، الأسعار، وتسجيل الحضور', count: 'مركز الدروس', color: 'border-indigo-200 bg-white' },
       { id: 'joseph_arimathea', icon: '🕊️', title: 'خدمة يوسف الرامي', desc: 'حالات الوفاة بالليل، الطقوس التلقائية، الصناديق، وخط سير السائق ومكان الدفن', count: totalJosephAlerts > 0 ? `🚨 ${totalJosephAlerts} بحاجة للمتابعة` : `${josephCases.length} حالة مسجلة`, color: totalJosephAlerts > 0 ? 'border-red-400 bg-red-50/50' : 'border-slate-300 bg-white' }
@@ -1927,6 +2017,46 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
           return (
             <div className="space-y-4">
               {renderTopBar('🙏 الاعترافات والمتابعة الروحية')}
+
+              {/* تحديد مدة الاعتراف الدورية لكل الشعب */}
+              <div className="bg-amber-50 border-2 border-amber-300 p-4 rounded-3xl flex flex-wrap justify-between items-center gap-3">
+                <div>
+                  <strong className="text-sm font-black text-amber-950 block">⏱️ تحديد مدة الاعتراف الدورية لكل الشعب</strong>
+                  <p className="text-xs text-amber-900">
+                    كل معترف يتجاوز هذه المدة يظهر عليه تنبيه «متأخر عن الاعتراف» لمتابعته وافتقاده، وتظهر المدة في صفحة المخدوم.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSaveConfessionInterval(45)}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-black cursor-pointer border ${
+                      confessionIntervalDays === 45 ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-gray-800'
+                    }`}
+                  >
+                    كل شهر ونصف (45 يوم)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSaveConfessionInterval(60)}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-black cursor-pointer border ${
+                      confessionIntervalDays === 60 ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-gray-800'
+                    }`}
+                  >
+                    كل شهرين (60 يوم)
+                  </button>
+                  <input
+                    type="number"
+                    min="7"
+                    max="180"
+                    className="w-20 p-2 border rounded-xl bg-white text-xs font-black text-center"
+                    value={confessionIntervalDays}
+                    onChange={e => handleSaveConfessionInterval(e.target.value)}
+                  />
+                  <span className="text-xs font-bold text-gray-700">{savingInterval ? 'جاري الحفظ...' : 'يوم'}</span>
+                </div>
+              </div>
+
               {confSubView === 'menu' && (
                 <div className="grid sm:grid-cols-3 gap-4">
                   {confMenuCards.map(mc => (
@@ -2060,6 +2190,12 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                         .filter(b => b.member_id === m.id && b.booking_date >= todayISO && b.status === 'محجوز')
                         .sort((a, b) => (a.booking_date || '').localeCompare(b.booking_date || ''))[0];
 
+                      const lastConfStr = note?.last_confession_date;
+                      const daysSinceConf = lastConfStr
+                        ? Math.floor((Date.now() - new Date(lastConfStr).getTime()) / 86400000)
+                        : null;
+                      const isOverdueConf = daysSinceConf !== null && daysSinceConf > confessionIntervalDays;
+
                       return (
                         <div key={m.id} onClick={() => setSelectedConfessor(m)} className="bg-white p-4 rounded-3xl border-2 border-gray-200 hover:border-[#7a1c24] shadow-sm space-y-2 transition cursor-pointer">
                           <div className="flex justify-between items-start gap-2">
@@ -2074,6 +2210,11 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                           {nextBooking && (
                             <div className="px-2.5 py-1 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-xl text-xs font-black">
                               📅 حجز قادم: {nextBooking.booking_date === todayISO ? 'اليوم' : nextBooking.booking_date} {nextBooking.booking_time ? `(${nextBooking.booking_time})` : ''}
+                            </div>
+                          )}
+                          {isOverdueConf && (
+                            <div className="px-2.5 py-1 bg-red-50 border border-red-300 text-red-800 rounded-xl text-xs font-black">
+                              ⚠️ متأخر عن الاعتراف منذ {daysSinceConf} يوم (الحد: {confessionIntervalDays} يوم)
                             </div>
                           )}
                           <p className="text-sm text-gray-600">🎂 {m.dob || '—'} ({calcAge(m.dob)}) • 💼 {m.job_title || '—'}</p>
@@ -2224,6 +2365,27 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
           );
         })()}
 
+        {activeCard === 'family_visitation' && (
+          <div className="space-y-4">
+            {renderTopBar('👨‍👩‍👧‍👦 افتقاد أسر ومخدومي الأب الكاهن')}
+            <PriestFamilyVisitation
+              priest={priest}
+              onOpenWhatsApp={openWhatsAppComposer}
+            />
+          </div>
+        )}
+
+        {activeCard === 'certificates' && (
+          <div className="space-y-4">
+            {renderTopBar('📜 التوثيق والشهادات وكارت خلو الموانع')}
+            <CertificatesRegistry
+              users={localUsers}
+              onRefresh={loadPriestData}
+              initialTab="clearance"
+            />
+          </div>
+        )}
+
         {activeCard === 'masses' && (
           <div className="space-y-4">
             {renderTopBar('⛪ جدول قداسات أبونا')}
@@ -2256,7 +2418,44 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
         {activeCard === 'personal' && (
           <div className="space-y-4">
             <div className={printBusState ? 'print:hidden space-y-4' : 'space-y-4'}>
-              {renderTopBar('📅 الجدول الخاص بالكاهن (صلاة طشت / خطوبة / إكليل / رحلات ومؤتمرات)')}
+              {renderTopBar('📅 الجدول الخاص بالكاهن والدعوات الواردة')}
+
+              {/* صندوق دعوات المناسبات الواردة من الخدام والمخدومين وأولياء الأمور */}
+              {invitations.length > 0 && (
+                <div className="bg-amber-50 border-2 border-amber-300 p-4 rounded-3xl space-y-2.5">
+                  <strong className="text-sm font-black text-[#7a1c24] block">
+                    💌 دعوات المناسبات الواردة من الشعب والخدام وأولياء الأمور ({pendingInvitesCount} بانتظار الرد)
+                  </strong>
+                  <div className="grid md:grid-cols-2 gap-2.5">
+                    {invitations.map(inv => (
+                      <div key={inv.id} className="bg-white p-3.5 rounded-2xl border space-y-1.5 text-xs">
+                        <div className="flex justify-between items-start gap-2">
+                          <div>
+                            <span className="px-2 py-0.5 bg-purple-100 text-purple-950 rounded text-[10px] font-black ml-1.5">{inv.event_type}</span>
+                            <strong className="text-sm text-gray-900">{inv.title}</strong>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                            inv.status === 'مقبولة' ? 'bg-green-100 text-green-800' : inv.status === 'معتذر' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-900'
+                          }`}>{inv.status}</span>
+                        </div>
+                        <p className="text-gray-700">👤 من ({inv.sender_role}): <strong>{inv.sender_name}</strong> • 📞 {inv.sender_phone || '—'}</p>
+                        <p className="text-gray-600">📅 {inv.event_date} {inv.event_time && `• ⏰ ${inv.event_time}`} {inv.location && `• 📍 ${inv.location}`}</p>
+                        {inv.notes && <p className="text-gray-600">📝 {inv.notes}</p>}
+                        {inv.status === 'قيد الانتظار' && (
+                          <div className="flex gap-2 pt-1">
+                            <button type="button" onClick={() => handleRespondInvitation(inv, 'مقبولة')} className="flex-1 py-1.5 bg-green-700 text-white rounded-xl font-black cursor-pointer">
+                              قبول وإضافة للجدول ✅
+                            </button>
+                            <button type="button" onClick={() => handleRespondInvitation(inv, 'معتذر')} className="px-3 py-1.5 bg-red-50 text-red-700 rounded-xl font-bold cursor-pointer">
+                              اعتذار
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <form onSubmit={handleSavePersonal} className="bg-white p-5 rounded-3xl border space-y-3 font-bold">
                 <div className="grid md:grid-cols-3 gap-2.5">
