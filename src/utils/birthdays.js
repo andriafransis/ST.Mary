@@ -1,49 +1,73 @@
-export function getUpcomingBirthdays(users = [], families = []) {
+export function getUpcomingBirthdays(users = [], families = [], daysAhead = 14) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const checkDaysLeft = (dobStr) => {
-    if (!dobStr) return null;
-    const [, m, d] = dobStr.split('-').map(Number);
-    if (!m || !d) return null;
-    let next = new Date(today.getFullYear(), m - 1, d);
-    if (next < today) next = new Date(today.getFullYear() + 1, m - 1, d);
-    const diffDays = Math.round((next - today) / 86400000);
-    return diffDays >= 0 && diffDays <= 7 ? diffDays : null;
-  };
+  const candidates = [];
 
-  const results = [];
-  const seen = new Set();
+  if (Array.isArray(users)) {
+    for (const u of users) {
+      if (u?.dob) {
+        candidates.push({
+          id: u.id,
+          name: u.full_name || u.username || 'مخدوم',
+          dob: u.dob,
+          phone: u.phone || '',
+          stage: u.detailed_stage || u.service_stage || ''
+        });
+      }
+    }
+  }
 
-  users.forEach(u => {
-    const daysLeft = checkDaysLeft(u.dob);
-    if (daysLeft !== null && !seen.has(`${u.full_name}-${u.dob}`)) {
-      seen.add(`${u.full_name}-${u.dob}`);
-      results.push({
-        id: 'u_' + u.id,
-        name: u.full_name,
-        phone: u.phone || '',
-        dob: u.dob,
-        daysLeft,
-        label: u.role === 'member' ? 'مخدوم' : u.role === 'servant' ? `خادم ${u.service_stage}` : u.sector || 'عضو'
+  if (Array.isArray(families)) {
+    for (const fam of families) {
+      if (Array.isArray(fam?.children)) {
+        for (const ch of fam.children) {
+          if (ch?.dob) {
+            candidates.push({
+              id: ch.id,
+              name: ch.full_name || ch.name || 'ابن/ابنة',
+              dob: ch.dob,
+              phone: ch.phone || fam.phone || '',
+              stage: ch.stage || ''
+            });
+          }
+        }
+      }
+    }
+  }
+
+  const upcoming = [];
+
+  for (const item of candidates) {
+    const birthDate = new Date(item.dob);
+    if (Number.isNaN(birthDate.getTime())) continue;
+
+    const month = birthDate.getMonth();
+    const day = birthDate.getDate();
+
+    let nextBirthday = new Date(today.getFullYear(), month, day);
+    nextBirthday.setHours(0, 0, 0, 0);
+
+    if (nextBirthday < today) {
+      nextBirthday = new Date(today.getFullYear() + 1, month, day);
+      nextBirthday.setHours(0, 0, 0, 0);
+    }
+
+    const diffDays = Math.round((nextBirthday - today) / (1000 * 60 * 60 * 24));
+
+    if (diffDays >= 0 && diffDays <= daysAhead) {
+      const age = nextBirthday.getFullYear() - birthDate.getFullYear();
+      upcoming.push({
+        ...item,
+        daysRemaining: diffDays,
+        isToday: diffDays === 0,
+        upcomingAge: age,
+        nextBirthdayISO: nextBirthday.toISOString().split('T')[0]
       });
     }
-  });
+  }
 
-  families.forEach(f => {
-    const famDays = checkDaysLeft(f.dob);
-    if (famDays !== null && !seen.has(`${f.head_name}-${f.dob}`)) {
-      seen.add(`${f.head_name}-${f.dob}`);
-      results.push({
-        id: 'f_' + f.id,
-        name: f.head_name,
-        phone: f.phone || '',
-        dob: f.dob,
-        daysLeft: famDays,
-        label: 'رب أسرة'
-      });
-    }
-  });
-
-  return results.sort((a, b) => a.daysLeft - b.daysLeft);
+  return upcoming.sort((a, b) => a.daysRemaining - b.daysRemaining);
 }
+
+export default getUpcomingBirthdays;
