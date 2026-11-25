@@ -72,6 +72,16 @@ const parseDynamicEntry = (row) => {
   return { text: row.details || '', field_label: '', field_value: '' };
 };
 
+// يحوّل ناتج toCopticDate (object أو string) لنص آمن للعرض والحفظ
+const copticText = (value) => {
+  const c = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)
+    ? toCopticDate(value)
+    : value;
+  if (!c) return '';
+  if (typeof c === 'object') return c.formatted || `${c.day} ${c.monthName} ${c.year}`;
+  return String(c);
+};
+
 export default function DeaconSchedule({ deacons = [], currentUser, canEdit = false }) {
   const [activeCard, setActiveCard] = useState('hub');
   const [schedules, setSchedules] = useState([]);
@@ -114,7 +124,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
   const [savingKat, setSavingKat] = useState(false);
 
   const emptyForm = {
-    deacon_id: '', event_title: '', service_date: todayISO, coptic_date: toCopticDate(todayISO),
+    deacon_id: '', event_title: '', service_date: todayISO, coptic_date: copticText(todayISO),
     service_time: '07:00 ص', prayer_hour: 'القداس الإلهي', service_role: 'خادم مذبح ⛪',
     reading_reference: '', reading_text: '', notes: ''
   };
@@ -582,13 +592,13 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
   };
 
   const handleDateChange = (iso) => {
-    setForm({ ...form, service_date: iso, coptic_date: toCopticDate(iso) });
+    setForm({ ...form, service_date: iso, coptic_date: copticText(iso) });
   };
 
   const handleSaveSchedule = async (e) => {
     e.preventDefault();
     if (!canEdit) return;
-    const payload = { ...form, coptic_date: form.coptic_date || toCopticDate(form.service_date) };
+    const payload = { ...form, coptic_date: copticText(form.coptic_date) || copticText(form.service_date) };
     if (editingId) {
       const { id, created_at, ...clean } = payload;
       const { data, error } = await supabase.from('deacon_schedules').update(clean).eq('id', editingId).select().single();
@@ -665,7 +675,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
     const rawCards = [
       { id: 'schedule', icon: '📅', title: 'جدول التوزيع والخدمات', desc: canEdit ? 'توزيع الشمامسة على المذبح والقراءات' : 'عرض مواعيد خدمتك وتوزيعك (قراءة فقط)', count: `${displayedSchedules.length} ميعاد`, color: 'border-red-200 bg-white' },
       { id: 'agpeya', icon: '🙏', title: 'الأجبية المقدسة', desc: 'صلوات السواعي السبع وصلاة الستار والمقدمة', count: 'قراءة', color: 'border-blue-200 bg-white' },
-      { id: 'katameros', icon: '📖', title: 'القطمارس السنوي', desc: 'قراءات الـ 13 شهر قبطي والسنكسار والإنجيل', count: `${toCopticDate(todayISO)}`, color: 'border-amber-300 bg-white' },
+      { id: 'katameros', icon: '📖', title: 'القطمارس السنوي', desc: 'قراءات الـ 13 شهر قبطي والسنكسار والإنجيل', count: copticText(todayISO), color: 'border-amber-300 bg-white' },
       { id: 'liturgy', icon: '⛪', title: 'القداس الإلهي', desc: 'محتوى القداس الباسيلي والغريغوري والكيرلسي والقراءات', count: 'القداس', color: 'border-emerald-200 bg-white' },
       { id: 'euchologion', icon: '📘', title: 'كتاب الخولاجي', desc: 'رفع البخور والتحاليل والأواشي والقداسات والصلح والمجمع والطراحيم والبركات', count: 'الخولاجي', color: 'border-sky-200 bg-white' },
       { id: 'rituals', icon: '🕯️', title: 'الطقوس الكنسية الخاصة', desc: 'الطقس الحزايني، طقس صلوات اللقان، صلاة الثالث، والمعمودية', count: 'الطقوس', color: 'border-purple-200 bg-white' }
@@ -689,7 +699,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
           <div>
             <h2 className="text-xl font-black text-amber-200">🕯️ خورس الشمامسة والكتب الطقسية</h2>
             <p className="text-xs md:text-sm text-white/85 mt-1">
-              اليوم القبطي: <strong>{toCopticDate(todayISO)}</strong> {!canEdit && '• وضع القراءة والمتابعة فقط'}
+              اليوم القبطي: <strong>{copticText(todayISO)}</strong> {!canEdit && '• وضع القراءة والمتابعة فقط'}
             </p>
           </div>
         </div>
@@ -959,7 +969,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
             <div className="flex flex-wrap justify-between items-center gap-2">
               <h3 className="text-sm font-black text-[#7a1c24]">{editingId ? '✏️ تعديل توزيع الشماس' : 'توزيع الشمامسة والصلوات والقطمارس'}</h3>
               <span className="px-3 py-1 bg-amber-50 border border-amber-200 text-amber-950 rounded-full text-[11px]">
-                التقويم القبطي لليوم المختار: <strong>{form.coptic_date || toCopticDate(form.service_date)}</strong>
+                التقويم القبطي لليوم المختار: <strong>{copticText(form.coptic_date) || copticText(form.service_date)}</strong>
               </span>
             </div>
 
@@ -1009,7 +1019,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
                     <span className="mr-2 px-2 py-0.5 bg-blue-100 text-blue-900 rounded font-bold text-[10px]">{s.prayer_hour || 'القداس'}</span>
                     <span className="mr-2 px-2 py-0.5 bg-purple-100 text-purple-900 rounded font-bold text-[10px]">{s.service_role}</span>
                     <p className="text-gray-500 mt-1">
-                      ⛪ {s.event_title} • 📅 {s.service_date} (<strong className="text-amber-800">{s.coptic_date || toCopticDate(s.service_date)}</strong>) • ⏰ {s.service_time}
+                      ⛪ {s.event_title} • 📅 {s.service_date} (<strong className="text-amber-800">{copticText(s.coptic_date) || copticText(s.service_date)}</strong>) • ⏰ {s.service_time}
                     </p>
                   </div>
                   {canEdit && (
