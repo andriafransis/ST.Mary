@@ -4,35 +4,20 @@ import {
   requestMobileNotificationPermission,
   showMobileNotification
 } from '../lib/mobileNotifications';
-import { ArrowRight, BellRing, CheckCircle2, UserPlus, LogIn } from 'lucide-react';
+import { ArrowRight, BellRing, CheckCircle2 } from 'lucide-react';
 
 export const PENDING_APPROVAL_KEY = 'church_pending_approval_user';
 
 export default function LoginPage({
   onLogin,
-  onRegister,
   users = [],
   error,
   successMessage,
   onBackToPublic,
   churchName = 'كنيسة السيدة العذراء مريم بالمطرية'
 }) {
-  const [mode, setMode] = useState('login'); // 'login' | 'register'
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-
-  const [regForm, setRegForm] = useState({
-    full_name: '',
-    username: '',
-    password: '',
-    phone: '',
-    gender: 'ذكر',
-    dob: '',
-    role: 'member',
-    guardian_type: 'father',
-    detailed_stage: 'شعب عام'
-  });
-  const [regBusy, setRegBusy] = useState(false);
 
   const [pendingInfo, setPendingInfo] = useState(() => {
     try {
@@ -132,64 +117,33 @@ export default function LoginPage({
     setNotifPermission(res);
   };
 
-  const handleSubmitLogin = (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
     onLogin(username, password);
   };
 
-  const handleSubmitRegister = async (e) => {
-    e.preventDefault();
-    if (!onRegister) return;
-    setRegBusy(true);
-    try {
-      const ok = await onRegister({
-        ...regForm,
-        username: regForm.username.trim().toLowerCase(),
-        status: 'pending'
-      });
-      if (ok) {
-        const info = {
-          username: regForm.username.trim().toLowerCase(),
-          password: regForm.password,
-          full_name: regForm.full_name
-        };
-        setPendingInfo(info);
-        try {
-          localStorage.setItem(PENDING_APPROVAL_KEY, JSON.stringify(info));
-        } catch {
-          // ignore
-        }
-        setMode('login');
-      }
-    } finally {
-      setRegBusy(false);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-linear-to-br from-[#41090d] via-[#6f151c] to-[#1c0406] flex items-center justify-center p-4" dir="rtl">
-      <div className="bg-white rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl space-y-4">
+      <div className="bg-white rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl">
         {onBackToPublic && (
           <button
             type="button"
             onClick={onBackToPublic}
-            className="text-xs font-bold text-[#7a1c24] hover:underline flex items-center gap-1 cursor-pointer"
+            className="mb-3 text-xs font-bold text-[#7a1c24] hover:underline flex items-center gap-1 cursor-pointer"
           >
             <ArrowRight size={14} /> العودة لصفحة الكنيسة الرئيسية
           </button>
         )}
 
-        <div className="text-center">
-          <div className="w-16 h-16 bg-[#f9ecee] text-[#7a1c24] border border-[#ead0d3] rounded-2xl flex items-center justify-center text-3xl font-black mx-auto mb-3 shadow-inner">
-            ✝
-          </div>
-          <h1 className="text-xl font-black text-[#7a1c24]">{churchName}</h1>
-          <p className="text-xs text-gray-500 mt-1">تسجيل الدخول الموحد للآباء الكهنة، الخدام، والرعية</p>
+        <div className="w-16 h-16 bg-[#f9ecee] text-[#7a1c24] border border-[#ead0d3] rounded-2xl flex items-center justify-center text-3xl font-black mx-auto mb-3 shadow-inner">
+          ✝
         </div>
+        <h1 className="text-xl font-black text-center text-[#7a1c24]">{churchName}</h1>
+        <p className="text-xs text-gray-500 text-center mt-1 mb-6">تسجيل الدخول الموحد للآباء الكهنة، الخدام، والرعية</p>
 
         {/* كارت إشعار القبول الصريح باليوزر والباسورد */}
         {approvedNotice && (
-          <div className="p-4 bg-emerald-50 border-2 border-emerald-400 rounded-2xl space-y-2 text-xs">
+          <div className="mb-4 p-4 bg-emerald-50 border-2 border-emerald-400 rounded-2xl space-y-2 text-xs">
             <strong className="text-sm text-emerald-950 flex items-center gap-1.5 font-black">
               <CheckCircle2 size={17} className="text-emerald-700" /> مرحباً بك في الكنيسة! تم قبول حسابك 🎉
             </strong>
@@ -210,7 +164,7 @@ export default function LoginPage({
 
         {/* تنبيه انتظار الموافقة + زر تفعيل إشعار القبول على الموبايل */}
         {pendingInfo && !approvedNotice && (
-          <div className="p-3 bg-amber-50 border border-amber-300 rounded-2xl text-xs space-y-2 font-bold text-amber-950">
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-2xl text-xs space-y-2 font-bold text-amber-950">
             <p>⏳ حسابك (<strong>@{pendingInfo.username}</strong>) بانتظار موافقة الأب الكاهن أو أدمن الكنيسة.</p>
             {notifPermission === 'default' && (
               <button
@@ -224,148 +178,44 @@ export default function LoginPage({
           </div>
         )}
 
-        {onRegister && (
-          <div className="grid grid-cols-2 gap-1.5 bg-gray-100 p-1 rounded-2xl text-xs font-black">
-            <button
-              type="button"
-              onClick={() => setMode('login')}
-              className={`py-2 rounded-xl flex items-center justify-center gap-1 cursor-pointer ${
-                mode === 'login' ? 'bg-[#7a1c24] text-white' : 'text-gray-700'
-              }`}
-            >
-              <LogIn size={14} /> تسجيل الدخول
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('register')}
-              className={`py-2 rounded-xl flex items-center justify-center gap-1 cursor-pointer ${
-                mode === 'register' ? 'bg-[#7a1c24] text-white' : 'text-gray-700'
-              }`}
-            >
-              <UserPlus size={14} /> طلب انضمام جديد
-            </button>
-          </div>
-        )}
-
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl font-bold">
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl font-bold">
             {error}
           </div>
         )}
 
         {successMessage && (
-          <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl font-bold">
+          <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl font-bold">
             {successMessage}
           </div>
         )}
 
-        {mode === 'login' ? (
-          <form onSubmit={handleSubmitLogin} className="space-y-4 text-xs font-bold text-gray-700">
-            <div>
-              <label className="block mb-1">اسم المستخدم / Username</label>
-              <input
-                required
-                value={username}
-                onChange={e => setUsername(e.target.value)}
-                placeholder="اسم المستخدم"
-                className="w-full p-3 border rounded-xl outline-none focus:border-[#7a1c24]"
-              />
-            </div>
-            <div>
-              <label className="block mb-1">كلمة المرور / Password</label>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full p-3 border rounded-xl outline-none focus:border-[#7a1c24]"
-              />
-            </div>
-            <button type="submit" className="w-full py-3 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-bold text-sm shadow transition cursor-pointer">
-              تسجيل الدخول
-            </button>
-          </form>
-        ) : (
-          <form onSubmit={handleSubmitRegister} className="space-y-3 text-xs font-bold text-gray-700">
+        <form onSubmit={handleSubmit} className="space-y-4 text-xs font-bold text-gray-700">
+          <div>
+            <label className="block mb-1">اسم المستخدم / Username</label>
             <input
               required
-              placeholder="الاسم الرباعي بالكامل *"
-              className="w-full p-2.5 border rounded-xl"
-              value={regForm.full_name}
-              onChange={e => setRegForm({ ...regForm, full_name: e.target.value })}
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              placeholder="اسم المستخدم"
+              className="w-full p-3 border rounded-xl outline-none focus:border-[#7a1c24]"
             />
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                required
-                placeholder="اسم المستخدم للدخول *"
-                className="p-2.5 border rounded-xl"
-                value={regForm.username}
-                onChange={e => setRegForm({ ...regForm, username: e.target.value })}
-              />
-              <input
-                required
-                type="text"
-                placeholder="كلمة المرور *"
-                className="p-2.5 border rounded-xl"
-                value={regForm.password}
-                onChange={e => setRegForm({ ...regForm, password: e.target.value })}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                required
-                type="tel"
-                placeholder="رقم التليفون / الواتساب *"
-                className="p-2.5 border rounded-xl"
-                value={regForm.phone}
-                onChange={e => setRegForm({ ...regForm, phone: e.target.value })}
-              />
-              <input
-                type="date"
-                className="p-2.5 border rounded-xl"
-                value={regForm.dob}
-                onChange={e => setRegForm({ ...regForm, dob: e.target.value })}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <select
-                className="p-2.5 border rounded-xl bg-white"
-                value={regForm.gender}
-                onChange={e => setRegForm({ ...regForm, gender: e.target.value })}
-              >
-                <option value="ذكر">ذكر</option>
-                <option value="أنثى">أنثى</option>
-              </select>
-              <select
-                className="p-2.5 border rounded-xl bg-white"
-                value={regForm.role}
-                onChange={e => setRegForm({ ...regForm, role: e.target.value })}
-              >
-                <option value="member">مخدوم (شعب)</option>
-                <option value="parent">ولي أمر</option>
-                <option value="servant">خادم</option>
-              </select>
-            </div>
-            {regForm.role === 'parent' && (
-              <select
-                className="w-full p-2.5 border rounded-xl bg-blue-50/50"
-                value={regForm.guardian_type}
-                onChange={e => setRegForm({ ...regForm, guardian_type: e.target.value })}
-              >
-                <option value="father">ولي الأمر: الأب</option>
-                <option value="mother">ولي الأمر: الأم</option>
-              </select>
-            )}
-            <button
-              type="submit"
-              disabled={regBusy}
-              className="w-full py-3 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black text-sm shadow cursor-pointer"
-            >
-              {regBusy ? 'جاري إرسال الطلب...' : 'إرسال طلب الانضمام'}
-            </button>
-          </form>
-        )}
+          </div>
+          <div>
+            <label className="block mb-1">كلمة المرور / Password</label>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full p-3 border rounded-xl outline-none focus:border-[#7a1c24]"
+            />
+          </div>
+          <button type="submit" className="w-full py-3 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-bold text-sm shadow transition cursor-pointer">
+            تسجيل الدخول
+          </button>
+        </form>
       </div>
     </div>
   );
