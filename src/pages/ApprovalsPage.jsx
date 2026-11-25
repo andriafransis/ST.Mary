@@ -6,7 +6,7 @@ import {
   buildScreenPermissionsMap,
   extractAllowedScreensFromMap
 } from './PermissionsPage';
-import { CheckCircle2, XCircle, Clock, UserCheck, Shield } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, UserCheck, MessageCircle, X } from 'lucide-react';
 
 const STAGE_OPTIONS = [
   'حضانة', 'أولى ابتدائي', 'ثانية ابتدائي', 'ثالثة ابتدائي', 'رابعة ابتدائي', 'خامسة ابتدائي', 'سادسة ابتدائي',
@@ -28,6 +28,7 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
     }))
   );
   const [busyId, setBusyId] = useState(null);
+  const [approvedWelcomeBanner, setApprovedWelcomeBanner] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -81,6 +82,62 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
     if (u.family_role === 'أب' || u.family_role === 'والد') return 'father';
     if (u.family_role === 'أم' || u.family_role === 'والدة') return 'mother';
     return '';
+  };
+
+  const sendApprovalWelcomeNotification = async (user) => {
+    const welcomeText =
+      `سلام ونعمة يا ${user.full_name} ✝\n` +
+      `أنت مرحب بك في الكنيسة! تم قبول طلب انضمامك بنجاح 🎉\n` +
+      `بيانات الدخول الخاصة بك:\n` +
+      `• اسم المستخدم: ${user.username}\n` +
+      `• كلمة المرور: ${user.password || '123'}\n` +
+      `يمكنك تسجيل الدخول الآن والتمتع بخدمات الكنيسة 🙏`;
+
+    // 1) حفظ إشعار القبول الصريح باليوزر والباسورد في church_notifications
+    try {
+      await supabase.from('church_notifications').insert([{
+        user_id: user.id,
+        type: 'account_approved',
+        title: '🎉 تم قبولك! أنت مرحب بك في الكنيسة',
+        message: JSON.stringify({
+          user_id: user.id,
+          username: user.username,
+          password: user.password || '123',
+          full_name: user.full_name,
+          text: welcomeText
+        }),
+        reference_id: user.id,
+        is_read: false
+      }]);
+    } catch {
+      // ignore if notifications table differs
+    }
+
+    // 2) بث فوري (Realtime Broadcast) ليصل للمستخدم لو فاتح التطبيق أو شاشة الدخول
+    try {
+      const ch = supabase.channel('church-approval-alerts');
+      await ch.subscribe();
+      await ch.send({
+        type: 'broadcast',
+        event: 'account_approved',
+        payload: {
+          userId: user.id,
+          username: user.username,
+          password: user.password || '123',
+          full_name: user.full_name,
+          text: welcomeText
+        }
+      });
+      supabase.removeChannel(ch);
+    } catch {
+      // ignore broadcast errors
+    }
+
+    // 3) عرض كارت تأكيد للأدمن/الكاهن مع زر إرسال واتساب جاهز
+    setApprovedWelcomeBanner({
+      user,
+      text: welcomeText
+    });
   };
 
   const handleDecision = async (user, decision) => {
@@ -148,6 +205,9 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
       if (error) {
         alert('خطأ: ' + error.message);
       } else {
+        if (decision === 'approved') {
+          await sendApprovalWelcomeNotification(user);
+        }
         if (onRefresh) await onRefresh();
       }
     } finally {
@@ -163,10 +223,46 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
             <UserCheck size={20} /> طلبات الانضمام وتحديد الرتب وولي الأمر (أب/أم) وGroup Policy ({pendingUsers.length})
           </h2>
           <p className="text-xs text-gray-500">
-            حدد الرتبة، وهل ولي الأمر «أب» أم «أم»، وقالب الصلاحيات (Group Policy) ثم اضغط قبول
+            حدد الرتبة، وهل ولي الأمر «أب» أم «أم»، وقالب الصلاحيات (Group Policy) ثم اضغط قبول لإرسال إشعار الترحيب ببيانات الدخول
           </p>
         </div>
       </div>
+
+      {/* إشعار تأكيد القبول وإرسال بيانات الدخول للعضو */}
+      {approvedWelcomeBanner && (
+        <div className="bg-emerald-50 border-2 border-emerald-400 p-4 rounded-3xl shadow-sm space-y-2.5">
+          <div className="flex justify-between items-start gap-2">
+            <div>
+              <strong className="text-sm text-emerald-950 block">
+                ✅ تم قبول ({approvedWelcomeBanner.user.full_name}) وإرسال إشعار الترحيب ببيانات الدخول!
+              </strong>
+              <p className="text-xs text-emerald-900 mt-1 whitespace-pre-line font-bold bg-white/80 p-3 rounded-2xl border border-emerald-200">
+                {approvedWelcomeBanner.text}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setApprovedWelcomeBanner(null)}
+              className="p-1.5 bg-white rounded-xl text-gray-600 cursor-pointer"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          {approvedWelcomeBanner.user.phone && (
+            <div className="flex justify-end">
+              <a
+                href={`https://wa.me/2${String(approvedWelcomeBanner.user.phone).replace(/\D/g, '')}?text=${encodeURIComponent(approvedWelcomeBanner.text)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl font-black text-xs inline-flex items-center gap-1.5 shadow"
+              >
+                <MessageCircle size={15} /> إرسال رسالة الترحيب باليوزر والباسورد على واتساب ({approvedWelcomeBanner.user.phone})
+              </a>
+            </div>
+          )}
+        </div>
+      )}
 
       {pendingUsers.length === 0 ? (
         <div className="bg-white p-8 rounded-3xl border text-center text-gray-500 text-xs">
@@ -262,7 +358,7 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
                       <option value="">-- Group Policy (قالب الصلاحيات) --</option>
                       {templates.map(t => (
                         <option key={t.key} value={t.key}>
-                          <Shield size={12} /> {t.label}
+                          🛡️ {t.label}
                         </option>
                       ))}
                     </select>
