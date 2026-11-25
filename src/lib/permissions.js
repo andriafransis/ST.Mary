@@ -13,6 +13,7 @@ export const SCREEN_ORDER = [
   'trips_office',
   'deacons',
   'certs',
+  'social_status',
   'public_editor',
   'public_page'
 ];
@@ -33,6 +34,7 @@ export const SCREEN_LABELS = {
   trips_office: '🚌 مكتب الرحلات',
   deacons: '🕯️ جدول الشمامسة',
   certs: '📜 سجل الشهادات',
+  social_status: '👪 الحالة الاجتماعية والعمل',
   public_editor: '✏️ تعديل الصفحة العامة',
   public_page: '🌐 صفحة الكنيسة العامة'
 };
@@ -74,6 +76,7 @@ export const ROLE_DEFAULT_PERMISSIONS = {
       trips_office: { view: true, create: true, edit: true, delete: false },
       deacons: { view: true, create: true, edit: true, delete: false },
       certs: { view: true, create: true, edit: true, delete: false },
+      social_status: { view: true, create: false, edit: true, delete: false },
       public_editor: { view: true, create: true, edit: true, delete: false },
       public_page: { view: true, create: false, edit: false, delete: false }
     }
