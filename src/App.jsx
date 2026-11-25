@@ -1,8 +1,12 @@
-
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from './lib/supabase';
 import { startUserSession, endUserSession } from './lib/activityLogger';
 import { resolveScreens, getScreenAccess, SCREEN_LABELS, SCREEN_ORDER } from './lib/permissions';
+import {
+  updateAppIconBadge,
+  requestMobileNotificationPermission,
+  showMobileNotification
+} from './lib/mobileNotifications';
 import { getUpcomingBirthdays } from './utils/birthdays';
 import BirthdayBanner from './components/BirthdayBanner';
 import EducationalCenterManager from './components/EducationalCenterManager';
@@ -22,7 +26,7 @@ import MemberDashboard from './pages/MemberDashboard';
 import ParentDashboard from './pages/ParentDashboard';
 import DeaconSchedule from './pages/DeaconSchedule';
 import CertificatesRegistry from './pages/CertificatesRegistry';
-import { LogOut, Bell, GraduationCap, HeartHandshake, Menu, X } from 'lucide-react';
+import { LogOut, Bell, BellRing, GraduationCap, HeartHandshake, Menu, X } from 'lucide-react';
 
 const SAVED_USER_KEY = 'church_app_logged_user_id';
 const DEFAULT_CHURCH_NAME = 'كنيسة السيدة العذراء مريم بالمطرية';
@@ -33,7 +37,13 @@ const APP_SCREEN_LABELS = {
   hidden_families: '🕊️ خدمة الأسر المستترة'
 };
 
-const APP_SCREEN_ORDER = Array.from(new Set([...SCREEN_ORDER, 'hidden_families']));
+// ترتيب الشاشات بحيث تكون "طلبات الانضمام" ثاني تاب مباشرة بعد "لوحة الإدارة"
+const BASE_SCREEN_ORDER = Array.from(new Set([...SCREEN_ORDER, 'hidden_families']));
+const APP_SCREEN_ORDER = [
+  ...BASE_SCREEN_ORDER.filter(s => s === 'admin_panel'),
+  ...(BASE_SCREEN_ORDER.includes('approvals') ? ['approvals'] : []),
+  ...BASE_SCREEN_ORDER.filter(s => s !== 'admin_panel' && s !== 'approvals')
+];
 
 const ROLE_TEXT = {
   admin: '🛡️ سوبر أدمن الكنيسة',
@@ -139,11 +149,24 @@ export default function App() {
   const [priestPublicEvents, setPriestPublicEvents] = useState([]);
   const [childLinkRequests, setChildLinkRequests] = useState([]);
 
+  // حالات الإشعارات الفعلية للموبايل والـ Badge
+  const [unreadSystemNotifications, setUnreadSystemNotifications] = useState([]);
+  const [pendingInvitesList, setPendingInvitesList] = useState([]);
+  const [pendingJosephCount, setPendingJosephCount] = useState(0);
+  const [todayPriestBookingsCount, setTodayPriestBookingsCount] = useState(0);
+  const [notifPermission, setNotifPermission] = useState(() =>
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
+  );
+  const [showNotifSummary, setShowNotifSummary] = useState(false);
+
   const todayISO = new Date().toISOString().split('T')[0];
 
   const fetchData = async () => {
     try {
-      const [u, rs, tplRes, logoRes, stRes, f, a, n, e, srv, grpRes, cats, cc, act, mNotes, cs, pm, pps] = await Promise.all([
+      const [
+        u, rs, tplRes, logoRes, stRes, f, a, n, e, srv, grpRes, cats, cc, act, mNotes, cs, pm, pps,
+        allNotifsRes, invRes, jcRes, jmRes, todayBkRes
+      ] = await Promise.all([
         supabase.from('church_users').select('*').order('created_at', { ascending: true }),
         supabase.from('role_screens').select('*'),
         supabase.from('church_public_content').select('*').eq('kind', 'role_template').order('created_at', { ascending: true }),
@@ -161,7 +184,12 @@ export default function App() {
         supabase.from('servant_member_notes').select('*').order('created_at', { ascending: false }),
         supabase.from('priest_confession_slots').select('*').order('slot_date', { ascending: true }),
         supabase.from('priest_masses').select('*').order('mass_date', { ascending: true }),
-        supabase.from('priest_personal_schedule').select('*').eq('is_public', true).order('event_date', { ascending: true })
+        supabase.from('priest_personal_schedule').select('*').eq('is_public', true).order('event_date', { ascending: true }),
+        supabase.from('church_notifications').select('*').order('created_at', { ascending: false }).limit(100),
+        supabase.from('priest_invitations').select('id, priest_id, status, title, sender_name, event_date').eq('status', 'قيد الانتظار'),
+        supabase.from('joseph_arimathea_cases').select('id').eq('status', 'جديد / طارئ'),
+        supabase.from('joseph_memorial_requests').select('id').eq('status', 'معلق'),
+        supabase.from('confession_bookings').select('id, priest_id').eq('booking_date', todayISO).eq('status', 'محجوز')
       ]);
 
       const resolvedName = logoRes?.data?.title || stRes?.data?.church_name;
@@ -214,34 +242,36 @@ export default function App() {
       if (pm.data) setPriestMasses(pm.data);
       if (pps.data) setPriestPublicEvents(pps.data);
 
-      try {
-        const { data: linkReqs } = await supabase
-          .from('church_notifications')
-          .select('*')
-          .eq('type', 'child_link_request')
-          .order('created_at', { ascending: false });
-        if (linkReqs) {
-          const parsed = linkReqs.map(r => {
-            let meta = {};
-            try {
-              meta = r.message ? JSON.parse(r.message) : {};
-            } catch {
-              meta = {};
-            }
-            return {
-              id: r.id,
-              parent_id: r.user_id,
-              child_id: meta.child_id || r.reference_id,
-              child_name: meta.child_name || '',
-              guardian_type: meta.guardian_type || 'father',
-              status: meta.status || (r.is_read ? 'handled' : 'pending'),
-              created_at: r.created_at
-            };
-          });
-          setChildLinkRequests(parsed);
-        }
-      } catch {
-        // ignore
+      if (!invRes?.error && invRes?.data) setPendingInvitesList(invRes.data);
+      const jCasesCnt = !jcRes?.error && jcRes?.data ? jcRes.data.length : 0;
+      const jMemCnt = !jmRes?.error && jmRes?.data ? jmRes.data.length : 0;
+      setPendingJosephCount(jCasesCnt + jMemCnt);
+      if (!todayBkRes?.error && todayBkRes?.data) {
+        setTodayPriestBookingsCount(todayBkRes.data);
+      }
+
+      if (!allNotifsRes?.error && Array.isArray(allNotifsRes?.data)) {
+        setUnreadSystemNotifications(allNotifsRes.data.filter(r => !r.is_read));
+
+        const linkReqs = allNotifsRes.data.filter(r => r.type === 'child_link_request');
+        const parsed = linkReqs.map(r => {
+          let meta = {};
+          try {
+            meta = r.message ? JSON.parse(r.message) : {};
+          } catch {
+            meta = {};
+          }
+          return {
+            id: r.id,
+            parent_id: r.user_id,
+            child_id: meta.child_id || r.reference_id,
+            child_name: meta.child_name || '',
+            guardian_type: meta.guardian_type || 'father',
+            status: meta.status || (r.is_read ? 'handled' : 'pending'),
+            created_at: r.created_at
+          };
+        });
+        setChildLinkRequests(parsed);
       }
     } catch (err) {
       console.error('Database fetch error:', err);
@@ -262,6 +292,7 @@ export default function App() {
     if (!currentUser) {
       setActiveScreen('');
       setExtraScreen('');
+      updateAppIconBadge(0, churchName);
       return;
     }
     const { allowed } = getEffectiveAllowedSet(currentUser, roleScreens, roleTemplates);
@@ -269,6 +300,202 @@ export default function App() {
       setActiveScreen(getPostLoginScreen(currentUser, roleScreens, roleTemplates));
     }
   }, [currentUser, roleScreens, roleTemplates]);
+
+  // حساب إجمالي الإشعارات الفعلية لهذا المستخدم
+  const pendingCount = useMemo(() => users.filter(u => u.status === 'pending').length, [users]);
+
+  const myPendingChildRequests = useMemo(
+    () =>
+      currentUser
+        ? childLinkRequests.filter(r => r.parent_id === currentUser.id && r.status === 'pending')
+        : [],
+    [childLinkRequests, currentUser]
+  );
+
+  const notificationStats = useMemo(() => {
+    if (!currentUser) return { total: 0, items: [] };
+
+    const items = [];
+    const role = currentUser.role;
+
+    if (role === 'admin') {
+      if (pendingCount > 0) {
+        items.push({ label: `طلبات انضمام معلقة (${pendingCount})`, count: pendingCount, target: 'approvals' });
+      }
+      const hiddenReqs = unreadSystemNotifications.filter(n => n.type === 'hidden_family_edit_request').length;
+      if (hiddenReqs > 0) {
+        items.push({ label: `طلبات الأسر المستترة (${hiddenReqs})`, count: hiddenReqs, target: 'priest_panel' });
+      }
+      if (pendingInvitesList.length > 0) {
+        items.push({ label: `دعوات مناسبات معلقة (${pendingInvitesList.length})`, count: pendingInvitesList.length, target: 'priest_panel' });
+      }
+      if (pendingJosephCount > 0) {
+        items.push({ label: `تنبيهات يوسف الرامي (${pendingJosephCount})`, count: pendingJosephCount, extra: 'joseph_arimathea' });
+      }
+    } else if (role === 'priest') {
+      const myInvites = pendingInvitesList.filter(i => !i.priest_id || i.priest_id === currentUser.id).length;
+      if (myInvites > 0) {
+        items.push({ label: `دعوات مناسبات واردة (${myInvites})`, count: myInvites, target: 'priest_panel' });
+      }
+      const myTodayBookings = Array.isArray(todayPriestBookingsCount)
+        ? todayPriestBookingsCount.filter(b => b.priest_id === currentUser.id).length
+        : 0;
+      if (myTodayBookings > 0) {
+        items.push({ label: `حجوزات اعتراف اليوم (${myTodayBookings})`, count: myTodayBookings, target: 'priest_panel' });
+      }
+      if (pendingJosephCount > 0) {
+        items.push({ label: `طوارئ يوسف الرامي (${pendingJosephCount})`, count: pendingJosephCount, extra: 'joseph_arimathea' });
+      }
+      const hiddenReqs = unreadSystemNotifications.filter(n => n.type === 'hidden_family_edit_request').length;
+      if (hiddenReqs > 0) {
+        items.push({ label: `طلبات الأسر المستترة (${hiddenReqs})`, count: hiddenReqs, target: 'priest_panel' });
+      }
+    } else if (role === 'parent') {
+      if (myPendingChildRequests.length > 0) {
+        items.push({ label: `طلبات ربط أبناء (${myPendingChildRequests.length})`, count: myPendingChildRequests.length, target: 'parent_panel' });
+      }
+      const personalNotifs = unreadSystemNotifications.filter(
+        n => n.user_id === currentUser.id && n.type !== 'child_link_request'
+      ).length;
+      if (personalNotifs > 0) {
+        items.push({ label: `تنبيهات خاصة (${personalNotifs})`, count: personalNotifs, target: 'parent_panel' });
+      }
+    } else if (['head_servant', 'vice_head_servant', 'servant', 'meeting_servant', 'mercy_servant'].includes(role)) {
+      const unreadNotes = memberNotes.filter(n => !n.is_read && !n.acknowledged).length;
+      if (unreadNotes > 0) {
+        items.push({ label: `ملاحظات متابعة (${unreadNotes})`, count: unreadNotes, target: 'servant_panel' });
+      }
+      const personalNotifs = unreadSystemNotifications.filter(n => n.user_id === currentUser.id).length;
+      if (personalNotifs > 0) {
+        items.push({ label: `إشعارات الخدمة (${personalNotifs})`, count: personalNotifs, target: 'servant_panel' });
+      }
+    } else {
+      const personalNotifs = unreadSystemNotifications.filter(n => n.user_id === currentUser.id).length;
+      if (personalNotifs > 0) {
+        items.push({ label: `تنبيهات حسابك (${personalNotifs})`, count: personalNotifs, target: 'member_panel' });
+      }
+    }
+
+    const total = items.reduce((sum, x) => sum + x.count, 0);
+    return { total, items };
+  }, [
+    currentUser,
+    pendingCount,
+    unreadSystemNotifications,
+    pendingInvitesList,
+    pendingJosephCount,
+    todayPriestBookingsCount,
+    myPendingChildRequests,
+    memberNotes
+  ]);
+
+  const badgeCountRef = useRef(0);
+
+  // تحديث الرقم الفعلي على أيقونة التطبيق من بره + عنوان المتصفح باستمرار
+  useEffect(() => {
+    badgeCountRef.current = notificationStats.total;
+    if (currentUser) {
+      updateAppIconBadge(notificationStats.total, churchName);
+    }
+  }, [notificationStats.total, currentUser, churchName]);
+
+  // الاستماع اللحظي لإرسال إشعارات الموبايل الخارجية وتحديث الرقم على الأيقونة
+  useEffect(() => {
+    if (!currentUser?.id || typeof supabase.channel !== 'function') return;
+
+    const channel = supabase
+      .channel(`mobile-alerts-${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'church_users' },
+        async ({ new: newUser }) => {
+          await fetchData();
+          if (currentUser.role === 'admin' && newUser?.status === 'pending') {
+            await showMobileNotification({
+              title: '✅ طلب انضمام جديد',
+              body: `طلب جديد من: ${newUser.full_name}`,
+              badgeCount: badgeCountRef.current + 1,
+              icon: churchLogoUrl || '/pwa-192x192.png'
+            });
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'priest_invitations' },
+        async ({ new: inv }) => {
+          await fetchData();
+          if (
+            (currentUser.role === 'priest' && (!inv.priest_id || inv.priest_id === currentUser.id)) ||
+            currentUser.role === 'admin'
+          ) {
+            await showMobileNotification({
+              title: `💌 دعوة جديدة: ${inv.event_type}`,
+              body: `من ${inv.sender_name}: ${inv.title} (${inv.event_date})`,
+              badgeCount: badgeCountRef.current + 1,
+              icon: churchLogoUrl || '/pwa-192x192.png'
+            });
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'joseph_arimathea_cases' },
+        async ({ new: row }) => {
+          await fetchData();
+          if (currentUser.role === 'priest' || currentUser.role === 'admin') {
+            await showMobileNotification({
+              title: '🕊️ حالة طارئة — خدمة يوسف الرامي',
+              body: `المنتقل: ${row.deceased_name}`,
+              badgeCount: badgeCountRef.current + 1,
+              icon: churchLogoUrl || '/pwa-192x192.png'
+            });
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'church_notifications' },
+        async ({ new: notif }) => {
+          await fetchData();
+          if (!notif) return;
+          const isForMe =
+            notif.user_id === currentUser.id ||
+            (currentUser.role === 'admin' && ['hidden_family_edit_request', 'priest_invitation'].includes(notif.type)) ||
+            (currentUser.role === 'priest' && ['hidden_family_edit_request', 'priest_invitation'].includes(notif.type));
+          if (isForMe) {
+            await showMobileNotification({
+              title: notif.title || '🔔 إشعار جديد من الكنيسة',
+              body: notif.type === 'child_link_request' ? 'لديك طلب ربط ابن بانتظار موافقتك' : (notif.message || ''),
+              badgeCount: badgeCountRef.current + 1,
+              icon: churchLogoUrl || '/pwa-192x192.png'
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser?.id, currentUser?.role, churchLogoUrl]);
+
+  const handleEnableMobileNotifications = async () => {
+    const res = await requestMobileNotificationPermission();
+    setNotifPermission(res);
+    if (res === 'granted') {
+      await showMobileNotification({
+        title: `🔔 تم تفعيل إشعارات ${churchName}`,
+        body: notificationStats.total > 0
+          ? `لديك الآن (${notificationStats.total}) إشعارات بانتظار المتابعة`
+          : 'ستصلك إشعارات الكنيسة فوراً مع الرقم الفعلي على أيقونة التطبيق',
+        badgeCount: notificationStats.total,
+        icon: churchLogoUrl || '/pwa-192x192.png'
+      });
+    } else if (res === 'denied') {
+      alert('تم حظر الإشعارات من المتصفح. يمكنك تفعيلها من إعدادات الموقع في Chrome.');
+    }
+  };
 
   const handleLogin = async (username, password) => {
     setLoginError('');
@@ -301,6 +528,7 @@ export default function App() {
   const handleLogout = async () => {
     await endUserSession();
     localStorage.removeItem(SAVED_USER_KEY);
+    updateAppIconBadge(0, churchName);
     setCurrentUser(null);
     setAuthView('public');
     setActiveScreen('');
@@ -791,12 +1019,8 @@ export default function App() {
       u.father_id === currentUser.id ||
       u.mother_id === currentUser.id
   );
-  const myPendingChildRequests = childLinkRequests.filter(
-    r => r.parent_id === currentUser.id && r.status === 'pending'
-  );
   const priestFamilies = families.filter(f => f.priest_id === currentUser.id);
   const upcomingBirthdays = getUpcomingBirthdays(users, isPriest ? priestFamilies : families);
-  const pendingCount = users.filter(u => u.status === 'pending').length;
 
   const combinedAttendance = [
     ...attendance,
@@ -839,11 +1063,13 @@ export default function App() {
     setExtraScreen('');
     setActiveScreen(scr);
     setMobileMenuOpen(false);
+    setShowNotifSummary(false);
   };
 
   const selectExtra = (ext) => {
     setExtraScreen(ext);
     setMobileMenuOpen(false);
+    setShowNotifSummary(false);
   };
 
   return (
@@ -886,24 +1112,42 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
-              {myPendingChildRequests.length > 0 && (
+            <div className="flex items-center gap-1.5 shrink-0 relative">
+              {/* زر تفعيل إشعارات الموبايل (إذا لم تكن مفعلة بعد) */}
+              {notifPermission === 'default' && (
                 <button
                   type="button"
-                  onClick={() => selectScreen('parent_panel')}
-                  title="طلبات ربط أبناء تنتظر موافقتك"
-                  className="px-2.5 py-1.5 bg-amber-400 text-[#4a0e13] rounded-xl text-[11px] font-black flex items-center gap-1 shadow-xs cursor-pointer"
+                  onClick={handleEnableMobileNotifications}
+                  className="px-2.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-[10px] sm:text-[11px] font-black flex items-center gap-1 cursor-pointer shadow-xs"
+                  title="تفعيل وصول إشعارات التطبيق على الموبايل وظهور العدد على الأيقونة"
                 >
-                  <Bell size={13} /> طلب ربط ({myPendingChildRequests.length})
+                  <BellRing size={13} />
+                  <span className="hidden sm:inline">تفعيل إشعارات الموبايل</span>
+                  <span className="sm:hidden">تفعيل الإشعار</span>
                 </button>
               )}
+
+              {/* جرس الإشعارات الفعلي المربوط برقم الـ Badge الخارجي */}
+              <button
+                type="button"
+                onClick={() => setShowNotifSummary(prev => !prev)}
+                title="عرض ملخص الإشعارات الفعلية"
+                className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black flex items-center gap-1 shadow-xs cursor-pointer transition ${
+                  notificationStats.total > 0
+                    ? 'bg-amber-400 hover:bg-amber-300 text-[#4a0e13]'
+                    : 'bg-white/15 hover:bg-white/25 text-white'
+                }`}
+              >
+                <Bell size={14} />
+                <span>{notificationStats.total}</span>
+              </button>
 
               {!['member', 'parent', 'worker'].includes(currentUser.role) && upcomingBirthdays.length > 0 && (
                 <span
                   title="أعياد ميلاد قادمة"
-                  className="px-2 py-1.5 bg-amber-400 text-amber-950 rounded-xl text-[11px] font-black flex items-center gap-1 shadow-xs"
+                  className="hidden md:flex px-2 py-1.5 bg-white/15 text-amber-200 rounded-xl text-[11px] font-black items-center gap-1"
                 >
-                  <Bell size={13} /> {upcomingBirthdays.length}
+                  🎂 {upcomingBirthdays.length}
                 </span>
               )}
 
@@ -925,6 +1169,53 @@ export default function App() {
               >
                 {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
               </button>
+
+              {/* نافذة منبثقة بملخص الإشعارات الفعلية */}
+              {showNotifSummary && (
+                <div className="absolute left-0 top-12 w-72 sm:w-80 bg-white text-gray-900 rounded-2xl shadow-2xl border border-amber-300 p-3.5 space-y-2 z-50 text-xs">
+                  <div className="flex justify-between items-center border-b pb-2">
+                    <strong className="text-[#7a1c24] font-black">
+                      🔔 الإشعارات الحالية ({notificationStats.total})
+                    </strong>
+                    <button type="button" onClick={() => setShowNotifSummary(false)} className="text-gray-400 hover:text-gray-700 cursor-pointer">
+                      ✕
+                    </button>
+                  </div>
+
+                  {notifPermission === 'default' && (
+                    <button
+                      type="button"
+                      onClick={handleEnableMobileNotifications}
+                      className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-[11px] cursor-pointer"
+                    >
+                      📲 اضغط لتفعيل إشعارات الموبايل + رقم الأيقونة
+                    </button>
+                  )}
+
+                  {notificationStats.total === 0 ? (
+                    <p className="text-center text-gray-500 py-3 font-bold">لا توجد إشعارات معلقة حالياً ✅</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {notificationStats.items.map((item, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            if (item.extra) selectExtra(item.extra);
+                            else if (item.target) selectScreen(item.target);
+                          }}
+                          className="w-full p-2.5 bg-[#fbfaf7] hover:bg-amber-50 border border-gray-200 rounded-xl flex justify-between items-center font-bold text-right cursor-pointer"
+                        >
+                          <span>{item.label}</span>
+                          <span className="px-2 py-0.5 bg-[#7a1c24] text-white rounded-full text-[10px] font-black">
+                            {item.count}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -1155,7 +1446,7 @@ export default function App() {
           )}
 
           {!extraScreen && currentScr === 'certs' && (
-            <CertificatesRegistry users={users} onRefresh={fetchData} />
+            <CertificatesRegistry users={users} currentUser={currentUser} onRefresh={fetchData} />
           )}
 
           {!extraScreen && !currentScr && (
