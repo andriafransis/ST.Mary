@@ -248,8 +248,9 @@ export default function ParentDashboard({
   canManageLinks = true
 }) {
   const curYear = new Date().getFullYear();
+  const parentId = parent?.id || 'guest';
   const isMother = useMemo(() => detectParentIsMother(parent), [parent]);
-  const dismissedStorageKey = `parent_dismissed_children_${parent.id}`;
+  const dismissedStorageKey = `parent_dismissed_children_${parentId}`;
 
   const [activeTab, setActiveTab] = useState('children');
   const [phoneQuery, setPhoneQuery] = useState('');
@@ -267,6 +268,15 @@ export default function ParentDashboard({
       return [];
     }
   });
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(dismissedStorageKey);
+      setDismissedIds(saved ? JSON.parse(saved) : []);
+    } catch {
+      setDismissedIds([]);
+    }
+  }, [dismissedStorageKey]);
 
   useEffect(() => {
     if (!supabase || typeof supabase.from !== 'function') return;
@@ -330,8 +340,8 @@ export default function ParentDashboard({
   const displayedParentTrips = tripSubTab === 'general' ? generalTripsForParent : childrenTripsForParent;
 
   const candidatePool = useMemo(
-    () => allUsers.filter(u => u.id !== parent.id && !['admin', 'priest', 'parent'].includes(u.role)),
-    [allUsers, parent.id]
+    () => allUsers.filter(u => u.id !== parent?.id && !['admin', 'priest', 'parent'].includes(u.role)),
+    [allUsers, parent?.id]
   );
 
   const autoSuggestions = useMemo(() => {
@@ -485,7 +495,7 @@ export default function ParentDashboard({
       <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-base sm:text-xl font-black text-amber-200">أهلاً بحضرتك، {parent.full_name}</h2>
+            <h2 className="text-base sm:text-xl font-black text-amber-200">أهلاً بحضرتك، {parent?.full_name}</h2>
             <span className="px-2.5 py-0.5 rounded-full bg-white/15 text-amber-100 text-[11px] font-black">
               {isMother ? '👩 حساب ولي الأمر: الأم' : '👨 حساب ولي الأمر: الأب'}
             </span>
