@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { uploadChurchMedia } from '../lib/mediaUpload';
-import UserFormModal from './UserFormModal';
+import UserFormModal from '../components/UserFormModal';
 import {
   Church, Radio, Calendar, MapPin, Bus, Layers,
   LogIn, UserPlus, X, ExternalLink, Newspaper,
