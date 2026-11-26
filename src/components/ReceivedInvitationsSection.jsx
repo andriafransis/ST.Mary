@@ -41,12 +41,12 @@ function isInvitationStrictlyMine(row, currentUser) {
   const userId = String(currentUser.id || '').trim();
   const rowRecipientId = String(row.recipient_user_id || '').trim();
 
-  // إذا كانت الدعوة مرتبطة بـ user_id محدد، يجب أن تطابقه بالضبط ولا تظهر لغيره
+  // إذا كانت الدعوة مرتبطة بـ recipient_user_id محدد، يجب أن تطابقه بالضبط ولا تظهر لغيره
   if (rowRecipientId) {
     return Boolean(userId) && rowRecipientId === userId;
   }
 
-  // في حال عدم وجود recipient_user_id، نتحقق من تطابق التليفون أو الاسم الكامل بدقة
+  // عند غياب recipient_user_id، نطابق رقم التليفون الموحد أو الاسم الكامل بدقة فقط
   const userPhones = [
     currentUser.phone,
     currentUser.father_phone,
@@ -220,7 +220,7 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
       const { data, error } = await supabase
         .from('church_invitations')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: true });
 
       if (!error && Array.isArray(data)) {
         const strictlyMine = data.filter((row) => isInvitationStrictlyMine(row, currentUser));
@@ -299,7 +299,7 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
             <Ticket size={17} /> دعواتي وكود الـ QR ({myInvites.length})
           </h3>
           <p className="text-[11px] text-gray-500 font-bold mt-0.5">
-            تظهر هنا الدعوات الموجهة باسمك وحسابك فقط ولا تظهر لأي شخص آخر.
+            تظهر هنا الدعوات الموجهة باسمك وحسابك فقط ومرتبة من الترتيب رقم 1.
           </p>
         </div>
 
@@ -329,7 +329,8 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-          {myInvites.map((inv) => {
+          {myInvites.map((inv, index) => {
+            const serialNumber = index + 1;
             const isVip = inv.invite_tier === 'vip';
             const isChecked = inv.status === 'checked_in';
 
@@ -345,6 +346,9 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                      <span className="px-2 py-0.5 rounded-lg bg-[#7a1c24] text-white text-[10px] font-black">
+                        #{serialNumber}
+                      </span>
                       <span
                         className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black inline-flex items-center gap-1 ${
                           isVip
@@ -360,7 +364,7 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
                       </span>
                     </div>
                     <strong className="text-sm sm:text-base font-black text-gray-900">
-                      {inv.event_title}
+                      {serialNumber}. {inv.event_title}
                     </strong>
                     {inv.recipient_name && (
                       <p className="text-[11px] text-gray-600 font-bold mt-0.5">
