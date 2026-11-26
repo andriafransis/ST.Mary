@@ -8,14 +8,14 @@ import {
 } from './PermissionsPage';
 import { CheckCircle2, XCircle, Clock, UserCheck, MessageCircle, X, ShieldCheck, Baby } from 'lucide-react';
 
-const STAGE_OPTIONS = [
+const FALLBACK_STAGE_OPTIONS = [
   'حضانة', 'أولى ابتدائي', 'ثانية ابتدائي', 'ثالثة ابتدائي', 'رابعة ابتدائي', 'خامسة ابتدائي', 'سادسة ابتدائي',
   'أولى إعدادي', 'ثانية إعدادي', 'ثالثة إعدادي',
   'أولى ثانوي', 'ثانية ثانوي', 'ثالثة ثانوي',
   'جامعة وخريجين', 'اجتماع الشباب', 'اجتماع الأسرة', 'اجتماع الصالة', 'شعب عام', 'عام'
 ];
 
-export default function ApprovalsPage({ users = [], services = [], onRefresh }) {
+export default function ApprovalsPage({ users = [], services = [], groups = [], onRefresh }) {
   const [roleOverrides, setRoleOverrides] = useState({});
   const [parentTypeOverrides, setParentTypeOverrides] = useState({});
   const [templateOverrides, setTemplateOverrides] = useState({});
@@ -24,6 +24,7 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
   const [serviceStatusOverrides, setServiceStatusOverrides] = useState({});
   const [serviceConfirmedOverrides, setServiceConfirmedOverrides] = useState({});
   const [childLinkOverrides, setChildLinkOverrides] = useState({});
+  const [dbGroups, setDbGroups] = useState([]);
   const [templates, setTemplates] = useState(() =>
     DEFAULT_ROLE_TEMPLATES.map(t => ({
       ...t,
@@ -32,6 +33,24 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
   );
   const [busyId, setBusyId] = useState(null);
   const [approvedWelcomeBanner, setApprovedWelcomeBanner] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('service_groups')
+          .select('*')
+          .order('sort_order', { ascending: true });
+        if (active && !error && Array.isArray(data)) {
+          setDbGroups(data);
+        }
+      } catch {
+        // ignore if service_groups is not created yet
+      }
+    })();
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -72,6 +91,26 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
     })();
     return () => { active = false; };
   }, []);
+
+  const databaseServicesAndMeetings = (() => {
+    const combinedGroups = [
+      ...(Array.isArray(groups) ? groups : []),
+      ...(Array.isArray(dbGroups) ? dbGroups : [])
+    ];
+
+    const groupNames = combinedGroups.map(g => g?.group_name).filter(Boolean);
+    const groupStages = combinedGroups.flatMap(g => {
+      const st = g?.stages;
+      if (Array.isArray(st)) return st;
+      return String(st || '').split(/[,،]/).map(s => s.trim()).filter(Boolean);
+    });
+    const serviceStageNames = (Array.isArray(services) ? services : [])
+      .map(s => s?.stage_name)
+      .filter(Boolean);
+
+    const fromDb = [...new Set([...groupNames, ...groupStages, ...serviceStageNames])];
+    return fromDb.length > 0 ? fromDb : FALLBACK_STAGE_OPTIONS;
+  })();
 
   const pendingUsers = users.filter(u => u.status === 'pending');
   const recentUsers = users.filter(u => u.status === 'rejected').slice(0, 10);
@@ -263,7 +302,6 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
       if (error) {
         alert('خطأ: ' + error.message);
       } else {
-        // ربط الطفل / الابن المختار بولي الأمر من الداخل عند القبول
         if (decision === 'approved' && selectedChildId) {
           const childObj = candidateChildren.find(c => String(c.id) === String(selectedChildId));
           if (childObj) {
@@ -382,7 +420,6 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
                       <strong className="text-base text-gray-900">{u.full_name}</strong>
                       <span className="text-xs text-gray-500">(@{u.username})</span>
 
-                      {/* حالة التواجد في الخدمة */}
                       <span className={`px-2 py-0.5 rounded text-[11px] font-black ${
                         isOutOfService
                           ? 'bg-slate-200 text-slate-900'
@@ -432,7 +469,6 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
                   </div>
                 </div>
 
-                {/* سطر تأكيد الخدمة ونوع الارتباط */}
                 <div className="bg-cyan-50/60 border border-cyan-200 rounded-2xl p-3 grid sm:grid-cols-3 gap-2 items-center">
                   <div>
                     <label className="block text-[11px] font-black text-cyan-950 mb-1">
@@ -445,14 +481,14 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
                     >
                       <option value="in_service">✅ معانا في خدمة محددة</option>
                       <option value="parish_only">⛪ معانا في خدمة شعب فقط</option>
-                      <option value="hall_meeting">🏛️ معانا في اجتماع الصلاة</option>
+                      <option value="hall_meeting">🏛️ معانا في اجتماع الصالة</option>
                       <option value="not_in_service">🚪 مش معانا في الخدمة / زائر موقع (Click Out)</option>
                     </select>
                   </div>
 
                   <div>
                     <label className="block text-[11px] font-black text-cyan-950 mb-1">
-                      خدمة إيه؟ (المرحلة / الخدمة)
+                      خدمة إيه؟ (من الداتابيز)
                     </label>
                     <select
                       disabled={isOutOfService}
@@ -460,8 +496,10 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
                       value={isOutOfService ? '' : selectedStage}
                       onChange={e => setStageOverrides({ ...stageOverrides, [u.id]: e.target.value })}
                     >
-                      <option value="">{isOutOfService ? 'خارج الخدمة' : '-- اختر الخدمة / المرحلة --'}</option>
-                      {STAGE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                      <option value="">{isOutOfService ? 'خارج الخدمة' : '-- اختر الخدمة أو الاجتماع --'}</option>
+                      {databaseServicesAndMeetings.map((s, idx) => (
+                        <option key={`${s}-${idx}`} value={s}>{s}</option>
+                      ))}
                     </select>
                   </div>
 
@@ -481,7 +519,6 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
                   </div>
                 </div>
 
-                {/* ربط ولي الأمر بالطفل / الابن من الداخل */}
                 {showParentSelector && (
                   <div className="bg-blue-50/60 border border-blue-200 rounded-2xl p-3 grid sm:grid-cols-2 gap-2 items-center">
                     <div>
