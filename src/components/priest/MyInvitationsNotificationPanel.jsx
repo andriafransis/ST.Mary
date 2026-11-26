@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../lib/supabase';
 import InvitationQrCard from './InvitationQrCard';
 import { Bell, Crown, Users, QrCode, CheckCircle2, Calendar, MapPin } from 'lucide-react';
 
@@ -30,7 +30,6 @@ export default function MyInvitationsNotificationPanel({ currentUser }) {
     loadMyInvitations();
   }, [currentUser?.id]);
 
-  // تحديث فوري عند فتح البطاقة أو إغلاقها تحسباً لتغيّر حالة الدخول
   const handleCloseCard = async () => {
     setActiveInvite(null);
     await loadMyInvitations();
