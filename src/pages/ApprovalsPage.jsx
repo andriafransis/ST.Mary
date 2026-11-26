@@ -445,7 +445,7 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
                     >
                       <option value="in_service">✅ معانا في خدمة محددة</option>
                       <option value="parish_only">⛪ معانا في خدمة شعب فقط</option>
-                      <option value="hall_meeting">🏛️ معانا في اجتماع الصالة</option>
+                      <option value="hall_meeting">🏛️ معانا في اجتماع الصلاة</option>
                       <option value="not_in_service">🚪 مش معانا في الخدمة / زائر موقع (Click Out)</option>
                     </select>
                   </div>
