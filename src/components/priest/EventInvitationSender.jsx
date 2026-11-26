@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { supabase } from '../../lib/supabase';
-import { logActivity } from '../lib/activityLogger';
+import { logActivity } from '../../lib/activityLogger';
 import {
   Send,
   Crown,
