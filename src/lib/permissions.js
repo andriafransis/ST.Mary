@@ -62,7 +62,7 @@ export const CATEGORY_PRESETS = {
     baseRole: 'member',
     defaultScreen: 'member_panel',
     screens: ['public_page', 'member_panel', 'edu_center', 'trips_office', 'deacons'],
-    actions: { view: true, create: false, edit: false, delete: false }
+    actions: { view: true, create: false, edit: false, delete: false, send_invitations: false }
   },
   parent: {
     key: 'parent',
@@ -70,7 +70,7 @@ export const CATEGORY_PRESETS = {
     baseRole: 'parent',
     defaultScreen: 'parent_panel',
     screens: ['public_page', 'parent_panel', 'member_panel', 'edu_center', 'trips_office', 'deacons'],
-    actions: { view: true, create: false, edit: false, delete: false }
+    actions: { view: true, create: false, edit: false, delete: false, send_invitations: false }
   },
   servant: {
     key: 'servant',
@@ -88,7 +88,7 @@ export const CATEGORY_PRESETS = {
       'social_status',
       'public_page'
     ],
-    actions: { view: true, create: true, edit: true, delete: false }
+    actions: { view: true, create: true, edit: true, delete: false, send_invitations: false }
   },
   head_servant: {
     key: 'head_servant',
@@ -110,7 +110,7 @@ export const CATEGORY_PRESETS = {
       'public_editor',
       'public_page'
     ],
-    actions: { view: true, create: true, edit: true, delete: true }
+    actions: { view: true, create: true, edit: true, delete: true, send_invitations: true }
   },
   priest: {
     key: 'priest',
@@ -133,7 +133,7 @@ export const CATEGORY_PRESETS = {
       'public_editor',
       'public_page'
     ],
-    actions: { view: true, create: true, edit: true, delete: false }
+    actions: { view: true, create: true, edit: true, delete: false, send_invitations: true }
   },
   admin: {
     key: 'admin',
@@ -141,7 +141,7 @@ export const CATEGORY_PRESETS = {
     baseRole: 'admin',
     defaultScreen: 'admin_panel',
     screens: SCREEN_ORDER,
-    actions: { view: true, create: true, edit: true, delete: true }
+    actions: { view: true, create: true, edit: true, delete: true, send_invitations: true }
   }
 };
 
@@ -397,4 +397,31 @@ export function resolveScreens(user, roleScreens = [], policies = []) {
 
 export function getScreenAccess(user, screenKey, roleScreens = [], policies = []) {
   return getDetailedScreenPermissions(user, screenKey, roleScreens, policies);
+}
+
+// صلاحية إرسال الدعوات: للأدمن، أو الكاهن، أو أمين الخدمة، أو أي خادم/مستخدم مُفعّل له الصلاحية
+export function canSendChurchInvitations(user, policies = []) {
+  if (!user) return false;
+  if (user.permissions?.read_only === true) return false;
+  if (user.role === 'admin' || user.role === 'priest' || user.role === 'head_servant') {
+    return true;
+  }
+
+  const perms = user.permissions || {};
+  if (
+    perms.can_send_invitations === true ||
+    perms.actions?.send_invitations === true ||
+    user.can_send_invitations === true
+  ) {
+    return true;
+  }
+
+  if (Array.isArray(policies) && policies.length > 0) {
+    const { mergedActions } = mergeUserPolicies(user, policies);
+    if (mergedActions.send_invitations === true || mergedActions.can_send_invitations === true) {
+      return true;
+    }
+  }
+
+  return false;
 }
