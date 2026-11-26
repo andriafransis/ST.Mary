@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
+import PriestInvitationTab from '../components/priest/PriestInvitationTab';
 import { startUserSession, logActivity } from '../lib/activityLogger';
 import {
   loadAdminCardsConfig,
