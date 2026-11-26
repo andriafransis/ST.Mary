@@ -4,7 +4,7 @@ import { logActivity } from '../../lib/activityLogger';
 import {
   Users, Plus, Search, Edit3, Trash2, Printer, MessageCircle,
   Calendar, MapPin, Phone, Briefcase, GraduationCap, Heart, X,
-  UserPlus, Link2, RefreshCw, GitBranch, Network
+  UserPlus, Link2, RefreshCw, GitBranch, Network, ChevronDown, ChevronUp, FileSpreadsheet
 } from 'lucide-react';
 
 const MARITAL_STATUS_OPTIONS = ['متزوج', 'متزوجة', 'أعزب', 'آنسة', 'أرمل', 'أرملة', 'مطلق/ة'];
@@ -57,7 +57,6 @@ const extractUserAddress = (u) => {
     .map(v => (typeof v === 'string' ? v.trim() : ''))
     .filter(Boolean);
 
-  // إزالة التكرار لو العنوان أصلاً يحتوي على المنطقة
   const uniqueParts = [];
   for (const p of parts) {
     const pNorm = normalizeArabic(p);
@@ -725,6 +724,9 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   const [searchQ, setSearchQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
+  // التحكم في فتح/طي الكروت الصغيرة
+  const [expandedCards, setExpandedCards] = useState({});
+
   const [showForm, setShowForm] = useState(false);
   const [editingSavedId, setEditingSavedId] = useState(null);
   const [form, setForm] = useState(emptyFamilyForm);
@@ -738,6 +740,10 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   const [linkModalFam, setLinkModalFam] = useState(null);
   const [linkSearchQ, setLinkSearchQ] = useState('');
   const [linkBusy, setLinkBusy] = useState(false);
+
+  const toggleCardExpand = (id) => {
+    setExpandedCards(prev => ({ ...prev, [id]: !prev[id] }));
+  };
 
   useEffect(() => {
     if (Array.isArray(passedUsers) && passedUsers.length > 0) {
@@ -945,23 +951,35 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           description: `ربط الزوجين ومصاهرة الأسرتين: (${getDisplayQuadName(primaryUser)}) و(${getDisplayQuadName(targetUser)})`
         });
       } else if (relationType === 'father') {
-        await supabase
-          .from('church_users')
-          .update({
-            father_id: targetUser.id,
-            father_full_name: getDisplayQuadName(targetUser),
-            father_phone: targetUser.phone || ''
-          })
-          .eq('id', primaryUser.id);
+        await Promise.all([
+          supabase
+            .from('church_users')
+            .update({
+              father_id: targetUser.id,
+              father_full_name: getDisplayQuadName(targetUser),
+              father_phone: targetUser.phone || ''
+            })
+            .eq('id', primaryUser.id),
+          supabase
+            .from('church_users')
+            .update({ marital_status: 'متزوج' })
+            .eq('id', targetUser.id)
+        ]);
       } else if (relationType === 'mother') {
-        await supabase
-          .from('church_users')
-          .update({
-            mother_id: targetUser.id,
-            mother_full_name: getDisplayQuadName(targetUser),
-            mother_phone: targetUser.phone || ''
-          })
-          .eq('id', primaryUser.id);
+        await Promise.all([
+          supabase
+            .from('church_users')
+            .update({
+              mother_id: targetUser.id,
+              mother_full_name: getDisplayQuadName(targetUser),
+              mother_phone: targetUser.phone || ''
+            })
+            .eq('id', primaryUser.id),
+          supabase
+            .from('church_users')
+            .update({ marital_status: 'متزوجة' })
+            .eq('id', targetUser.id)
+        ]);
       } else if (relationType === 'child') {
         const isPrimaryFemale = primaryUser.gender === 'أنثى';
         const patch = {
@@ -995,9 +1013,66 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       await loadData();
       setLinkModalFam(null);
       setLinkSearchQ('');
-      alert('تم ربط الأسرة وتسلسلها وعلاقات المصاهرة في قاعدة البيانات بنجاح ✅');
+      alert('تم ربط الأسرة وتحديث قاعدة البيانات بنجاح ✅');
     } finally {
       setLinkBusy(false);
+    }
+  };
+
+  // تحديث بيانات الأفراد المربوطين في جدول church_users نفسه عند حفظ التعديل
+  const syncEditedPeopleBackToChurchUsers = async (familyData) => {
+    const updates = [];
+    const sharedAddress = (familyData.address || '').trim();
+    const sharedHousing = familyData.housing_type || 'تمليك';
+
+    const syncOne = (personObj, roleType) => {
+      if (!personObj?.user_id) return;
+      const patch = {
+        marital_status: resolveMaritalStatusForRole(personObj.marital_status, roleType, true)
+      };
+      if (personObj.full_name?.trim()) patch.full_name = personObj.full_name.trim();
+      if (personObj.dob) patch.dob = personObj.dob;
+      if (personObj.job_title?.trim()) patch.job_title = personObj.job_title.trim();
+      if (personObj.phone?.trim()) patch.phone = personObj.phone.trim();
+      if (sharedAddress) patch.address = sharedAddress;
+      if (roleType === 'husband' || roleType === 'wife') {
+        patch.housing_type = sharedHousing;
+      }
+
+      updates.push(
+        supabase
+          .from('church_users')
+          .update(patch)
+          .eq('id', personObj.user_id)
+      );
+    };
+
+    syncOne(familyData.husband, 'husband');
+    syncOne(familyData.wife, 'wife');
+    syncOne(familyData.father, 'father');
+    syncOne(familyData.mother, 'mother');
+
+    if (Array.isArray(familyData.children)) {
+      familyData.children.forEach(c => {
+        if (!c?.user_id) return;
+        const cPatch = {};
+        if (c.full_name?.trim()) cPatch.full_name = c.full_name.trim();
+        if (c.dob) cPatch.dob = c.dob;
+        if (c.marital_status) cPatch.marital_status = c.marital_status;
+        if (c.job_title?.trim()) cPatch.job_title = c.job_title.trim();
+        if (c.phone?.trim()) cPatch.phone = c.phone.trim();
+        if (sharedAddress) cPatch.address = sharedAddress;
+        updates.push(
+          supabase
+            .from('church_users')
+            .update(cPatch)
+            .eq('id', c.user_id)
+        );
+      });
+    }
+
+    if (updates.length > 0) {
+      await Promise.all(updates);
     }
   };
 
@@ -1030,6 +1105,9 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         updated_at: new Date().toISOString()
       };
 
+      // مزامنة التعديلات في قاعدة بيانات الأفراد (church_users)
+      await syncEditedPeopleBackToChurchUsers(payload);
+
       if (editingSavedId) {
         const { data, error } = await supabase
           .from('priest_family_visitations')
@@ -1039,16 +1117,12 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           .single();
         if (error) return alert('تعذر التعديل: ' + error.message);
         if (data) {
-          setSavedRecords(prev => prev.map(r => (r.id === editingSavedId ? data : r)));
-          if (selectedFamily?.savedId === editingSavedId) {
-            setSelectedFamily({ ...selectedFamily, ...data, savedId: data.id, hasSavedRecord: true });
-          }
           logActivity({
             user: priest,
             actionType: 'تعديل_ملف_افتقاد_أسرة',
             targetTable: 'priest_family_visitations',
             targetId: data.id,
-            description: `عدل ملف افتقاد أسرة: ${data.family_title}`
+            description: `عدل ملف افتقاد أسرة وحدث الداتابيز: ${data.family_title}`
           });
         }
       } else {
@@ -1059,17 +1133,17 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           .single();
         if (error) return alert('تعذر الحفظ: ' + error.message);
         if (data) {
-          setSavedRecords(prev => [data, ...prev]);
           logActivity({
             user: priest,
             actionType: 'إضافة_ملف_افتقاد_أسرة',
             targetTable: 'priest_family_visitations',
             targetId: data.id,
-            description: `أضاف ملف افتقاد أسرة: ${data.family_title}`
+            description: `أضاف ملف افتقاد أسرة وحدث الداتابيز: ${data.family_title}`
           });
         }
       }
 
+      await loadData();
       setShowForm(false);
       setEditingSavedId(null);
       setForm(emptyFamilyForm);
@@ -1206,6 +1280,76 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       [roleKey]: { ...prev[roleKey], ...patch }
     }));
     setUserLookupQ('');
+  };
+
+  // تصدير شيت إكسيل (CSV UTF-8 مع BOM يفتح مباشرة بالعربي في Excel)
+  const handleExportExcelSheet = () => {
+    const headers = [
+      'م',
+      'اسم الأسرة / رب الأسرة',
+      'بيانات الزوج (السن / الوظيفة / الموبايل)',
+      'الزوجة (البيانات والموبايل)',
+      'الوالد / الوالدة',
+      'الأبناء',
+      'العنوان والمنطقة',
+      'السكن',
+      'الحالة الأسرية',
+      'عدد الزيارات',
+      'آخر زيارة وملاحظات'
+    ];
+
+    const escapeCsv = (val) => `"${String(val || '').replace(/"/g, '""')}"`;
+
+    const rows = filteredRecords.map((fam, index) => {
+      const hInfo = fam.husband?.full_name
+        ? `${fam.husband.full_name} (${calcAge(fam.husband.dob)} - ${fam.husband.job_title || '—'} - ${fam.husband.phone || '—'})`
+        : '—';
+      const wInfo = fam.wife?.full_name
+        ? `${fam.wife.full_name} (${calcAge(fam.wife.dob)} - ${fam.wife.job_title || '—'} - ${fam.wife.phone || '—'})`
+        : '—';
+      const parentsInfo = [
+        fam.father?.full_name ? `الوالد: ${fam.father.full_name}` : '',
+        fam.mother?.full_name ? `الوالدة: ${fam.mother.full_name}` : ''
+      ]
+        .filter(Boolean)
+        .join(' | ') || '—';
+
+      const kidsInfo =
+        Array.isArray(fam.children) && fam.children.length > 0
+          ? fam.children.map(k => `${k.full_name} (${calcAge(k.dob)})`).join(' ، ')
+          : '—';
+
+      const addr = fam.address || fam.husband?.address || fam.wife?.address || 'غير مسجل';
+      const visits = Array.isArray(fam.visitations_log) ? fam.visitations_log : [];
+      const lastVisit = visits[0] ? `${visits[0].visit_date}: ${visits[0].summary}` : fam.notes || '—';
+
+      return [
+        index + 1,
+        fam.family_title,
+        hInfo,
+        wInfo,
+        parentsInfo,
+        kidsInfo,
+        addr,
+        fam.housing_type || 'تمليك',
+        fam.family_status || 'مستقرة',
+        visits.length,
+        lastVisit
+      ]
+        .map(escapeCsv)
+        .join(',');
+    });
+
+    const csvContent = '\uFEFF' + [headers.map(escapeCsv).join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `كشف_افتقاد_الأسر_${todayISO}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const priestOnlyCount = useMemo(
@@ -1351,13 +1495,27 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
   return (
     <div className="space-y-4 text-xs" dir="rtl">
+      {/* إعدادات طباعة شيت الافتقاد بالعرض (Landscape Table) */}
+      <style>{`
+        @media print {
+          @page {
+            size: landscape;
+            margin: 10mm;
+          }
+          body {
+            background: white !important;
+          }
+        }
+      `}</style>
+
+      {/* شريط التحكم العلوي (يختفي عند الطباعة) */}
       <div className="bg-white p-4 rounded-3xl border border-gray-200 shadow-2xs flex flex-wrap justify-between items-center gap-3 print:hidden">
         <div>
           <h3 className="text-sm sm:text-base font-black text-[#7a1c24] flex items-center gap-1.5">
             <Users size={18} /> سجل افتقاد أسر ومخدومي الأب الكاهن ({unifiedFamilies.length} أسرة متصلة)
           </h3>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            ربط تلقائي ذكي من قاعدة بيانات الأفراد بالتسلسل العائلي (الأب والأم ← الأبناء ← روابط المصاهرة والنسب بين الأسر)
+            كروت مدمجة ذكية (اضغط على أي أسرة لفتح التفاصيل) • مزامنة فورية مع قاعدة بيانات الأفراد
           </p>
         </div>
 
@@ -1367,14 +1525,21 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             onClick={loadData}
             className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl font-black flex items-center gap-1 cursor-pointer"
           >
-            <RefreshCw size={14} /> تحديث الربط
+            <RefreshCw size={14} /> تحديث
+          </button>
+          <button
+            type="button"
+            onClick={handleExportExcelSheet}
+            className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
+          >
+            <FileSpreadsheet size={14} /> تصدير شيت إكسيل
           </button>
           <button
             type="button"
             onClick={() => window.print()}
-            className="px-3.5 py-2 bg-slate-800 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
           >
-            <Printer size={14} /> طباعة
+            <Printer size={14} /> طباعة شيت الافتقاد بالعرض
           </button>
           <button
             type="button"
@@ -1385,11 +1550,12 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             }}
             className="px-4 py-2 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
           >
-            <Plus size={15} /> إضافة أسرة يدوياً
+            <Plus size={15} /> إضافة أسرة
           </button>
         </div>
       </div>
 
+      {/* الفلاتر والبحث (يختفي عند الطباعة) */}
       <div className="bg-white p-3.5 rounded-2xl border border-gray-200 space-y-2.5 print:hidden">
         <div className="flex flex-wrap gap-1.5 font-black">
           <button
@@ -1399,7 +1565,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               scopeTab === 'all' ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-800'
             }`}
           >
-            🔗 كل الأسر المترابطة من الداتابيز ({unifiedFamilies.length})
+            🔗 كل الأسر المترابطة ({unifiedFamilies.length})
           </button>
           <button
             type="button"
@@ -1453,186 +1619,300 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         </div>
       </div>
 
-      {loading ? (
-        <div className="bg-white p-8 rounded-3xl border text-center text-gray-500 font-bold">جاري ربط وتجميع بيانات الأسر من الداتابيز...</div>
-      ) : filteredRecords.length === 0 ? (
-        <div className="bg-white p-8 rounded-3xl border border-dashed text-center text-gray-400 font-bold">
-          لا توجد أسر مطابقة لخيار البحث الحالي.
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
-          {filteredRecords.map(fam => {
-            const kids = Array.isArray(fam.children) ? fam.children : [];
-            const visits = Array.isArray(fam.visitations_log) ? fam.visitations_log : [];
-            const connected = Array.isArray(fam.connectedFamilies) ? fam.connectedFamilies : [];
-            const primaryPhone = fam.phone || fam.husband?.phone || fam.wife?.phone || '';
-            const displayAddress = fam.address || fam.husband?.address || fam.wife?.address || 'غير مسجل';
+      {/* عرض الشاشة التفاعلي: كروت صغيرة باسم كل أسرة تتفتح عند الضغط عليها (يختفي عند الطباعة) */}
+      <div className="print:hidden">
+        {loading ? (
+          <div className="bg-white p-8 rounded-3xl border text-center text-gray-500 font-bold">جاري ربط وتجميع بيانات الأسر من الداتابيز...</div>
+        ) : filteredRecords.length === 0 ? (
+          <div className="bg-white p-8 rounded-3xl border border-dashed text-center text-gray-400 font-bold">
+            لا توجد أسر مطابقة لخيار البحث الحالي.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
+            {filteredRecords.map(fam => {
+              const isExpanded = Boolean(expandedCards[fam.id]);
+              const kids = Array.isArray(fam.children) ? fam.children : [];
+              const visits = Array.isArray(fam.visitations_log) ? fam.visitations_log : [];
+              const connected = Array.isArray(fam.connectedFamilies) ? fam.connectedFamilies : [];
+              const primaryPhone = fam.phone || fam.husband?.phone || fam.wife?.phone || '';
+              const displayAddress = fam.address || fam.husband?.address || fam.wife?.address || 'غير مسجل';
 
-            return (
-              <div key={fam.id} className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-2xs space-y-3">
-                <div className="flex flex-wrap justify-between items-start gap-2 border-b border-gray-100 pb-2.5">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-1.5 mb-1">
-                      {fam.isAutoConnected && (
-                        <span className="px-2 py-0.5 bg-blue-100 text-blue-900 rounded-lg text-[10px] font-black inline-flex items-center gap-1">
-                          <Link2 size={10} /> متصلة بالداتابيز
+              return (
+                <div
+                  key={fam.id}
+                  className={`bg-white rounded-2xl border transition-all ${
+                    isExpanded
+                      ? 'md:col-span-2 lg:col-span-3 border-[#7a1c24] shadow-md p-4 space-y-3'
+                      : 'border-gray-200 hover:border-[#7a1c24]/50 shadow-2xs p-3'
+                  }`}
+                >
+                  {/* رأس الكارت الصغير القابل للضغط لفتح البيانات */}
+                  <div
+                    onClick={() => toggleCardExpand(fam.id)}
+                    className="flex items-center justify-between gap-2 cursor-pointer select-none"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1 mb-1">
+                        {fam.belongsToPriest && (
+                          <span className="px-1.5 py-0.5 bg-red-100 text-[#7a1c24] rounded text-[9px] font-black">
+                            ✝ معترفو أبونا
+                          </span>
+                        )}
+                        <span className="px-1.5 py-0.5 bg-amber-100 text-amber-950 rounded text-[9px] font-black">
+                          {fam.family_status}
                         </span>
-                      )}
-                      {fam.belongsToPriest && (
-                        <span className="px-2 py-0.5 bg-red-100 text-[#7a1c24] rounded-lg text-[10px] font-black">
-                          ✝ معترفو أبونا
+                        <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-900 rounded text-[9px] font-bold">
+                          🕊️ {visits.length}
                         </span>
-                      )}
-                      <span className="px-2.5 py-0.5 bg-amber-100 text-amber-950 rounded-lg text-[10px] font-black">
-                        {fam.family_status}
-                      </span>
-                      <span className="px-2 py-0.5 bg-gray-100 text-gray-800 rounded-lg text-[10px] font-bold">
-                        🏠 {fam.housing_type || 'تمليك'}
-                      </span>
-                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-900 rounded-lg text-[10px] font-bold">
-                        🕊️ {visits.length} زيارة
+                        {connected.length > 0 && (
+                          <span className="px-1.5 py-0.5 bg-purple-100 text-purple-950 rounded text-[9px] font-black">
+                            🔗 {connected.length} صلة
+                          </span>
+                        )}
+                      </div>
+
+                      <strong className="text-xs sm:text-sm text-[#7a1c24] block truncate">
+                        {fam.family_title}
+                      </strong>
+
+                      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] text-gray-600 mt-0.5">
+                        <span className="inline-flex items-center gap-1 truncate max-w-full">
+                          <MapPin size={11} className="text-[#7a1c24] shrink-0" /> {displayAddress}
+                        </span>
+                        {primaryPhone && (
+                          <span className="inline-flex items-center gap-1 shrink-0">
+                            <Phone size={11} /> {primaryPhone}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="p-1.5 bg-gray-100 rounded-xl text-gray-700">
+                        {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                       </span>
                     </div>
-                    <strong className="text-sm sm:text-base text-[#7a1c24] block">{fam.family_title}</strong>
-
-                    {fam.lineageParentName && (
-                      <button
-                        type="button"
-                        onClick={() => setSearchQ(fam.lineageParentName)}
-                        className="mt-1 px-2.5 py-0.5 bg-purple-50 hover:bg-purple-100 text-purple-950 border border-purple-200 rounded-lg text-[10px] font-black inline-flex items-center gap-1 cursor-pointer"
-                        title="اضغط لعرض تسلسل أسرة الوالد"
-                      >
-                        <GitBranch size={11} /> تسلسل العائلة: أسرة الوالد ({fam.lineageParentName}) ↗
-                      </button>
-                    )}
-
-                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-gray-700 mt-1.5 font-bold">
-                      <span className="inline-flex items-center gap-1 text-slate-800 bg-slate-100 px-2 py-0.5 rounded-lg">
-                        <MapPin size={12} className="text-[#7a1c24]" /> العنوان والمنطقة: {displayAddress}
-                      </span>
-                      {primaryPhone && (
-                        <span className="inline-flex items-center gap-1">
-                          <Phone size={12} /> {primaryPhone}
-                        </span>
-                      )}
-                    </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-1.5 print:hidden">
-                    {primaryPhone && onOpenWhatsApp && (
-                      <button
-                        type="button"
-                        onClick={() => onOpenWhatsApp({ name: fam.family_title, phone: primaryPhone, defaultCategory: 'افتقاد' })}
-                        className="p-2 bg-green-600 text-white rounded-xl cursor-pointer"
-                        title="إرسال واتساب"
-                      >
-                        <MessageCircle size={14} />
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => { setLinkModalFam(fam); setLinkSearchQ(''); }}
-                      className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-950 border border-indigo-200 rounded-xl font-black inline-flex items-center gap-1 cursor-pointer"
-                      title="ربط زوج/زوجة أو والد أو ابن من حسابات الكنيسة"
-                    >
-                      <Link2 size={13} /> ربط أفراد
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedFamily(fam)}
-                      className="px-3 py-1.5 bg-[#f9ecee] hover:bg-[#f2dce0] text-[#7a1c24] rounded-xl font-black cursor-pointer"
-                    >
-                      التفاصيل والزيارات
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openEditFamily(fam)}
-                      className="p-2 bg-gray-100 hover:bg-gray-200 rounded-xl cursor-pointer"
-                      title="تعديل وتكميل بيانات الأسرة"
-                    >
-                      <Edit3 size={14} />
-                    </button>
-                    {fam.savedId && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteFamily(fam)}
-                        className="p-2 bg-red-50 text-red-700 rounded-xl cursor-pointer"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {connected.length > 0 && (
-                  <div className="bg-purple-50/60 p-2.5 rounded-2xl border border-purple-200 space-y-1.5">
-                    <strong className="text-[10px] text-purple-950 flex items-center gap-1">
-                      <Network size={12} /> أسر متصلة بالنسب والمصاهرة ({connected.length}):
-                    </strong>
-                    <div className="flex flex-wrap gap-1.5">
-                      {connected.map(rel => (
-                        <button
-                          key={rel.key}
-                          type="button"
-                          onClick={() => setSearchQ(rel.searchTerm)}
-                          className="px-2.5 py-1 bg-white hover:bg-purple-100 text-purple-950 border border-purple-200 rounded-xl text-[10px] font-black inline-flex items-center gap-1 cursor-pointer text-right"
-                        >
-                          <span>🔗 {rel.title}</span>
-                          <span className="text-purple-700 font-bold">({rel.relationLabel}) ↗</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid gap-2">
-                  {renderPersonCard('الزوج', fam.husband, '👨', 'husband', true)}
-                  {renderPersonCard('الزوجة', fam.wife, '👩', 'wife', true)}
-                  {renderPersonCard('الوالد', fam.father, '👴', 'father', true)}
-                  {renderPersonCard('الوالدة', fam.mother, '👵', 'mother', true)}
-                </div>
-
-                {kids.length > 0 && (
-                  <div className="bg-blue-50/40 p-3 rounded-2xl border border-blue-200 space-y-1.5">
-                    <strong className="text-[11px] text-blue-950 block">👶 الأبناء ({kids.length}):</strong>
-                    <div className="grid gap-1.5">
-                      {kids.map((k, idx) => (
-                        <div key={idx} className="bg-white p-2 rounded-xl border text-[11px] flex flex-wrap gap-x-3 gap-y-0.5 items-center">
-                          <strong className="text-gray-900">{k.full_name}</strong>
-                          {k.user_id && <span className="px-1.5 py-0.5 bg-blue-100 text-blue-900 rounded text-[9px] font-black">حساب كنيسة ✓</span>}
-                          {k.hasOwnFamily && (
+                  {/* التفاصيل الكاملة عند الضغط على الكارت */}
+                  {isExpanded && (
+                    <div className="pt-3 border-t border-gray-100 space-y-3">
+                      <div className="flex flex-wrap justify-between items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="px-2 py-0.5 bg-gray-100 text-gray-800 rounded-lg text-[10px] font-bold">
+                            🏠 {fam.housing_type || 'تمليك'}
+                          </span>
+                          {fam.lineageParentName && (
                             <button
                               type="button"
-                              onClick={() => setSearchQ(k.full_name)}
-                              className="px-2 py-0.5 bg-purple-100 text-purple-950 rounded text-[9px] font-black cursor-pointer"
+                              onClick={() => setSearchQ(fam.lineageParentName)}
+                              className="px-2.5 py-0.5 bg-purple-50 hover:bg-purple-100 text-purple-950 border border-purple-200 rounded-lg text-[10px] font-black inline-flex items-center gap-1 cursor-pointer"
                             >
-                              🏠 له أسرة مستقلة ↗
+                              <GitBranch size={11} /> تسلسل العائلة: أسرة الوالد ({fam.lineageParentName}) ↗
                             </button>
                           )}
-                          {k.dob && <span>🎂 {k.dob} ({calcAge(k.dob)})</span>}
-                          {k.marital_status && <span>💍 {k.marital_status}</span>}
-                          {k.study_status && <span>🎓 {k.study_status}</span>}
-                          {k.job_title && <span>💼 {k.job_title}</span>}
-                          {k.phone && <span>📞 {k.phone}</span>}
                         </div>
-                      ))}
+
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {primaryPhone && onOpenWhatsApp && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenWhatsApp({ name: fam.family_title, phone: primaryPhone, defaultCategory: 'افتقاد' })}
+                              className="p-2 bg-green-600 text-white rounded-xl cursor-pointer"
+                              title="إرسال واتساب"
+                            >
+                              <MessageCircle size={14} />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => { setLinkModalFam(fam); setLinkSearchQ(''); }}
+                            className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-950 border border-indigo-200 rounded-xl font-black inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Link2 size={13} /> ربط أفراد
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedFamily(fam)}
+                            className="px-3 py-1.5 bg-[#f9ecee] hover:bg-[#f2dce0] text-[#7a1c24] rounded-xl font-black cursor-pointer"
+                          >
+                            سجل الزيارات ({visits.length})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openEditFamily(fam)}
+                            className="px-2.5 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-950 rounded-xl font-black inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Edit3 size={13} /> تعديل وحفظ بالداتابيز
+                          </button>
+                          {fam.savedId && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteFamily(fam)}
+                              className="p-2 bg-red-50 text-red-700 rounded-xl cursor-pointer"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {connected.length > 0 && (
+                        <div className="bg-purple-50/60 p-2.5 rounded-2xl border border-purple-200 space-y-1.5">
+                          <strong className="text-[10px] text-purple-950 flex items-center gap-1">
+                            <Network size={12} /> أسر متصلة بالنسب والمصاهرة ({connected.length}):
+                          </strong>
+                          <div className="flex flex-wrap gap-1.5">
+                            {connected.map(rel => (
+                              <button
+                                key={rel.key}
+                                type="button"
+                                onClick={() => setSearchQ(rel.searchTerm)}
+                                className="px-2.5 py-1 bg-white hover:bg-purple-100 text-purple-950 border border-purple-200 rounded-xl text-[10px] font-black inline-flex items-center gap-1 cursor-pointer text-right"
+                              >
+                                <span>🔗 {rel.title}</span>
+                                <span className="text-purple-700 font-bold">({rel.relationLabel}) ↗</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="grid sm:grid-cols-2 gap-2">
+                        {renderPersonCard('الزوج', fam.husband, '👨', 'husband', true)}
+                        {renderPersonCard('الزوجة', fam.wife, '👩', 'wife', true)}
+                        {renderPersonCard('الوالد', fam.father, '👴', 'father', true)}
+                        {renderPersonCard('الوالدة', fam.mother, '👵', 'mother', true)}
+                      </div>
+
+                      {kids.length > 0 && (
+                        <div className="bg-blue-50/40 p-3 rounded-2xl border border-blue-200 space-y-1.5">
+                          <strong className="text-[11px] text-blue-950 block">👶 الأبناء ({kids.length}):</strong>
+                          <div className="grid sm:grid-cols-2 gap-1.5">
+                            {kids.map((k, idx) => (
+                              <div key={idx} className="bg-white p-2 rounded-xl border text-[11px] flex flex-wrap gap-x-3 gap-y-0.5 items-center">
+                                <strong className="text-gray-900">{k.full_name}</strong>
+                                {k.user_id && <span className="px-1.5 py-0.5 bg-blue-100 text-blue-900 rounded text-[9px] font-black">حساب كنيسة ✓</span>}
+                                {k.hasOwnFamily && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setSearchQ(k.full_name)}
+                                    className="px-2 py-0.5 bg-purple-100 text-purple-950 rounded text-[9px] font-black cursor-pointer"
+                                  >
+                                    🏠 له أسرة مستقلة ↗
+                                  </button>
+                                )}
+                                {k.dob && <span>🎂 {k.dob} ({calcAge(k.dob)})</span>}
+                                {k.marital_status && <span>💍 {k.marital_status}</span>}
+                                {k.study_status && <span>🎓 {k.study_status}</span>}
+                                {k.job_title && <span>💼 {k.job_title}</span>}
+                                {k.phone && <span>📞 {k.phone}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {fam.next_visit_date && (
+                        <p className="text-[11px] font-bold text-amber-900 bg-amber-50 px-3 py-1.5 rounded-xl inline-flex items-center gap-1">
+                          <Calendar size={12} /> ميعاد الافتقاد القادم: {fam.next_visit_date}
+                        </p>
+                      )}
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
-                {fam.next_visit_date && (
-                  <p className="text-[11px] font-bold text-amber-900 bg-amber-50 px-3 py-1.5 rounded-xl inline-flex items-center gap-1">
-                    <Calendar size={12} /> ميعاد الافتقاد القادم: {fam.next_visit_date}
-                  </p>
-                )}
-              </div>
-            );
-          })}
+      {/* شيت الطباعة الأفقي (Landscape Excel-Style Print Sheet) يظهر عند الطباعة فقط */}
+      <div className="hidden print:block w-full text-black" dir="rtl">
+        <div className="text-center border-b-2 border-black pb-2 mb-3">
+          <h2 className="text-base font-black">كشف افتقاد الأسر والمخدومين — {priest?.full_name || 'الأب الكاهن'}</h2>
+          <p className="text-[11px]">
+            تاريخ الطباعة: {todayISO} • إجمالي الأسر بالكشف: {filteredRecords.length} أسرة
+          </p>
         </div>
-      )}
 
+        <table className="w-full border-collapse border border-black text-[10px]">
+          <thead>
+            <tr className="bg-gray-200 font-black">
+              <th className="border border-black p-1.5 text-center w-8">م</th>
+              <th className="border border-black p-1.5 text-right">اسم رب الأسرة والبيانات</th>
+              <th className="border border-black p-1.5 text-right">الزوجة وبياناتها</th>
+              <th className="border border-black p-1.5 text-right">الوالد / الوالدة</th>
+              <th className="border border-black p-1.5 text-right">الأبناء</th>
+              <th className="border border-black p-1.5 text-right">العنوان والمنطقة والسكن</th>
+              <th className="border border-black p-1.5 text-center">التليفون</th>
+              <th className="border border-black p-1.5 text-center">الحالة</th>
+              <th className="border border-black p-1.5 text-right">ملاحظات / آخر زيارة</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredRecords.map((fam, idx) => {
+              const kids = Array.isArray(fam.children) ? fam.children : [];
+              const visits = Array.isArray(fam.visitations_log) ? fam.visitations_log : [];
+              const addr = fam.address || fam.husband?.address || fam.wife?.address || '—';
+              const primaryPhone = fam.phone || fam.husband?.phone || fam.wife?.phone || '—';
+
+              return (
+                <tr key={fam.id} className="break-inside-avoid">
+                  <td className="border border-black p-1.5 text-center font-bold">{idx + 1}</td>
+                  <td className="border border-black p-1.5 align-top">
+                    <div className="font-black">{fam.husband?.full_name || fam.family_title}</div>
+                    {fam.husband?.dob && <div>ميلاد: {fam.husband.dob} ({calcAge(fam.husband.dob)})</div>}
+                    {fam.husband?.job_title && <div>العمل: {fam.husband.job_title}</div>}
+                    {fam.husband?.phone && <div>ت: {fam.husband.phone}</div>}
+                  </td>
+                  <td className="border border-black p-1.5 align-top">
+                    {fam.wife?.full_name ? (
+                      <>
+                        <div className="font-bold">{fam.wife.full_name}</div>
+                        {fam.wife.dob && <div>ميلاد: {fam.wife.dob} ({calcAge(fam.wife.dob)})</div>}
+                        {fam.wife.job_title && <div>العمل: {fam.wife.job_title}</div>}
+                        {fam.wife.phone && <div>ت: {fam.wife.phone}</div>}
+                      </>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td className="border border-black p-1.5 align-top">
+                    {fam.father?.full_name && <div>الوالد: {fam.father.full_name}</div>}
+                    {fam.mother?.full_name && <div>الوالدة: {fam.mother.full_name}</div>}
+                    {!fam.father?.full_name && !fam.mother?.full_name && '—'}
+                  </td>
+                  <td className="border border-black p-1.5 align-top">
+                    {kids.length > 0 ? (
+                      kids.map((k, kIdx) => (
+                        <div key={kIdx}>
+                          • {k.full_name} ({calcAge(k.dob)}{k.study_status ? ` - ${k.study_status}` : ''})
+                        </div>
+                      ))
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td className="border border-black p-1.5 align-top">
+                    <div className="font-bold">{addr}</div>
+                    <div>({fam.housing_type || 'تمليك'})</div>
+                  </td>
+                  <td className="border border-black p-1.5 text-center align-top font-bold">{primaryPhone}</td>
+                  <td className="border border-black p-1.5 text-center align-top">{fam.family_status || 'مستقرة'}</td>
+                  <td className="border border-black p-1.5 align-top">
+                    {visits[0] ? `${visits[0].visit_date}: ${visits[0].summary}` : fam.notes || ''}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* مودال الربط المباشر بين الزوجين أو الوالدين والأبناء والمصاهرة في الداتابيز */}
       {linkModalFam && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-55">
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-55 print:hidden">
           <div className="bg-white rounded-3xl w-full max-w-xl p-5 sm:p-6 space-y-3 font-bold max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-2.5">
               <div>
@@ -1640,7 +1920,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                   🔗 ربط أفراد وتسلسل أسرة: {linkModalFam.family_title}
                 </h3>
                 <p className="text-[11px] text-gray-500 font-normal mt-0.5">
-                  اختر أي شخص من حسابات الكنيسة لدمجه كزوج/زوجة (ربط ومصاهرة الأسرتين) أو كوالد/والدة أو كابن في تسلسل هذه الأسرة.
+                  اختر أي شخص من حسابات الكنيسة لدمجه كزوج/زوجة أو كوالد/والدة أو كابن وتحديث الداتابيز فوراً.
                 </p>
               </div>
               <button type="button" onClick={() => setLinkModalFam(null)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer">
@@ -1685,7 +1965,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                           onClick={() => handleLinkPersonInDatabase(linkModalFam, u, 'spouse')}
                           className="px-2.5 py-1.5 bg-rose-700 hover:bg-rose-800 text-white rounded-xl text-[11px] font-black cursor-pointer"
                         >
-                          💍 ربط كزوج/زوجة (دمج الأسرتين)
+                          💍 ربط كزوج/زوجة
                         </button>
                         <button
                           type="button"
@@ -1721,12 +2001,13 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         </div>
       )}
 
+      {/* مودال تعديل وحفظ بيانات الأسرة في الداتابيز */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50">
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 print:hidden">
           <div className="bg-white rounded-3xl w-full max-w-4xl p-5 sm:p-6 space-y-4 font-bold max-h-[92vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="text-sm sm:text-base font-black text-[#7a1c24]">
-                {editingSavedId ? '✏️ تعديل ملف الأسرة للافتقاد' : '➕ حفظ / تعديل بيانات الأسرة بسجل الافتقاد'}
+                {editingSavedId ? '✏️ تعديل ملف الأسرة وتحديث قاعدة البيانات' : '➕ حفظ / تعديل بيانات الأسرة وتحديث قاعدة البيانات'}
               </h3>
               <button type="button" onClick={() => setShowForm(false)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer">
                 <X size={18} />
@@ -1763,7 +2044,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             <form onSubmit={handleSaveFamily} className="space-y-4">
               <div className="bg-amber-50/40 p-3.5 rounded-2xl border border-amber-200 space-y-2.5">
                 <strong className="text-xs font-black text-amber-950 flex items-center gap-1">
-                  <Heart size={14} /> البيانات العامة والعنوان والحالة الأسرية
+                  <Heart size={14} /> البيانات العامة والعنوان والحالة الأسرية (تُحدَّث تلقائياً في الداتابيز)
                 </strong>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                   <input
@@ -1899,7 +2180,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                   disabled={saving}
                   className="px-5 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black cursor-pointer"
                 >
-                  {saving ? 'جاري الحفظ...' : 'حفظ ملف الأسرة بسجل الافتقاد'}
+                  {saving ? 'جاري الحفظ والمزامنة مع الداتابيز...' : 'حفظ وتحديث الداتابيز كاملة ✅'}
                 </button>
               </div>
             </form>
@@ -1907,8 +2188,9 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         </div>
       )}
 
+      {/* مودال سجل زيارات الافتقاد */}
       {selectedFamily && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50">
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 print:hidden">
           <div className="bg-white rounded-3xl w-full max-w-3xl p-5 sm:p-6 space-y-4 font-bold max-h-[92vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
               <div>
