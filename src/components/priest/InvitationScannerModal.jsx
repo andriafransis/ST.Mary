@@ -70,6 +70,39 @@ function playFeedbackTone(kind = 'success', enabled = true) {
   }
 }
 
+export function parseQrContent(rawText = '') {
+  const trimmed = String(rawText || '').trim();
+  if (!trimmed) return { token: '', embedded: null };
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === 'object') {
+      const token = String(parsed.token || parsed.qr_token || parsed.code || '').trim();
+      return {
+        token,
+        embedded: {
+          recipient_name: parsed.recipient_name || '',
+          recipient_role: parsed.role_or_title || parsed.recipient_role || '',
+          event_title: parsed.event_title || '',
+          invite_tier: parsed.tier === 'vip' ? 'vip' : 'general',
+          seat_or_zone: parsed.seat_or_zone || '',
+          attendance_mode: parsed.attendance_mode || 'check_in',
+          raw_status: parsed.status || ''
+        }
+      };
+    }
+  } catch {
+    // كود نصي مباشر أو رابط
+  }
+
+  const urlMatch = trimmed.match(/[?&](?:token|qr|code)=([^&#]+)/i);
+  if (urlMatch?.[1]) {
+    return { token: decodeURIComponent(urlMatch[1]).trim(), embedded: null };
+  }
+
+  return { token: trimmed, embedded: null };
+}
+
 export default function InvitationScannerModal({ currentUser, onClose }) {
   const scannerRef = useRef(null);
   const isProcessingRef = useRef(false);
@@ -100,24 +133,6 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
     ROLE_AR_LABELS[currentUser?.role] ||
     currentUser?.role ||
     'مستخدم';
-
-  const extractToken = (rawText = '') => {
-    const trimmed = String(rawText || '').trim();
-    if (!trimmed) return '';
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (parsed?.qr_token) return String(parsed.qr_token).trim();
-      if (parsed?.token) return String(parsed.token).trim();
-      if (parsed?.code) return String(parsed.code).trim();
-    } catch {
-      // كود نصي مباشر
-    }
-    const urlMatch = trimmed.match(/[?&](?:token|qr|code)=([^&#]+)/i);
-    if (urlMatch?.[1]) {
-      return decodeURIComponent(urlMatch[1]).trim();
-    }
-    return trimmed;
-  };
 
   const applyContinuousFocusIfSupported = async (html5QrCode) => {
     try {
@@ -223,7 +238,7 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
   }, [facingMode, startScanner, stopScannerSafe]);
 
   const processToken = async (rawValue) => {
-    const token = extractToken(rawValue);
+    const { token, embedded } = parseQrContent(rawValue);
     if (!token || isProcessingRef.current) return;
 
     isProcessingRef.current = true;
@@ -238,8 +253,11 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
         playFeedbackTone('error', soundEnabledRef.current);
         setScanResult({
           kind: 'error',
-          title: 'دعوة غير موجودة أو كود غير صحيح',
-          message: `لم يتم العثور على دعوة بالكود (${token}).`,
+          title: embedded?.recipient_name
+            ? `كود غير مسجل في قاعدة البيانات (${embedded.recipient_name})`
+            : 'دعوة غير موجودة أو كود غير صحيح',
+          message: `لم يتم العثور على دعوة بالكود (${token}) في سجل الدعوات.`,
+          embedded,
           scannedAt: new Date().toISOString(),
           scannedBy: scannerDisplayName,
           scannedByRole: scannerRoleLabel
@@ -247,15 +265,25 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
         return;
       }
 
+      const mergedInvitePreview = {
+        ...invite,
+        recipient_name: invite.recipient_name || embedded?.recipient_name || 'مدعو',
+        recipient_role: invite.recipient_role || embedded?.recipient_role || '',
+        event_title: invite.event_title || embedded?.event_title || '',
+        invite_tier: invite.invite_tier || embedded?.invite_tier || 'general',
+        seat_or_zone: invite.seat_or_zone || embedded?.seat_or_zone || ''
+      };
+
       if (invite.status === 'checked_in') {
         playFeedbackTone('warning', soundEnabledRef.current);
         setScanResult({
           kind: 'warning',
           title: 'تم مسح هذه الدعوة مسبقاً',
-          message: `تم تسجيل دخول (${invite.recipient_name}) مسبقاً${
+          message: `تم تسجيل دخول (${mergedInvitePreview.recipient_name}) مسبقاً${
             invite.checked_in_at ? ` في (${formatDateTimeAr(invite.checked_in_at)})` : ''
           }${invite.checked_in_by ? ` بواسطة (${invite.checked_in_by})` : ''}.`,
-          invite,
+          invite: mergedInvitePreview,
+          embedded,
           scannedAt: invite.checked_in_at || new Date().toISOString(),
           scannedBy: invite.checked_in_by || scannerDisplayName,
           scannedByRole: invite.checked_in_by_role || scannerRoleLabel
@@ -308,6 +336,8 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
           kind: 'error',
           title: 'تعذر تحديث حالة الدخول في قاعدة البيانات',
           message: updErr.message,
+          invite: mergedInvitePreview,
+          embedded,
           scannedAt: nowIso,
           scannedBy: scannerDisplayName,
           scannedByRole: scannerRoleLabel
@@ -316,7 +346,8 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
       }
 
       const finalInvite = {
-        ...(updatedRow || invite),
+        ...mergedInvitePreview,
+        ...(updatedRow || {}),
         status: 'checked_in',
         checked_in_at: updatedRow?.checked_in_at || nowIso,
         checked_in_by: updatedRow?.checked_in_by || actorLabel,
@@ -330,8 +361,9 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
         title: 'تم التحقق وتسجيل الحضور بنجاح ✅',
         message: finalInvite.seat_or_zone
           ? `توجيه المدعو إلى: ${finalInvite.seat_or_zone}`
-          : 'الدعوة صالحة وتم تسجيل وقت الحضور ومن قام بالمسح.',
+          : 'الدعوة صالحة وتم تسجيل وقت الحضور وبيانات من قام بالمسح.',
         invite: finalInvite,
+        embedded,
         scannedAt: finalInvite.checked_in_at,
         scannedBy: scannerDisplayName,
         scannedByRole: scannerRoleLabel
@@ -431,7 +463,7 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
           </div>
         </div>
 
-        {/* منطقة الكاميرا — مملوءة بالكامل بدون تقسيم أسود */}
+        {/* منطقة الكاميرا */}
         <div className="bg-slate-950 rounded-2xl overflow-hidden relative border border-slate-800">
           <div
             id="church-qr-scanner-box"
@@ -488,7 +520,7 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
           </button>
         </form>
 
-        {/* نتيجة المسح وتفاصيل الوقت ومن قام بالمسح */}
+        {/* نتيجة المسح وتفاصيل المدعو والوقت ومن قام بالمسح */}
         {scanResult && (
           <div
             className={`p-4 rounded-2xl border-2 space-y-2.5 ${
@@ -508,28 +540,40 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
 
             <p className="font-bold">{scanResult.message}</p>
 
-            {scanResult.invite && (
+            {(scanResult.invite || scanResult.embedded?.recipient_name) && (
               <div className="bg-white/95 rounded-xl p-3 border space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <strong className="text-gray-900 block text-sm">
-                      {scanResult.invite.recipient_name}
+                      {scanResult.invite?.recipient_name || scanResult.embedded?.recipient_name}
                     </strong>
-                    <span className="text-gray-600">{scanResult.invite.event_title}</span>
+                    <span className="text-gray-600 block">
+                      {(scanResult.invite?.recipient_role || scanResult.embedded?.recipient_role)
+                        ? `${scanResult.invite?.recipient_role || scanResult.embedded?.recipient_role} • `
+                        : ''}
+                      {scanResult.invite?.event_title || scanResult.embedded?.event_title || ''}
+                    </span>
+                    {(scanResult.invite?.seat_or_zone || scanResult.embedded?.seat_or_zone) && (
+                      <span className="text-[11px] font-bold text-[#7a1c24] block mt-0.5">
+                        المكان / المقعد: {scanResult.invite?.seat_or_zone || scanResult.embedded?.seat_or_zone}
+                      </span>
+                    )}
                   </div>
                   <span
                     className={`px-3 py-1 rounded-xl font-black flex items-center gap-1 ${
-                      scanResult.invite.invite_tier === 'vip'
+                      (scanResult.invite?.invite_tier || scanResult.embedded?.invite_tier) === 'vip'
                         ? 'bg-amber-400 text-[#4a0e13]'
                         : 'bg-slate-200 text-slate-800'
                     }`}
                   >
-                    {scanResult.invite.invite_tier === 'vip' ? (
+                    {(scanResult.invite?.invite_tier || scanResult.embedded?.invite_tier) === 'vip' ? (
                       <Crown size={13} />
                     ) : (
                       <Users size={13} />
                     )}
-                    {scanResult.invite.invite_tier === 'vip' ? 'VIP' : 'عام'}
+                    {(scanResult.invite?.invite_tier || scanResult.embedded?.invite_tier) === 'vip'
+                      ? 'VIP'
+                      : 'عام'}
                   </span>
                 </div>
 
@@ -539,7 +583,7 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
                     <span>
                       وقت الحضور / الـ Scan:{' '}
                       <strong className="text-gray-900">
-                        {formatDateTimeAr(scanResult.invite.checked_in_at || scanResult.scannedAt)}
+                        {formatDateTimeAr(scanResult.invite?.checked_in_at || scanResult.scannedAt)}
                       </strong>
                     </span>
                   </div>
@@ -548,7 +592,7 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
                     <span>
                       تم المسح بواسطة:{' '}
                       <strong className="text-gray-900">
-                        {scanResult.invite.checked_in_by ||
+                        {scanResult.invite?.checked_in_by ||
                           `${scanResult.scannedBy} (${scanResult.scannedByRole})`}
                       </strong>
                     </span>
