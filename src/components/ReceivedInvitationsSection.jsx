@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import {
   Ticket,
@@ -11,6 +11,63 @@ import {
   BellRing,
   ScanLine
 } from 'lucide-react';
+
+function normalizeArabicName(value = '') {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/ـ/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+function normalizePhoneNumber(phone = '') {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('20') && digits.length === 12) {
+    return digits.slice(2);
+  }
+  if (digits.startsWith('0020') && digits.length === 14) {
+    return digits.slice(4);
+  }
+  return digits;
+}
+
+function isInvitationStrictlyMine(row, currentUser) {
+  if (!row || !currentUser) return false;
+
+  const userId = String(currentUser.id || '').trim();
+  const rowRecipientId = String(row.recipient_user_id || '').trim();
+
+  // إذا كانت الدعوة مرتبطة بـ user_id محدد، يجب أن تطابقه بالضبط ولا تظهر لغيره
+  if (rowRecipientId) {
+    return Boolean(userId) && rowRecipientId === userId;
+  }
+
+  // في حال عدم وجود recipient_user_id، نتحقق من تطابق التليفون أو الاسم الكامل بدقة
+  const userPhones = [
+    currentUser.phone,
+    currentUser.father_phone,
+    currentUser.mother_phone
+  ]
+    .map(normalizePhoneNumber)
+    .filter(Boolean);
+
+  const rowPhone = normalizePhoneNumber(row.recipient_phone);
+  if (rowPhone && userPhones.length > 0 && userPhones.includes(rowPhone)) {
+    return true;
+  }
+
+  const userName = normalizeArabicName(currentUser.full_name);
+  const rowName = normalizeArabicName(row.recipient_name);
+  if (userName && rowName && userName === rowName) {
+    return true;
+  }
+
+  return false;
+}
 
 function QrCodeBox({ value, size = 88 }) {
   const canvasRef = useRef(null);
@@ -108,6 +165,17 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
     typeof Notification !== 'undefined' ? Notification.permission : 'default'
   );
 
+  const normalizedUserPhones = useMemo(() => {
+    if (!currentUser) return [];
+    return [
+      currentUser.phone,
+      currentUser.father_phone,
+      currentUser.mother_phone
+    ]
+      .map(normalizePhoneNumber)
+      .filter(Boolean);
+  }, [currentUser]);
+
   const triggerMobileNotification = useCallback((inv, isScanUpdate = false) => {
     const title = isScanUpdate
       ? `تم مسح QR الدعوة: ${inv.event_title}`
@@ -149,21 +217,15 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
     if (!currentUser?.id || !supabase || typeof supabase.from !== 'function') return;
     setLoading(true);
     try {
-      const filters = [`recipient_user_id.eq.${currentUser.id}`];
-      const cleanPhone = String(currentUser.phone || '').trim();
-      if (cleanPhone) {
-        filters.push(`recipient_phone.eq.${cleanPhone}`);
-      }
-
       const { data, error } = await supabase
         .from('church_invitations')
         .select('*')
-        .or(filters.join(','))
         .order('created_at', { ascending: false });
 
       if (!error && Array.isArray(data)) {
+        const strictlyMine = data.filter((row) => isInvitationStrictlyMine(row, currentUser));
         const uniqueByKey = Array.from(
-          new Map(data.map((row) => [row.id || row.qr_token, row])).values()
+          new Map(strictlyMine.map((row) => [row.id || row.qr_token, row])).values()
         );
         setMyInvites(uniqueByKey);
         if (onCountChange) {
@@ -173,7 +235,7 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
     } finally {
       setLoading(false);
     }
-  }, [currentUser?.id, currentUser?.phone, onCountChange]);
+  }, [currentUser, onCountChange]);
 
   useEffect(() => {
     fetchMyInvites();
@@ -193,11 +255,7 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
         },
         (payload) => {
           const row = payload.new || payload.old;
-          const matchesUser =
-            row?.recipient_user_id === currentUser.id ||
-            (currentUser.phone && row?.recipient_phone === currentUser.phone);
-
-          if (!matchesUser) return;
+          if (!isInvitationStrictlyMine(row, currentUser)) return;
 
           fetchMyInvites();
           if (payload.eventType === 'INSERT' && payload.new) {
@@ -218,7 +276,7 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
         supabase.removeChannel(channel);
       }
     };
-  }, [currentUser?.id, currentUser?.phone, fetchMyInvites, triggerMobileNotification]);
+  }, [currentUser, normalizedUserPhones, fetchMyInvites, triggerMobileNotification]);
 
   return (
     <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3 text-xs" dir="rtl">
@@ -236,9 +294,14 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
-        <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5">
-          <Ticket size={17} /> دعواتي وكود الـ QR ({myInvites.length})
-        </h3>
+        <div>
+          <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5">
+            <Ticket size={17} /> دعواتي وكود الـ QR ({myInvites.length})
+          </h3>
+          <p className="text-[11px] text-gray-500 font-bold mt-0.5">
+            تظهر هنا الدعوات الموجهة باسمك وحسابك فقط ولا تظهر لأي شخص آخر.
+          </p>
+        </div>
 
         <div className="flex items-center gap-2">
           {typeof Notification !== 'undefined' && notifPermission !== 'granted' && (
@@ -299,6 +362,11 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
                     <strong className="text-sm sm:text-base font-black text-gray-900">
                       {inv.event_title}
                     </strong>
+                    {inv.recipient_name && (
+                      <p className="text-[11px] text-gray-600 font-bold mt-0.5">
+                        المدعو: {inv.recipient_name}
+                      </p>
+                    )}
                   </div>
 
                   {isChecked ? (
@@ -315,7 +383,8 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
                 <div className="bg-white/90 p-3 rounded-2xl border border-gray-200/80 space-y-1.5 text-[11px]">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-gray-500 font-bold">المكان / التسكين:</span>
-                    <strong className="text-[#7a1c24] font-black text-xs">
+                    <strong className="text-[#7a1c24] font-black text-xs inline-flex items-center gap-1">
+                      <MapPin size={12} />
                       {[inv.seat_or_zone, inv.location].filter(Boolean).join(' — ') || 'يُحدد عند الدخول'}
                     </strong>
                   </div>
