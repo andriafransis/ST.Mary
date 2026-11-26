@@ -62,7 +62,7 @@ export const CATEGORY_PRESETS = {
     baseRole: 'member',
     defaultScreen: 'member_panel',
     screens: ['public_page', 'member_panel', 'edu_center', 'trips_office', 'deacons'],
-    actions: { view: true, create: false, edit: false, delete: false, send_invitations: false }
+    actions: { view: true, create: false, edit: false, delete: false, send_invitations: false, scan_invitations: false }
   },
   parent: {
     key: 'parent',
@@ -70,7 +70,7 @@ export const CATEGORY_PRESETS = {
     baseRole: 'parent',
     defaultScreen: 'parent_panel',
     screens: ['public_page', 'parent_panel', 'member_panel', 'edu_center', 'trips_office', 'deacons'],
-    actions: { view: true, create: false, edit: false, delete: false, send_invitations: false }
+    actions: { view: true, create: false, edit: false, delete: false, send_invitations: false, scan_invitations: false }
   },
   servant: {
     key: 'servant',
@@ -88,7 +88,7 @@ export const CATEGORY_PRESETS = {
       'social_status',
       'public_page'
     ],
-    actions: { view: true, create: true, edit: true, delete: false, send_invitations: false }
+    actions: { view: true, create: true, edit: true, delete: false, send_invitations: false, scan_invitations: false }
   },
   head_servant: {
     key: 'head_servant',
@@ -110,7 +110,7 @@ export const CATEGORY_PRESETS = {
       'public_editor',
       'public_page'
     ],
-    actions: { view: true, create: true, edit: true, delete: true, send_invitations: true }
+    actions: { view: true, create: true, edit: true, delete: true, send_invitations: true, scan_invitations: true }
   },
   priest: {
     key: 'priest',
@@ -133,7 +133,7 @@ export const CATEGORY_PRESETS = {
       'public_editor',
       'public_page'
     ],
-    actions: { view: true, create: true, edit: true, delete: false, send_invitations: true }
+    actions: { view: true, create: true, edit: true, delete: false, send_invitations: true, scan_invitations: true }
   },
   admin: {
     key: 'admin',
@@ -141,13 +141,17 @@ export const CATEGORY_PRESETS = {
     baseRole: 'admin',
     defaultScreen: 'admin_panel',
     screens: SCREEN_ORDER,
-    actions: { view: true, create: true, edit: true, delete: true, send_invitations: true }
+    actions: { view: true, create: true, edit: true, delete: true, send_invitations: true, scan_invitations: true }
   }
 };
 
 const EMPTY_PERM = { view: false, create: false, edit: false, delete: false };
 
-function buildPresetScreens(screens = [], { view = true, create = false, edit = false, delete: del = false }, excludePublicEdit = false) {
+function buildPresetScreens(
+  screens = [],
+  { view = true, create = false, edit = false, delete: del = false },
+  excludePublicEdit = false
+) {
   const map = {};
   SCREEN_ORDER.forEach((scr) => {
     const isAllowed = screens.includes(scr);
@@ -424,4 +428,44 @@ export function canSendChurchInvitations(user, policies = []) {
   }
 
   return false;
+}
+
+// صلاحية مسح QR الدعوات: للأدمن، الكاهن، أمين الخدمة، خادم الاجتماع، أو من تم تفعيل الصلاحية له
+export function canScanChurchInvitations(user, policies = []) {
+  if (!user) return false;
+  if (user.permissions?.read_only === true) return false;
+  if (
+    user.role === 'admin' ||
+    user.role === 'priest' ||
+    user.role === 'head_servant' ||
+    user.role === 'meeting_servant'
+  ) {
+    return true;
+  }
+
+  const perms = user.permissions || {};
+  if (
+    perms.can_scan_invitations === true ||
+    perms.actions?.scan_invitations === true ||
+    user.can_scan_invitations === true
+  ) {
+    return true;
+  }
+
+  if (Array.isArray(policies) && policies.length > 0) {
+    const { mergedActions } = mergeUserPolicies(user, policies);
+    if (mergedActions.scan_invitations === true || mergedActions.can_scan_invitations === true) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function canManageChurchInvitations(user, policies = []) {
+  return canSendChurchInvitations(user, policies) || canScanChurchInvitations(user, policies);
+}
+
+export function canViewChurchInvitations(user, policies = []) {
+  return Boolean(user);
 }
