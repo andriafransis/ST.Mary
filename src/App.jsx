@@ -164,7 +164,7 @@ function AppInner() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [churchName, setChurchName] = useState(DEFAULT_CHURCH_NAME);
-  const [churchTagline, setChurchTagline] = useState(DEFAULT_TAGLINE);
+  const [_churchTagline, setChurchTagline] = useState(DEFAULT_TAGLINE);
   const [churchLogoUrl, setChurchLogoUrl] = useState('');
 
   const [users, setUsers] = useState([]);
@@ -1246,7 +1246,7 @@ function AppInner() {
 
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <h1 className="font-black text-xs sm:text-sm text-amber-200 truncate max-w-[170px] sm:max-w-xs">
+                  <h1 className="font-black text-xs sm:text-sm text-amber-200 truncate max-w-42.5 sm:max-w-xs">
                     {currentUser.full_name}
                   </h1>
                   {currentUser.is_deacon && (
@@ -1260,7 +1260,7 @@ function AppInner() {
                     </span>
                   )}
                 </div>
-                <p className="text-[10px] sm:text-[11px] text-white/85 truncate">
+                <p className="text-[10px] sm:text-[11px] text-white/85 truncate" data-tagline={_churchTagline}>
                   {currentUser.permissions?.custom_role_label || ROLE_TEXT[currentUser.role] || currentUser.role} • {churchName}
                 </p>
               </div>
