@@ -1,33 +1,15 @@
-
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { uploadChurchMedia } from '../lib/mediaUpload';
-import UserFormModal from './UserFormModal'; // أو المسار الصحيح حسب مكان الملف عندك
+import UserFormModal from './UserFormModal';
 import {
   Church, Radio, Calendar, MapPin, Bus, Layers,
-  LogIn, UserPlus, X, ExternalLink, Newspaper, CheckCircle2,
+  LogIn, UserPlus, X, ExternalLink, Newspaper,
   ArrowRight, Video, Sparkles, Plus, Trash2, Edit3, Settings, Image as ImageIcon, Upload,
   ArrowUp, ArrowDown, Eye, EyeOff
 } from 'lucide-react';
 
 const DEFAULT_CHURCH_NAME = 'كنيسة السيدة العذراء مريم بالمطرية';
-
-const REGISTER_ROLES = [
-  { value: 'member', label: '👤 مخدوم (بفصل / مرحلة)' },
-  { value: 'parish', label: '🙏 شعب (رعية)' },
-  { value: 'parent', label: '👨‍👩‍👦 ولي أمر فقط' },
-  { value: 'servant', label: '📖 خادم مرحلة' },
-  { value: 'meeting_servant', label: '🎤 خادم اجتماع' },
-  { value: 'mercy_servant', label: '🤝 خادم إخوة رب' },
-  { value: 'worker', label: '🛠️ عامل / فراش الكنيسة' }
-];
-
-const STAGE_OPTIONS = [
-  'حضانة', 'أولى ابتدائي', 'ثانية ابتدائي', 'ثالثة ابتدائي', 'رابعة ابتدائي', 'خامسة ابتدائي', 'سادسة ابتدائي',
-  'أولى إعدادي', 'ثانية إعدادي', 'ثالثة إعدادي',
-  'أولى ثانوي', 'ثانية ثانوي', 'ثالثة ثانوي',
-  'جامعة وخريجين', 'خريجين وعاملين', 'اجتماع الشباب', 'اجتماع الأسرة', 'اجتماع عام'
-];
 
 const DEFAULT_SECTIONS = [
   { key: 'summary', defaultTitle: 'ملخص الأرقام السريع', sort_order: 1 },
@@ -38,6 +20,40 @@ const DEFAULT_SECTIONS = [
   { key: 'priest_bio', defaultTitle: 'آباء الكنيسة', sort_order: 6 },
   { key: 'history', defaultTitle: 'تاريخ الكنيسة', sort_order: 7 }
 ];
+
+const emptyVisitorForm = {
+  first_name: '',
+  second_name: '',
+  third_name: '',
+  fourth_name: '',
+  username: '',
+  password: '',
+  role: 'member',
+  gender: 'ذكر',
+  marital_status: 'single',
+  is_parent_guardian: false,
+  is_parish: false,
+  is_site_observer: false,
+  service_membership_status: 'in_service',
+  guardian_type: '',
+  family_role: 'مخدوم',
+  dob: '',
+  member_status: 'active',
+  is_deacon: false,
+  deacon_rank: '',
+  church_job: '',
+  detailed_stage: '',
+  assigned_class: '',
+  confession_father_id: '',
+  parent_id: '',
+  father_id: '',
+  mother_id: '',
+  phone: '',
+  job_title: '',
+  sector: '',
+  address: '',
+  permissions: {}
+};
 
 function toEmbedUrl(rawUrl = '') {
   const u = rawUrl.trim();
@@ -76,6 +92,12 @@ export default function PublicPage({
   const [marySettingsUrl, setMarySettingsUrl] = useState('');
   const [loading, setLoading] = useState(true);
 
+  const [priestsList, setPriestsList] = useState([]);
+  const [parentsWorkersList, setParentsWorkersList] = useState([]);
+  const [effectiveGroups, setEffectiveGroups] = useState([]);
+  const [servicesList, setServicesList] = useState([]);
+  const [deaconRanksTable, setDeaconRanksTable] = useState([]);
+
   const emptyEdit = {
     kind: 'news',
     title: '',
@@ -101,45 +123,12 @@ export default function PublicPage({
   const [sectionEdits, setSectionEdits] = useState({});
 
   const [showRegister, setShowRegister] = useState(false);
-  const [regStatus, setRegStatus] = useState({ type: '', msg: '' });
-  const [submitting, setSubmitting] = useState(false);
-
-  const emptyReg = {
-    first_name: '',
-    second_name: '',
-    third_name: '',
-    fourth_name: '',
-    username: '',
-    password: '',
-    phone: '',
-    dob: '',
-    gender: 'ذكر',
-    address: '',
-    requested_role: 'member',
-    also_parent: false,
-    guardian_type: 'father',
-    detailed_stage: 'أولى ثانوي',
-    job_title: '',
-    is_studying: true,
-    is_deacon: false,
-    deacon_rank: ''
-  };
-
-  const [regForm, setRegForm] = useState(emptyReg);
-  const [childrenList, setChildrenList] = useState([]);
-  const [tempChild, setTempChild] = useState({
-    child_name: '',
-    dob: '',
-    gender: 'ذكر',
-    stage: 'أولى ابتدائي',
-    study_details: '',
-    phone: ''
-  });
+  const [visitorForm, setVisitorForm] = useState(emptyVisitorForm);
 
   const loadPublic = async () => {
     setLoading(true);
     try {
-      const [pc, ev, ms, tr, pps, st] = await Promise.all([
+      const [pc, ev, ms, tr, pps, st, usersRes, groupsRes, srvRes, ranksRes] = await Promise.all([
         supabase
           .from('church_public_content')
           .select('*')
@@ -168,8 +157,22 @@ export default function PublicPage({
           .from('church_settings')
           .select('virgin_mary_image_url')
           .limit(1)
-          .maybeSingle()
+          .maybeSingle(),
+        supabase
+          .from('church_users')
+          .select('id, full_name, role, gender, phone, guardian_type, family_role, is_parent_guardian')
+          .order('full_name', { ascending: true }),
+        supabase
+          .from('service_groups')
+          .select('*'),
+        supabase
+          .from('church_services')
+          .select('*'),
+        supabase
+          .from('deacon_ranks')
+          .select('*')
       ]);
+
       if (pc.data) setItems(pc.data);
       if (ev.data) setEvents(ev.data);
       if (ms.data) setMasses(ms.data);
@@ -180,6 +183,22 @@ export default function PublicPage({
         );
       }
       if (st.data?.virgin_mary_image_url) setMarySettingsUrl(st.data.virgin_mary_image_url);
+
+      if (usersRes && !usersRes.error && Array.isArray(usersRes.data)) {
+        setPriestsList(usersRes.data.filter(u => u.role === 'priest'));
+        setParentsWorkersList(
+          usersRes.data.filter(u => u.role === 'parent' || u.role === 'worker' || u.is_parent_guardian)
+        );
+      }
+      if (groupsRes && !groupsRes.error && Array.isArray(groupsRes.data)) {
+        setEffectiveGroups(groupsRes.data);
+      }
+      if (srvRes && !srvRes.error && Array.isArray(srvRes.data)) {
+        setServicesList(srvRes.data);
+      }
+      if (ranksRes && !ranksRes.error && Array.isArray(ranksRes.data)) {
+        setDeaconRanksTable(ranksRes.data);
+      }
     } finally {
       setLoading(false);
     }
@@ -583,131 +602,12 @@ export default function PublicPage({
     ...events.map(e => `✨ ${e.title}${e.event_time ? ` — ${e.event_time}` : ''}`)
   ].join('   •   ');
 
-  const handleAddChildRow = () => {
-    if (!tempChild.child_name.trim()) return alert('اكتب اسم الابن/الابنة أولاً');
-    setChildrenList([...childrenList, { ...tempChild, child_name: tempChild.child_name.trim() }]);
-    setTempChild({ child_name: '', dob: '', gender: 'ذكر', stage: 'أولى ابتدائي', study_details: '', phone: '' });
-  };
-
-  const handleRegister = async (e) => {
-    e.preventDefault();
-    setRegStatus({ type: '', msg: '' });
-
-    const full_name = [
-      regForm.first_name,
-      regForm.second_name,
-      regForm.third_name,
-      regForm.fourth_name
-    ].map(s => s.trim()).filter(Boolean).join(' ');
-
-    if (!regForm.first_name.trim() || !regForm.second_name.trim() || !regForm.third_name.trim() || !regForm.fourth_name.trim()) {
-      return setRegStatus({ type: 'error', msg: 'يرجى إدخال الاسم الرباعي بالكامل.' });
-    }
-    const cleanUser = regForm.username.trim().toLowerCase().replace(/\s+/g, '');
-    if (cleanUser.length < 3 || cleanUser === 'admin') {
-      return setRegStatus({ type: 'error', msg: 'يرجى اختيار اسم مستخدم مناسب (3 أحرف على الأقل).' });
-    }
-    if (regForm.password.length < 3) {
-      return setRegStatus({ type: 'error', msg: 'كلمة المرور يجب أن تكون 3 أحرف على الأقل.' });
-    }
-
-    setSubmitting(true);
-    try {
-      const dbRole = regForm.requested_role === 'parish' ? 'member' : regForm.requested_role;
-      const isAlsoParent = regForm.requested_role === 'parent' || Boolean(regForm.also_parent);
-      const extraScreens = isAlsoParent && dbRole !== 'parent' ? ['parent_panel'] : [];
-      const effectiveChildren = tempChild.child_name.trim()
-        ? [...childrenList, { ...tempChild, child_name: tempChild.child_name.trim() }]
-        : childrenList;
-      const childrenSummary = effectiveChildren.map(c => `${c.child_name} (${c.study_details || c.stage})`).join('، ');
-      const userGender = regForm.gender === 'أنثى' ? 'أنثى' : 'ذكر';
-      const resolvedGuardianType = isAlsoParent
-        ? (regForm.guardian_type === 'mother' || userGender === 'أنثى' ? 'mother' : 'father')
-        : '';
-
-      const { data: savedUser, error } = await supabase.from('church_users').insert([{
-        username: cleanUser,
-        password: regForm.password,
-        full_name,
-        first_name: regForm.first_name.trim(),
-        second_name: regForm.second_name.trim(),
-        third_name: regForm.third_name.trim(),
-        fourth_name: regForm.fourth_name.trim(),
-        gender: userGender,
-        guardian_type: resolvedGuardianType,
-        family_role: resolvedGuardianType === 'mother' ? 'الأم' : resolvedGuardianType === 'father' ? 'الأب' : 'ابن/ابنة',
-        role: dbRole,
-        requested_role: dbRole,
-        status: 'pending',
-        sector: regForm.requested_role === 'parish' ? 'شعب (رعية)' : '',
-        phone: regForm.phone.trim(),
-        dob: regForm.dob || null,
-        address: regForm.address.trim(),
-        detailed_stage: regForm.requested_role === 'parish' ? 'شعب عام' : regForm.detailed_stage,
-        service_stage: regForm.requested_role === 'parish' ? 'شعب عام' : regForm.detailed_stage,
-        job_title: regForm.job_title || '',
-        is_studying: Boolean(regForm.is_studying),
-        children_names: childrenSummary,
-        is_deacon: Boolean(regForm.is_deacon),
-        deacon_rank: regForm.deacon_rank || '',
-        permissions: {
-          extra_screens: extraScreens,
-          view_parent_panel: isAlsoParent,
-          also_parent: isAlsoParent,
-          ...(resolvedGuardianType ? { guardian_type: resolvedGuardianType } : {})
-        }
-      }]).select().single();
-
-      if (error) {
-        return setRegStatus({
-          type: 'error',
-          msg: error.code === '23505' ? 'اسم المستخدم مستخدم بالفعل، اختر اسماً آخر.' : 'حدث خطأ: ' + error.message
-        });
-      }
-
-      if (isAlsoParent && savedUser && effectiveChildren.length > 0) {
-        const isMother = resolvedGuardianType === 'mother';
-        const childPayloads = effectiveChildren.map((c, idx) => ({
-          username: `${cleanUser}_c${idx + 1}_${Date.now().toString().slice(-4)}`,
-          password: regForm.password,
-          full_name: c.child_name.includes(' ') ? c.child_name : `${c.child_name} ${full_name}`,
-          first_name: c.child_name.split(' ')[0] || c.child_name,
-          gender: c.gender === 'أنثى' ? 'أنثى' : 'ذكر',
-          role: 'member',
-          requested_role: 'member',
-          status: 'pending',
-          parent_id: savedUser.id,
-          ...(isMother
-            ? { mother_id: savedUser.id, mother_full_name: full_name, mother_phone: regForm.phone.trim() }
-            : { father_id: savedUser.id, father_full_name: full_name, father_phone: regForm.phone.trim() }),
-          dob: c.dob || null,
-          detailed_stage: c.study_details || c.stage || 'أولى ابتدائي',
-          service_stage: c.stage || 'أولى ابتدائي',
-          phone: c.phone || '',
-          address: regForm.address.trim(),
-          is_studying: true,
-          permissions: {}
-        }));
-        const { error: childrenErr } = await supabase.from('church_users').insert(childPayloads);
-        if (childrenErr) {
-          return setRegStatus({
-            type: 'error',
-            msg: 'تم حفظ ولي الأمر ولكن تعذر حفظ الأبناء: ' + childrenErr.message
-          });
-        }
-      }
-
-      setRegStatus({
-        type: 'success',
-        msg: `تم إرسال طلب تسجيلك بنجاح ✅${effectiveChildren.length > 0 ? ` (مع ${effectiveChildren.length} من الأبناء)` : ''}! سيقوم أدمن الكنيسة بمراجعة بياناتك وقبول انضمامك.`
-      });
-      setRegForm(emptyReg);
-      setChildrenList([]);
-      setTempChild({ child_name: '', dob: '', gender: 'ذكر', stage: 'أولى ابتدائي', study_details: '', phone: '' });
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const availableServantServices = [
+    ...new Set([
+      ...servicesList.map(s => s.service_name || s.stage_name).filter(Boolean),
+      ...effectiveGroups.map(g => g.group_name).filter(Boolean)
+    ])
+  ];
 
   const renderCardActions = (item) => {
     if (!canEdit) return null;
@@ -747,8 +647,6 @@ export default function PublicPage({
       </div>
     );
   };
-
-  const showParentChildrenBox = regForm.requested_role === 'parent' || regForm.also_parent;
 
   const navButtons = [
     !hannaWordMeta.hidden && {
@@ -1317,7 +1215,10 @@ export default function PublicPage({
                 <div className="grid grid-cols-2 gap-2.5">
                   <button
                     type="button"
-                    onClick={() => { setRegStatus({ type: '', msg: '' }); setShowRegister(true); }}
+                    onClick={() => {
+                      setVisitorForm(emptyVisitorForm);
+                      setShowRegister(true);
+                    }}
                     className="min-h-11 px-3.5 py-2 bg-white/10 hover:bg-white/20 border border-white/30 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition"
                   >
                     <UserPlus size={15} /> تسجيل حساب جديد
@@ -1587,118 +1488,22 @@ export default function PublicPage({
       )}
 
       {showRegister && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl w-full max-w-xl p-6 space-y-4 max-h-[92vh] overflow-y-auto shadow-2xl">
-            <div className="flex justify-between items-center border-b pb-3">
-              <div><h3 className="text-base font-black text-[#7a1c24]">تسجيل عضو جديد — {activeChurchTitle}</h3><p className="text-[11px] text-gray-500">يتم مراجعة الطلب وقبوله من إدارة الكنيسة لتفعيل الحساب</p></div>
-              <button type="button" onClick={() => setShowRegister(false)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer"><X size={18} /></button>
-            </div>
-            {regStatus.msg && (
-              <div className={`p-3 rounded-2xl text-xs font-bold flex items-start gap-2 border ${regStatus.type === 'success' ? 'bg-green-50 border-green-300 text-green-900' : 'bg-red-50 border-red-300 text-red-800'}`}>
-                {regStatus.type === 'success' && <CheckCircle2 size={16} className="shrink-0 mt-0.5" />}
-                <span>{regStatus.msg}</span>
-              </div>
-            )}
-            <form onSubmit={handleRegister} autoComplete="off" className="space-y-3 text-xs font-bold text-gray-700">
-              <div className="bg-[#fbfaf7] p-3 rounded-2xl border space-y-1.5">
-                <label className="block text-[#7a1c24]">الاسم الرباعي بالكامل *</label>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  <input required placeholder="الأول *" className="p-2.5 border rounded-xl bg-white" value={regForm.first_name} onChange={e => setRegForm({ ...regForm, first_name: e.target.value })} />
-                  <input required placeholder="الثاني *" className="p-2.5 border rounded-xl bg-white" value={regForm.second_name} onChange={e => setRegForm({ ...regForm, second_name: e.target.value })} />
-                  <input required placeholder="الثالث *" className="p-2.5 border rounded-xl bg-white" value={regForm.third_name} onChange={e => setRegForm({ ...regForm, third_name: e.target.value })} />
-                  <input required placeholder="الرابع *" className="p-2.5 border rounded-xl bg-white" value={regForm.fourth_name} onChange={e => setRegForm({ ...regForm, fourth_name: e.target.value })} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2.5">
-                <input required placeholder="اسم المستخدم للدخول *" className="w-full p-2.5 border rounded-xl" value={regForm.username} onChange={e => setRegForm({ ...regForm, username: e.target.value })} />
-                <input required type="password" placeholder="كلمة المرور *" className="w-full p-2.5 border rounded-xl" value={regForm.password} onChange={e => setRegForm({ ...regForm, password: e.target.value })} />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                <input required type="tel" placeholder="رقم الموبايل / الواتساب *" className="w-full p-2.5 border rounded-xl" value={regForm.phone} onChange={e => setRegForm({ ...regForm, phone: e.target.value })} />
-                <input required type="date" className="w-full p-2.5 border rounded-xl" value={regForm.dob} onChange={e => setRegForm({ ...regForm, dob: e.target.value })} />
-                <select
-                  required
-                  className="w-full p-2.5 border rounded-xl bg-white"
-                  value={regForm.gender}
-                  onChange={e => {
-                    const g = e.target.value;
-                    setRegForm({
-                      ...regForm,
-                      gender: g,
-                      guardian_type: g === 'أنثى' ? 'mother' : 'father'
-                    });
-                  }}
-                >
-                  <option value="ذكر">♂️ النوع: ذكر</option>
-                  <option value="أنثى">♀️ النوع: أنثى</option>
-                </select>
-              </div>
-              <input required placeholder="العنوان بالتفصيل *" className="w-full p-2.5 border rounded-xl" value={regForm.address} onChange={e => setRegForm({ ...regForm, address: e.target.value })} />
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <select className="w-full p-2.5 border rounded-xl bg-white" value={regForm.requested_role} onChange={e => setRegForm({ ...regForm, requested_role: e.target.value })}>
-                  {REGISTER_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-                </select>
-                {regForm.requested_role !== 'parent' && regForm.requested_role !== 'parish' && (
-                  <select className="w-full p-2.5 border rounded-xl bg-white" value={regForm.detailed_stage} onChange={e => setRegForm({ ...regForm, detailed_stage: e.target.value })}>
-                    {STAGE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                )}
-              </div>
-              {regForm.requested_role !== 'parent' && (
-                <label className="flex items-center gap-2 p-3 bg-blue-50/70 border border-blue-200 rounded-xl cursor-pointer text-blue-950">
-                  <input type="checkbox" checked={regForm.also_parent} onChange={e => setRegForm({ ...regForm, also_parent: e.target.checked })} />
-                  <span>👨‍👩‍👦 وأيضاً: ولي أمر (لدي أبناء في الكنيسة وأريد متابعتهم)</span>
-                </label>
-              )}
-              {regForm.requested_role !== 'parent' && (
-                <div className="grid grid-cols-2 gap-2.5 bg-gray-50 p-2.5 rounded-xl border">
-                  <select className="p-2 border rounded-xl bg-white" value={regForm.is_studying ? 'yes' : 'no'} onChange={e => setRegForm({ ...regForm, is_studying: e.target.value === 'yes' })}>
-                    <option value="yes">طالب / بيدرس</option><option value="no">خريج / يعمل</option>
-                  </select>
-                  <input placeholder={regForm.is_studying ? 'السنة الدراسية / الكلية' : 'الوظيفة / المهنة'} className="p-2 border rounded-xl bg-white" value={regForm.job_title} onChange={e => setRegForm({ ...regForm, job_title: e.target.value })} />
-                </div>
-              )}
-              {showParentChildrenBox && (
-                <div className="bg-amber-50/70 p-3.5 rounded-2xl border-2 border-amber-200 space-y-2.5">
-                  <div className="flex flex-wrap justify-between items-center gap-2">
-                    <strong className="text-[#7a1c24] block">👨‍👩‍👦 بيانات الأبناء ({childrenList.length} مضافين):</strong>
-                    <select className="p-1.5 border border-amber-300 rounded-xl bg-white text-[11px]" value={regForm.guardian_type} onChange={e => setRegForm({ ...regForm, guardian_type: e.target.value })}>
-                      <option value="father">👨 الصفة: الأب</option>
-                      <option value="mother">👩 الصفة: الأم</option>
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    <input placeholder="اسم الابن / الابنة" className="p-2 border rounded-xl bg-white" value={tempChild.child_name} onChange={e => setTempChild({ ...tempChild, child_name: e.target.value })} />
-                    <input type="date" className="p-2 border rounded-xl bg-white" value={tempChild.dob} onChange={e => setTempChild({ ...tempChild, dob: e.target.value })} />
-                    <select className="p-2 border rounded-xl bg-white" value={tempChild.gender} onChange={e => setTempChild({ ...tempChild, gender: e.target.value })}>
-                      <option value="ذكر">♂️ ذكر</option>
-                      <option value="أنثى">♀️ أنثى</option>
-                    </select>
-                    <select className="p-2 border rounded-xl bg-white" value={tempChild.stage} onChange={e => setTempChild({ ...tempChild, stage: e.target.value })}>{STAGE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}</select>
-                    <input placeholder="تفاصيل الدراسة" className="sm:col-span-2 p-2 border rounded-xl bg-white" value={tempChild.study_details} onChange={e => setTempChild({ ...tempChild, study_details: e.target.value })} />
-                  </div>
-                  <div className="flex gap-2">
-                    <input type="tel" placeholder="موبايل الابن (اختياري)" className="flex-1 p-2 border rounded-xl bg-white" value={tempChild.phone} onChange={e => setTempChild({ ...tempChild, phone: e.target.value })} />
-                    <button type="button" onClick={handleAddChildRow} className="px-3.5 py-2 bg-amber-600 text-white rounded-xl flex items-center gap-1 cursor-pointer"><Plus size={14} /> إضافة ابن/ابنة</button>
-                  </div>
-                  {childrenList.map((c, idx) => (
-                    <div key={idx} className="bg-white p-2 rounded-xl border flex justify-between items-center text-[11px]">
-                      <span>• <strong>{c.child_name}</strong> ({c.gender === 'أنثى' ? 'أنثى' : 'ذكر'} • {c.study_details || c.stage})</span>
-                      <button type="button" onClick={() => setChildrenList(childrenList.filter((_, i) => i !== idx))} className="text-red-600 p-1"><Trash2 size={13} /></button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="flex items-center gap-3 bg-gray-50 p-2.5 rounded-xl border">
-                <label className="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" checked={regForm.is_deacon} onChange={e => setRegForm({ ...regForm, is_deacon: e.target.checked })} /> شماس؟</label>
-                {regForm.is_deacon && <input placeholder="الرتبة" className="flex-1 p-1.5 border rounded-lg bg-white" value={regForm.deacon_rank} onChange={e => setRegForm({ ...regForm, deacon_rank: e.target.value })} />}
-              </div>
-              <button type="submit" disabled={submitting} className="w-full py-3 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black text-sm cursor-pointer">
-                {submitting ? 'جاري إرسال الطلب...' : 'إرسال طلب التسجيل للموافقة'}
-              </button>
-            </form>
-          </div>
-        </div>
+        <UserFormModal
+          isEditing={false}
+          isVisitorMode={true}
+          formData={visitorForm}
+          setFormData={setVisitorForm}
+          priestsList={priestsList}
+          parentsWorkersList={parentsWorkersList}
+          availableServantServices={availableServantServices}
+          effectiveGroups={effectiveGroups}
+          services={servicesList}
+          deaconRanksTable={deaconRanksTable}
+          onClose={() => {
+            setShowRegister(false);
+            setVisitorForm(emptyVisitorForm);
+          }}
+        />
       )}
     </div>
   );
