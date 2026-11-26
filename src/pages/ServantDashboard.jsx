@@ -6,6 +6,7 @@ import {
   CheckCircle2, SlidersHorizontal, Camera, Cake, Award, MailPlus, Bus, QrCode
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { canScanChurchInvitations, canSendChurchInvitations } from '../lib/permissions';
 import { isScoutServant } from '../utils/scoutAccess';
 import BirthdayBanner from '../components/BirthdayBanner';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
@@ -196,6 +197,7 @@ export default function ServantDashboard({
   const canAdd = isAdminUser || servant?.permissions?.can_add !== false;
   const canManageStructure = true;
   const canExtractSheet = canExtractMasterSheet(servant);
+  const canSendInvites = useMemo(() => canSendChurchInvitations(servant), [servant]);
   const [showMasterSheet, setShowMasterSheet] = useState(false);
 
   const [localMemberPhotos, setLocalMemberPhotos] = useState({});
@@ -206,7 +208,7 @@ export default function ServantDashboard({
   const [birthdayTab, setBirthdayTab] = useState('members');
 
   const [servantTrips, setServantTrips] = useState([]);
-  const [tripSubTab, setTripSubTab] = useState('my_service'); // 'my_service' | 'general'
+  const [tripSubTab, setTripSubTab] = useState('my_service');
 
   const [scannerOpen, setScannerOpen] = useState(false);
   const [receivedInvitesCount, setReceivedInvitesCount] = useState(0);
@@ -584,8 +586,11 @@ export default function ServantDashboard({
     ...localGroups.map(g => [g.group_name, g])
   ]).values()];
 
+  // متاح لخادم الاجتماع ولأي مستخدم يملك صلاحية المسح أو مرتبط بالكشافة
   const canScanInvitations = useMemo(
-    () => isScoutServant(servant, localServices, localGroups),
+    () =>
+      canScanChurchInvitations(servant) ||
+      isScoutServant(servant, localServices, localGroups),
     [servant, localServices, localGroups]
   );
 
@@ -1506,7 +1511,7 @@ export default function ServantDashboard({
     { id: 'trips', label: '🚌 الرحلات', badge: myServiceTripsForServant.length + generalTripsForServant.length },
     { id: 'analytics', label: '📊 تحليلات ومكافآت الشهر' },
     { id: 'birthdays', label: `🎂 أعياد الميلاد (${activeBirthdayList.length})` },
-    { id: 'invite', label: '💌 دعوة لأبونا لمناسبة' }
+    ...(canSendInvites ? [{ id: 'invite', label: '💌 دعوة لأبونا لمناسبة' }] : [])
   ];
 
   return (
@@ -1564,16 +1569,18 @@ export default function ServantDashboard({
               onClick={() => setScannerOpen(true)}
               className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer shadow"
             >
-              <QrCode size={15} /> مسح QR الدعوات (الكشافة)
+              <QrCode size={15} /> مسح QR الدعوات
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => setActiveTab('invite')}
-            className="px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl font-black flex items-center gap-1.5 cursor-pointer shadow"
-          >
-            <MailPlus size={15} /> دعوة لأبونا
-          </button>
+          {canSendInvites && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('invite')}
+              className="px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl font-black flex items-center gap-1.5 cursor-pointer shadow"
+            >
+              <MailPlus size={15} /> دعوة لأبونا
+            </button>
+          )}
           {canExtractSheet && (
             <button
               type="button"
@@ -2187,7 +2194,7 @@ export default function ServantDashboard({
           </div>
         )}
 
-        {activeTab === 'invite' && (
+        {activeTab === 'invite' && canSendInvites && (
           <PriestInvitationModal
             inline={true}
             currentUser={servant}
@@ -2232,6 +2239,7 @@ export default function ServantDashboard({
             ) : (
               <div className={cardDensity === 'compact' ? 'grid grid-cols-1 xl:grid-cols-2 gap-3' : 'grid gap-3'}>
                 {displayedMembers.map((m, index) => {
+                  const seqNum = m.serial_no || index + 1;
                   const mActs = activities.filter(a => a.member_id === m.id);
                   const mNotes = getMemberActiveNotes(m.id);
                   const insights = getMemberInsights(m.id);
@@ -2272,7 +2280,7 @@ export default function ServantDashboard({
 
                         <div className="space-y-1.5 w-full min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="px-2 py-0.5 bg-[#7a1c24] text-white rounded-lg text-[10px] font-black">#{index + 1}</span>
+                            <span className="px-2 py-0.5 bg-[#7a1c24] text-white rounded-lg text-[10px] font-black">#{seqNum}</span>
                             <h3 className="text-sm font-black text-gray-900">{m.full_name}</h3>
                             {m.gender && (
                               <span className="px-2 py-0.5 bg-pink-50 text-pink-900 rounded-lg text-[10px] font-bold">
