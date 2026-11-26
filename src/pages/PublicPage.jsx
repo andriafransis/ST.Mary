@@ -1488,23 +1488,23 @@ export default function PublicPage({
       )}
 
       {showRegister && (
-        <UserFormModal
-          isEditing={false}
-          isVisitorMode={true}
-          formData={visitorForm}
-          setFormData={setVisitorForm}
-          priestsList={priestsList}
-          parentsWorkersList={parentsWorkersList}
-          availableServantServices={availableServantServices}
-          effectiveGroups={effectiveGroups}
-          services={servicesList}
-          deaconRanksTable={deaconRanksTable}
-          onClose={() => {
-            setShowRegister(false);
-            setVisitorForm(emptyVisitorForm);
-          }}
-        />
-      )}
+  <UserFormModal
+    isEditing={false}
+    isVisitorMode={true}
+    formData={visitorForm}
+    setFormData={setVisitorForm}
+    priestsList={[]}
+    parentsWorkersList={[]}
+    availableServantServices={availableServantServices}
+    effectiveGroups={effectiveGroups}
+    services={servicesList}
+    deaconRanksTable={deaconRanksTable}
+    onClose={() => {
+      setShowRegister(false);
+      setVisitorForm(emptyVisitorForm);
+    }}
+  />
+)}
     </div>
   );
 }
