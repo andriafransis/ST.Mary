@@ -1,10 +1,10 @@
 import { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import PriestInvitationsTab from '../components/priest/PriestInvitationsTab';
+import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
 import {
   CalendarCheck, MessageSquareHeart, ShieldCheck, Info, Calendar,
   MapPin, School, Search, UserCheck, Sparkles, X, Check, Unlink, RotateCcw, Bell,
-  Award, Gift, Link2, MailPlus, Bus
+  Award, Gift, Link2, MailPlus, Bus, QrCode
 } from 'lucide-react';
 
 export const isArabicOnlyName = (value = '') => {
@@ -260,6 +260,8 @@ export default function ParentDashboard({
   const [ackedNoteIds, setAckedNoteIds] = useState(() => new Set());
   const [parentTrips, setParentTrips] = useState([]);
   const [tripSubTab, setTripSubTab] = useState('children'); // 'children' | 'general'
+  const [receivedInvitesCount, setReceivedInvitesCount] = useState(0);
+  const [liveInviteToast, setLiveInviteToast] = useState('');
   const [dismissedIds, setDismissedIds] = useState(() => {
     try {
       const saved = localStorage.getItem(dismissedStorageKey);
@@ -298,6 +300,44 @@ export default function ParentDashboard({
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!parent?.id || !supabase || typeof supabase.channel !== 'function') return;
+
+    const channel = supabase
+      .channel(`parent-invites-alert-${parent.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'church_invitations'
+        },
+        (payload) => {
+          const row = payload.new || payload.old;
+          const matchesParent =
+            row?.recipient_user_id === parent.id ||
+            (parent.phone && row?.recipient_phone === parent.phone);
+          if (!matchesParent) return;
+
+          if (payload.eventType === 'INSERT' && payload.new) {
+            const tierLabel = payload.new.invite_tier === 'vip' ? 'VIP' : 'عامة';
+            setLiveInviteToast(
+              `وصلتك دعوة ${tierLabel}: ${payload.new.event_title}${payload.new.seat_or_zone ? ` (${payload.new.seat_or_zone})` : ''} — كود: ${payload.new.qr_token}`
+            );
+          } else if (payload.eventType === 'UPDATE' && payload.new?.status === 'checked_in') {
+            setLiveInviteToast(`تم مسح QR الدعوة (${payload.new.event_title}) وتسجيل الدخول.`);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (typeof supabase.removeChannel === 'function') {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [parent?.id, parent?.phone]);
 
   const effectiveChildrenList = useMemo(() => {
     const map = new Map();
@@ -480,18 +520,40 @@ export default function ParentDashboard({
 
   const tabsList = [
     { id: 'children', label: `👨‍👩‍👦 الأبناء والمتابعة (${effectiveChildrenList.length})` },
+    { id: 'my_invites', label: 'دعواتي QR', badge: receivedInvitesCount },
     ...(canManageLinks || linkRequests.length > 0
       ? [{ id: 'linking', label: '🔗 ربط الأبناء', badge: linkAlertCount }]
       : []),
     { id: 'trips', label: '🚌 الرحلات', badge: childrenTripsForParent.length + generalTripsForParent.length },
     { id: 'campaigns', label: `🎁 العروض والرحلات (${rewardCampaigns.length})` },
     { id: 'masses', label: `⛪ القداسات والاجتماعات (${events.length})` },
-    { id: 'services', label: `🏫 الفصول والخدمات (${services.length})` },
-    { id: 'invite', label: '💌 دعوة لأبونا لمناسبة' }
+    { id: 'services', label: `🏫 الفصول والخدمات (${services.length})` }
   ];
 
   return (
     <div className="space-y-3 text-xs" dir="rtl">
+      {liveInviteToast && (
+        <div className="bg-emerald-50 border-2 border-emerald-400 p-3 rounded-2xl flex items-center justify-between gap-2 text-emerald-950 font-black">
+          <span>{liveInviteToast}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setActiveTab('my_invites')}
+              className="px-3 py-1 bg-emerald-700 text-white rounded-xl cursor-pointer"
+            >
+              عرض الـ QR
+            </button>
+            <button
+              type="button"
+              onClick={() => setLiveInviteToast('')}
+              className="text-emerald-800 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -510,6 +572,16 @@ export default function ParentDashboard({
             <span className="text-[10px] opacity-85 font-bold block">الأبناء المربوطون</span>
             <strong className="text-sm sm:text-base text-amber-200 font-black">{effectiveChildrenList.length}</strong>
           </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('my_invites')}
+            className="bg-white/15 hover:bg-white/25 border border-white/20 px-3.5 py-2 rounded-2xl text-center cursor-pointer transition"
+          >
+            <span className="text-[10px] opacity-85 font-bold block flex items-center justify-center gap-1">
+              <QrCode size={11} /> دعواتي QR
+            </span>
+            <strong className="text-sm sm:text-base text-amber-200 font-black">{receivedInvitesCount}</strong>
+          </button>
           {linkAlertCount > 0 && (
             <button
               type="button"
@@ -520,13 +592,6 @@ export default function ParentDashboard({
               <strong className="text-sm">{linkAlertCount} ↗</strong>
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => setActiveTab('invite')}
-            className="col-span-2 sm:col-span-1 px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-2xl font-black flex items-center justify-center gap-1.5 cursor-pointer shadow"
-          >
-            <MailPlus size={15} /> دعوة لأبونا
-          </button>
         </div>
       </div>
 
@@ -576,6 +641,13 @@ export default function ParentDashboard({
       )}
 
       <div className="max-h-[calc(100vh-265px)] overflow-y-auto pr-1 space-y-4">
+        {activeTab === 'my_invites' && (
+          <ReceivedInvitationsSection
+            currentUser={parent}
+            onCountChange={setReceivedInvitesCount}
+          />
+        )}
+
         {activeTab === 'trips' && (
           <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3.5">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
@@ -1155,14 +1227,6 @@ export default function ParentDashboard({
               </div>
             )}
           </div>
-        )}
-
-        {activeTab === 'invite' && (
-          <PriestInvitationModal
-            inline={true}
-            currentUser={parent}
-            defaultRoleLabel="ولي أمر"
-          />
         )}
       </div>
     </div>
