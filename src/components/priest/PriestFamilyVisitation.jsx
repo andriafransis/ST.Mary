@@ -6,7 +6,7 @@ import {
   Calendar, MapPin, Phone, Briefcase, GraduationCap, Heart, X,
   UserPlus, Link2, RefreshCw, ChevronDown, ChevronUp,
   FileSpreadsheet, RotateCcw, UserCheck, ShieldCheck, AlertCircle,
-  Building2, CheckSquare, Square, Layers
+  Building2, CheckSquare, Square, Layers, Filter
 } from 'lucide-react';
 
 const MARITAL_STATUS_OPTIONS = ['متزوج', 'متزوجة', 'أعزب', 'آنسة', 'أرمل', 'أرملة', 'مطلق/ة'];
@@ -215,12 +215,12 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   const [statusFilter, setStatusFilter] = useState('all');
   const [streetFilter, setStreetFilter] = useState('all');
 
-  // نافذة اختيار المنطقة والشوارع والعمارات المراد طباعتها
-  const [showPrintPicker, setShowPrintPicker] = useState(false);
-  const [printAreaKey, setPrintAreaKey] = useState('all');
-  const [selectedPrintStreetKeys, setSelectedPrintStreetKeys] = useState([]);
-  const [selectedPrintBuildingKeys, setSelectedPrintBuildingKeys] = useState([]);
-  const [activePrintSelection, setActivePrintSelection] = useState(null);
+  // التاب المدمج داخل الكارت للبحث واختيار المنطقة والشوارع والعمارات والطباعة
+  const [showScopeTab, setShowScopeTab] = useState(false);
+  const [draftAreaKey, setDraftAreaKey] = useState('all');
+  const [draftStreetKeys, setDraftStreetKeys] = useState([]);
+  const [draftBuildingKeys, setDraftBuildingKeys] = useState([]);
+  const [appliedScope, setAppliedScope] = useState(null);
 
   const [selectedRoleByCandidate, setSelectedRoleByCandidate] = useState({});
   const [editingRelationKey, setEditingRelationKey] = useState(null);
@@ -428,28 +428,22 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     });
   }, [savedRecords, usersById, streetMap]);
 
-  // المناطق المتاحة للاختيار عند الطباعة
-  const availablePrintAreas = useMemo(() => {
+  const availableAreas = useMemo(() => {
     const map = new Map();
     for (const fam of familiesList) {
       const k = fam.area_key || 'unspecified_area';
       if (!map.has(k)) {
-        map.set(k, {
-          key: k,
-          label: fam.area_label,
-          familiesCount: 0
-        });
+        map.set(k, { key: k, label: fam.area_label, familiesCount: 0 });
       }
       map.get(k).familiesCount += 1;
     }
     return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, 'ar'));
   }, [familiesList]);
 
-  // الشوارع المتاحة داخل المنطقة المختارة للطباعة
-  const availablePrintStreets = useMemo(() => {
+  const availableStreetsInDraftArea = useMemo(() => {
     const map = new Map();
     for (const fam of familiesList) {
-      if (printAreaKey !== 'all' && fam.area_key !== printAreaKey) continue;
+      if (draftAreaKey !== 'all' && fam.area_key !== draftAreaKey) continue;
       const sk = fam.street_group_key;
       if (!map.has(sk)) {
         map.set(sk, {
@@ -468,16 +462,13 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
       return a.fullTitle.localeCompare(b.fullTitle, 'ar');
     });
-  }, [familiesList, printAreaKey]);
+  }, [familiesList, draftAreaKey]);
 
-  // العمارات المتاحة داخل الشوارع المختارة للطباعة
-  const availablePrintBuildings = useMemo(() => {
+  const availableBuildingsInDraftStreets = useMemo(() => {
     const map = new Map();
     for (const fam of familiesList) {
-      if (printAreaKey !== 'all' && fam.area_key !== printAreaKey) continue;
-      if (selectedPrintStreetKeys.length > 0 && !selectedPrintStreetKeys.includes(fam.street_group_key)) {
-        continue;
-      }
+      if (draftAreaKey !== 'all' && fam.area_key !== draftAreaKey) continue;
+      if (draftStreetKeys.length > 0 && !draftStreetKeys.includes(fam.street_group_key)) continue;
       const bKey = fam.building_key || '__no_building__';
       const compositeKey = `${fam.street_group_key}::${bKey}`;
       if (!map.has(compositeKey)) {
@@ -498,70 +489,72 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       if (stCmp !== 0) return stCmp;
       return String(a.buildingNoRaw).localeCompare(String(b.buildingNoRaw), 'ar', { numeric: true });
     });
-  }, [familiesList, printAreaKey, selectedPrintStreetKeys]);
+  }, [familiesList, draftAreaKey, draftStreetKeys]);
 
-  const openPrintPickerModal = () => {
-    const firstArea = availablePrintAreas[0]?.key || 'all';
-    const streetsInFirstArea = familiesList
-      .filter(f => firstArea === 'all' || f.area_key === firstArea)
-      .map(f => f.street_group_key);
-    const uniqueStreets = Array.from(new Set(streetsInFirstArea));
-
-    setPrintAreaKey(firstArea);
-    setSelectedPrintStreetKeys(uniqueStreets);
-    setSelectedPrintBuildingKeys([]);
-    setShowPrintPicker(true);
+  const toggleScopeTab = () => {
+    const nextOpen = !showScopeTab;
+    setShowScopeTab(nextOpen);
+    if (nextOpen && !appliedScope) {
+      const firstArea = availableAreas[0]?.key || 'all';
+      const streetsInArea = Array.from(
+        new Set(
+          familiesList
+            .filter(f => firstArea === 'all' || f.area_key === firstArea)
+            .map(f => f.street_group_key)
+        )
+      );
+      setDraftAreaKey(firstArea);
+      setDraftStreetKeys(streetsInArea);
+      setDraftBuildingKeys([]);
+    }
   };
 
-  const handleSelectPrintArea = (nextAreaKey) => {
-    setPrintAreaKey(nextAreaKey);
+  const handleDraftAreaChange = (nextArea) => {
+    setDraftAreaKey(nextArea);
     const streetsInArea = Array.from(
       new Set(
         familiesList
-          .filter(f => nextAreaKey === 'all' || f.area_key === nextAreaKey)
+          .filter(f => nextArea === 'all' || f.area_key === nextArea)
           .map(f => f.street_group_key)
       )
     );
-    setSelectedPrintStreetKeys(streetsInArea);
-    setSelectedPrintBuildingKeys([]);
+    setDraftStreetKeys(streetsInArea);
+    setDraftBuildingKeys([]);
   };
 
-  const togglePrintStreet = (streetKey) => {
-    setSelectedPrintStreetKeys(prev => {
+  const toggleDraftStreet = (streetKey) => {
+    setDraftStreetKeys(prev => {
       const exists = prev.includes(streetKey);
       const next = exists ? prev.filter(k => k !== streetKey) : [...prev, streetKey];
-      setSelectedPrintBuildingKeys(currB =>
-        currB.filter(bk => {
-          const stPart = bk.split('::')[0];
-          return next.includes(stPart);
-        })
+      setDraftBuildingKeys(currB =>
+        currB.filter(bk => next.includes(bk.split('::')[0]))
       );
       return next;
     });
   };
 
-  const togglePrintBuilding = (compositeKey) => {
-    setSelectedPrintBuildingKeys(prev =>
+  const toggleDraftBuilding = (compositeKey) => {
+    setDraftBuildingKeys(prev =>
       prev.includes(compositeKey) ? prev.filter(k => k !== compositeKey) : [...prev, compositeKey]
     );
   };
 
-  const executeSelectedPrint = () => {
+  const handleSearchScope = () => {
     const chosenStreets =
-      selectedPrintStreetKeys.length > 0
-        ? selectedPrintStreetKeys
-        : availablePrintStreets.map(s => s.key);
+      draftStreetKeys.length > 0
+        ? draftStreetKeys
+        : availableStreetsInDraftArea.map(s => s.key);
 
-    setActivePrintSelection({
-      areaKey: printAreaKey,
+    setAppliedScope({
+      areaKey: draftAreaKey,
       streetKeys: chosenStreets,
-      buildingCompositeKeys: selectedPrintBuildingKeys
+      buildingCompositeKeys: draftBuildingKeys
     });
-    setShowPrintPicker(false);
+  };
 
-    setTimeout(() => {
-      window.print();
-    }, 120);
+  const handleResetScope = () => {
+    setAppliedScope(null);
+    setDraftBuildingKeys([]);
   };
 
   const handleClearAllFamilies = async () => {
@@ -598,6 +591,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       setSavedRecords([]);
       setSelectedFamily(null);
       setExpandedCards({});
+      setAppliedScope(null);
       alert('تم مسح الأسر بنجاح ✅ يمكنك الآن الضغط على (+ إضافة أسرة) وإضافة من تريد وربط صلته.');
     } finally {
       setClearingAll(false);
@@ -1029,6 +1023,21 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     const base = familiesList.filter(r => {
       if (statusFilter !== 'all' && r.family_status !== statusFilter) return false;
       if (streetFilter !== 'all' && String(r.street_id || '') !== String(streetFilter)) return false;
+
+      if (appliedScope) {
+        if (appliedScope.areaKey && appliedScope.areaKey !== 'all') {
+          if (r.area_key !== appliedScope.areaKey) return false;
+        }
+        if (Array.isArray(appliedScope.streetKeys) && appliedScope.streetKeys.length > 0) {
+          if (!appliedScope.streetKeys.includes(r.street_group_key)) return false;
+        }
+        if (Array.isArray(appliedScope.buildingCompositeKeys) && appliedScope.buildingCompositeKeys.length > 0) {
+          const bKey = r.building_key || '__no_building__';
+          const compKey = `${r.street_group_key}::${bKey}`;
+          if (!appliedScope.buildingCompositeKeys.includes(compKey)) return false;
+        }
+      }
+
       if (!searchQ.trim()) return true;
       return normalizeArabic(JSON.stringify(r)).includes(normalizeArabic(searchQ));
     });
@@ -1041,36 +1050,12 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       if (stCmp !== 0) return stCmp;
       return compareBuildingAndFloor(a, b);
     });
-  }, [familiesList, statusFilter, streetFilter, searchQ]);
-
-  const printSourceRecords = useMemo(() => {
-    if (!activePrintSelection) return filteredRecords;
-    return filteredRecords.filter(fam => {
-      if (activePrintSelection.areaKey && activePrintSelection.areaKey !== 'all') {
-        if (fam.area_key !== activePrintSelection.areaKey) return false;
-      }
-      if (
-        Array.isArray(activePrintSelection.streetKeys) &&
-        activePrintSelection.streetKeys.length > 0
-      ) {
-        if (!activePrintSelection.streetKeys.includes(fam.street_group_key)) return false;
-      }
-      if (
-        Array.isArray(activePrintSelection.buildingCompositeKeys) &&
-        activePrintSelection.buildingCompositeKeys.length > 0
-      ) {
-        const bKey = fam.building_key || '__no_building__';
-        const compKey = `${fam.street_group_key}::${bKey}`;
-        if (!activePrintSelection.buildingCompositeKeys.includes(compKey)) return false;
-      }
-      return true;
-    });
-  }, [filteredRecords, activePrintSelection]);
+  }, [familiesList, statusFilter, streetFilter, appliedScope, searchQ]);
 
   const streetPrintPages = useMemo(() => {
     const groupsMap = new Map();
 
-    for (const fam of printSourceRecords) {
+    for (const fam of filteredRecords) {
       const key = fam.street_group_key || 'default';
       if (!groupsMap.has(key)) {
         groupsMap.set(key, {
@@ -1110,7 +1095,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           })
         };
       });
-  }, [printSourceRecords]);
+  }, [filteredRecords]);
 
   const handleExportExcelSheet = () => {
     const headers = [
@@ -1368,62 +1353,245 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         }
       `}</style>
 
-      <div className="bg-white p-4 rounded-3xl border border-gray-200 shadow-2xs flex flex-wrap justify-between items-center gap-3 print:hidden">
-        <div>
-          <h3 className="text-sm sm:text-base font-black text-[#7a1c24] flex items-center gap-1.5">
-            <Users size={18} /> سجل افتقاد الأسر ({filteredRecords.length} أسرة • {streetPrintPages.length} شارع/صفحة)
-          </h3>
-          <p className="text-[11px] text-gray-500 mt-0.5">
-            حدد المنطقة أولاً ثم اختر الشوارع والعمارات اللي هتنزلها عند الطباعة، وكل شارع يخرج في صفحة مستقلة بأسره.
-          </p>
+      {/* كارت الرأس + التاب المدمج داخله لاختيار المنطقة والشوارع والعمارات والبحث والطباعة */}
+      <div className="bg-white p-4 rounded-3xl border border-gray-200 shadow-2xs space-y-3 print:hidden">
+        <div className="flex flex-wrap justify-between items-center gap-3">
+          <div>
+            <h3 className="text-sm sm:text-base font-black text-[#7a1c24] flex items-center gap-1.5">
+              <Users size={18} /> سجل افتقاد الأسر ({filteredRecords.length} أسرة • {streetPrintPages.length} شارع/صفحة)
+            </h3>
+            <p className="text-[11px] text-gray-500 mt-0.5">
+              افتح تاب «تحديد المنطقة والشوارع» لتختار المنطقة والشارع والعمارة وتدوس بحث وتطبع، وكل شارع يخرج في صفحة مستقلة.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={clearingAll}
+              onClick={handleClearAllFamilies}
+              className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-900 border border-rose-300 rounded-xl font-black flex items-center gap-1 cursor-pointer"
+            >
+              <RotateCcw size={14} /> {clearingAll ? 'جاري المسح...' : 'مسح الأسر والبدء من جديد'}
+            </button>
+            <button
+              type="button"
+              onClick={loadData}
+              className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl font-black flex items-center gap-1 cursor-pointer"
+            >
+              <RefreshCw size={14} /> تحديث
+            </button>
+            <button
+              type="button"
+              onClick={handleExportExcelSheet}
+              className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
+            >
+              <FileSpreadsheet size={14} /> تصدير شيت إكسيل
+            </button>
+            <button
+              type="button"
+              onClick={toggleScopeTab}
+              className={`px-3.5 py-2 rounded-xl font-black flex items-center gap-1.5 cursor-pointer transition ${
+                showScopeTab || appliedScope
+                  ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                  : 'bg-slate-800 hover:bg-slate-900 text-white'
+              }`}
+            >
+              <Filter size={14} />
+              <span>تحديد المنطقة والشوارع والطباعة</span>
+              {showScopeTab ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="px-3.5 py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
+              title="طباعة النتائج الظاهرة حالياً"
+            >
+              <Printer size={14} /> طباعة
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEditingSavedId(null);
+                setForm(emptyFamilyForm);
+                setMemberFilterQ('');
+                setSelectedMemberDbUserId('');
+                setShowForm(true);
+              }}
+              className="px-4 py-2 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
+            >
+              <Plus size={15} /> إضافة أسرة
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={clearingAll}
-            onClick={handleClearAllFamilies}
-            className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-900 border border-rose-300 rounded-xl font-black flex items-center gap-1 cursor-pointer"
-          >
-            <RotateCcw size={14} /> {clearingAll ? 'جاري المسح...' : 'مسح الأسر والبدء من جديد'}
-          </button>
-          <button
-            type="button"
-            onClick={loadData}
-            className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl font-black flex items-center gap-1 cursor-pointer"
-          >
-            <RefreshCw size={14} /> تحديث
-          </button>
-          <button
-            type="button"
-            onClick={handleExportExcelSheet}
-            className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
-          >
-            <FileSpreadsheet size={14} /> تصدير شيت إكسيل
-          </button>
-          <button
-            type="button"
-            onClick={openPrintPickerModal}
-            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
-          >
-            <Printer size={14} /> اختيار منطقة / شوارع / عمارات وطباعة
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setEditingSavedId(null);
-              setForm(emptyFamilyForm);
-              setMemberFilterQ('');
-              setSelectedMemberDbUserId('');
-              setShowForm(true);
-            }}
-            className="px-4 py-2 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
-          >
-            <Plus size={15} /> إضافة أسرة
-          </button>
-        </div>
+        {/* التاب الخارجي داخل الكارت: اختيار المنطقة ← الشوارع ← العمارات + زر بحث وطباعة */}
+        {showScopeTab && (
+          <div className="pt-3 border-t border-gray-200 bg-[#fbfaf7] p-4 rounded-2xl space-y-3.5">
+            <div className="flex flex-wrap justify-between items-center gap-2">
+              <strong className="text-xs font-black text-[#7a1c24] flex items-center gap-1.5">
+                <Layers size={15} /> تاب اختيار نطاق الافتقاد والطباعة
+              </strong>
+              {appliedScope && (
+                <button
+                  type="button"
+                  onClick={handleResetScope}
+                  className="px-2.5 py-1 bg-rose-50 text-rose-800 border border-rose-200 rounded-lg text-[11px] font-black cursor-pointer"
+                >
+                  إلغاء تحديد النطاق ✕
+                </button>
+              )}
+            </div>
+
+            {/* 1. اختيار المنطقة */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
+              <label className="text-xs font-black text-gray-800">
+                ① المنطقة:
+              </label>
+              <select
+                className="sm:col-span-2 p-2.5 border rounded-xl bg-white text-xs font-black outline-none focus:border-[#7a1c24]"
+                value={draftAreaKey}
+                onChange={e => handleDraftAreaChange(e.target.value)}
+              >
+                <option value="all">كل المناطق ({familiesList.length} أسرة)</option>
+                {availableAreas.map(ar => (
+                  <option key={ar.key} value={ar.key}>
+                    {ar.label} ({ar.familiesCount} أسرة)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 2. اختيار الشوارع */}
+            <div className="space-y-2">
+              <div className="flex flex-wrap justify-between items-center gap-2">
+                <strong className="text-xs font-black text-gray-800">
+                  ② الشوارع ({draftStreetKeys.length} من {availableStreetsInDraftArea.length}):
+                </strong>
+                <div className="flex gap-2 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDraftStreetKeys(availableStreetsInDraftArea.map(s => s.key));
+                      setDraftBuildingKeys([]);
+                    }}
+                    className="px-2.5 py-1 bg-white border rounded-lg hover:bg-gray-50 cursor-pointer"
+                  >
+                    تحديد كل الشوارع
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDraftStreetKeys([]);
+                      setDraftBuildingKeys([]);
+                    }}
+                    className="px-2.5 py-1 bg-white border rounded-lg hover:bg-gray-50 cursor-pointer"
+                  >
+                    إلغاء الشوارع
+                  </button>
+                </div>
+              </div>
+
+              {availableStreetsInDraftArea.length === 0 ? (
+                <p className="text-gray-400 text-center py-2 bg-white rounded-xl border">لا توجد شوارع مسجلة لهذه المنطقة.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-40 overflow-y-auto">
+                  {availableStreetsInDraftArea.map(st => {
+                    const checked = draftStreetKeys.includes(st.key);
+                    return (
+                      <button
+                        key={st.key}
+                        type="button"
+                        onClick={() => toggleDraftStreet(st.key)}
+                        className={`p-2 rounded-xl border text-right flex items-center justify-between gap-2 cursor-pointer transition ${
+                          checked
+                            ? 'bg-[#7a1c24] text-white border-[#7a1c24]'
+                            : 'bg-white text-gray-900 border-gray-200 hover:border-[#7a1c24]/40'
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5 truncate">
+                          {checked ? <CheckSquare size={14} /> : <Square size={14} />}
+                          <span className="truncate">{st.streetLabel}</span>
+                        </span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] shrink-0 ${
+                          checked ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-950'
+                        }`}>
+                          {st.familiesCount}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* 3. اختيار عمارات محددة داخل الشوارع المختارة */}
+            <div className="space-y-2">
+              <div className="flex flex-wrap justify-between items-center gap-2">
+                <strong className="text-xs font-black text-blue-950 flex items-center gap-1">
+                  <Building2 size={14} /> ③ العمارات (اختياري — لو تركته فارغاً يجلب كل عمارات الشوارع المختارة):
+                </strong>
+                {draftBuildingKeys.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setDraftBuildingKeys([])}
+                    className="px-2.5 py-1 bg-white border border-blue-200 text-blue-950 rounded-lg text-[11px] cursor-pointer"
+                  >
+                    كل العمارات ({draftBuildingKeys.length} محدد)
+                  </button>
+                )}
+              </div>
+
+              {availableBuildingsInDraftStreets.length === 0 ? (
+                <p className="text-gray-400 text-center py-2 bg-white rounded-xl border text-[11px]">لا توجد عمارات متاحة.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+                  {availableBuildingsInDraftStreets.map(b => {
+                    const checked = draftBuildingKeys.includes(b.compositeKey);
+                    return (
+                      <button
+                        key={b.compositeKey}
+                        type="button"
+                        onClick={() => toggleDraftBuilding(b.compositeKey)}
+                        className={`px-3 py-1.5 rounded-xl border text-[11px] font-black cursor-pointer transition ${
+                          checked
+                            ? 'bg-blue-700 text-white border-blue-700'
+                            : 'bg-white text-gray-800 border-gray-200 hover:border-blue-400'
+                        }`}
+                      >
+                        {checked ? '✓ ' : ''}{b.buildingLabel} • {b.streetLabel} ({b.familiesCount})
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* أزرار البحث وعرض النتائج وطباعتها */}
+            <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-gray-200">
+              <button
+                type="button"
+                onClick={handleSearchScope}
+                className="px-5 py-2 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
+              >
+                <Search size={14} /> بحث وعرض النتائج
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleSearchScope();
+                  setTimeout(() => window.print(), 120);
+                }}
+                className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
+              >
+                <Printer size={14} /> بحث وطباعة النتائج
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
+      {/* شريط البحث السريع والحالة الأسرية */}
       <div className="bg-white p-3.5 rounded-2xl border border-gray-200 flex flex-col sm:flex-row gap-2.5 print:hidden">
         <div className="relative flex-1">
           <Search size={15} className="absolute right-3 top-2.5 text-gray-400" />
@@ -1434,13 +1602,14 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             onChange={e => setSearchQ(e.target.value)}
           />
         </div>
-        {(searchQ || streetFilter !== 'all' || statusFilter !== 'all') && (
+        {(searchQ || streetFilter !== 'all' || statusFilter !== 'all' || appliedScope) && (
           <button
             type="button"
             onClick={() => {
               setSearchQ('');
               setStreetFilter('all');
               setStatusFilter('all');
+              setAppliedScope(null);
             }}
             className="px-3 py-2 bg-rose-50 text-rose-800 border border-rose-200 rounded-xl font-black cursor-pointer"
           >
@@ -1473,13 +1642,14 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         </select>
       </div>
 
+      {/* عرض كروت الأسر المطابقة */}
       <div className="print:hidden">
         {loading ? (
           <div className="bg-white p-8 rounded-3xl border text-center text-gray-500 font-bold">جاري تحميل السجل...</div>
         ) : filteredRecords.length === 0 ? (
           <div className="bg-white p-8 rounded-3xl border border-dashed text-center space-y-2">
-            <p className="text-gray-600 font-black">لا توجد أسر مضافة حالياً في سجل الافتقاد.</p>
-            <p className="text-gray-400 text-[11px]">اضغط على زر «+ إضافة أسرة» لإضافة أسرة وتحديد صلة كل فرد فيها بنفسك.</p>
+            <p className="text-gray-600 font-black">لا توجد أسر مطابقة حالياً.</p>
+            <p className="text-gray-400 text-[11px]">يمكنك تغيير اختيارات المنطقة/الشارع أو الضغط على «+ إضافة أسرة».</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
@@ -1815,172 +1985,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           </div>
         ))}
       </div>
-
-      {/* نافذة تحديد المنطقة أولاً ثم الشوارع ثم العمارات للطباعة */}
-      {showPrintPicker && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-55 print:hidden">
-          <div className="bg-white rounded-3xl w-full max-w-3xl p-5 sm:p-6 space-y-4 font-bold max-h-[92vh] overflow-y-auto text-gray-900">
-            <div className="flex justify-between items-center border-b pb-3">
-              <div>
-                <h3 className="text-sm sm:text-base font-black text-[#7a1c24] flex items-center gap-1.5">
-                  <Printer size={17} /> تحديد خط سير الطباعة (المنطقة ← الشوارع ← العمارات)
-                </h3>
-                <p className="text-[11px] text-gray-500 font-normal mt-0.5">
-                  اختر المنطقة أولاً، ثم حدد الشوارع التي ستنزلها والعمارات المطلوبة، وسيُطبع كل شارع في صفحة مستقلة.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowPrintPicker(false)}
-                className="p-1.5 bg-gray-100 rounded-xl cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            {/* الخطوة 1: اختيار المنطقة */}
-            <div className="bg-amber-50/60 p-3.5 rounded-2xl border border-amber-200 space-y-2">
-              <label className="text-xs font-black text-amber-950 flex items-center gap-1.5">
-                <Layers size={14} /> ① اختر المنطقة أولاً:
-              </label>
-              <select
-                className="w-full p-2.5 border rounded-xl bg-white text-xs font-black outline-none focus:border-[#7a1c24]"
-                value={printAreaKey}
-                onChange={e => handleSelectPrintArea(e.target.value)}
-              >
-                <option value="all">كل المناطق ({familiesList.length} أسرة)</option>
-                {availablePrintAreas.map(ar => (
-                  <option key={ar.key} value={ar.key}>
-                    {ar.label} ({ar.familiesCount} أسرة)
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* الخطوة 2: اختيار الشوارع داخل المنطقة */}
-            <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-gray-200 space-y-2.5">
-              <div className="flex flex-wrap justify-between items-center gap-2">
-                <strong className="text-xs font-black text-[#7a1c24]">
-                  ② اختر الشوارع المراد طباعتها ({selectedPrintStreetKeys.length} من {availablePrintStreets.length}):
-                </strong>
-                <div className="flex gap-2 text-[11px]">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedPrintStreetKeys(availablePrintStreets.map(s => s.key));
-                      setSelectedPrintBuildingKeys([]);
-                    }}
-                    className="px-2.5 py-1 bg-white border rounded-lg hover:bg-gray-50 cursor-pointer"
-                  >
-                    تحديد الكل
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedPrintStreetKeys([]);
-                      setSelectedPrintBuildingKeys([]);
-                    }}
-                    className="px-2.5 py-1 bg-white border rounded-lg hover:bg-gray-50 cursor-pointer"
-                  >
-                    إلغاء التحديد
-                  </button>
-                </div>
-              </div>
-
-              {availablePrintStreets.length === 0 ? (
-                <p className="text-gray-400 text-center py-3">لا توجد شوارع مسجلة لهذه المنطقة.</p>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto">
-                  {availablePrintStreets.map(st => {
-                    const checked = selectedPrintStreetKeys.includes(st.key);
-                    return (
-                      <button
-                        key={st.key}
-                        type="button"
-                        onClick={() => togglePrintStreet(st.key)}
-                        className={`p-2.5 rounded-xl border text-right flex items-center justify-between gap-2 cursor-pointer transition ${
-                          checked
-                            ? 'bg-[#7a1c24] text-white border-[#7a1c24]'
-                            : 'bg-white text-gray-900 border-gray-200 hover:border-[#7a1c24]/40'
-                        }`}
-                      >
-                        <span className="flex items-center gap-1.5 truncate">
-                          {checked ? <CheckSquare size={15} /> : <Square size={15} />}
-                          <span className="truncate">{st.streetLabel}</span>
-                        </span>
-                        <span className={`px-2 py-0.5 rounded-lg text-[10px] shrink-0 ${
-                          checked ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-950'
-                        }`}>
-                          {st.familiesCount} أسرة
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* الخطوة 3: اختيار عمارات محددة (اختياري — إذا لم تحدد عمارات يُطبع كل عمارات الشوارع المختارة) */}
-            <div className="bg-blue-50/40 p-3.5 rounded-2xl border border-blue-200 space-y-2.5">
-              <div className="flex flex-wrap justify-between items-center gap-2">
-                <strong className="text-xs font-black text-blue-950 flex items-center gap-1.5">
-                  <Building2 size={14} /> ③ تحديد عمارات معينة (اختياري — لو تركته فارغاً يُطبع كل عمارات الشوارع المختارة):
-                </strong>
-                {selectedPrintBuildingKeys.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedPrintBuildingKeys([])}
-                    className="px-2.5 py-1 bg-white border border-blue-200 text-blue-950 rounded-lg text-[11px] cursor-pointer"
-                  >
-                    كل العمارات ({selectedPrintBuildingKeys.length} محدد)
-                  </button>
-                )}
-              </div>
-
-              {availablePrintBuildings.length === 0 ? (
-                <p className="text-gray-400 text-center py-2 text-[11px]">لا توجد عمارات متاحة للاختيار.</p>
-              ) : (
-                <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto">
-                  {availablePrintBuildings.map(b => {
-                    const checked = selectedPrintBuildingKeys.includes(b.compositeKey);
-                    return (
-                      <button
-                        key={b.compositeKey}
-                        type="button"
-                        onClick={() => togglePrintBuilding(b.compositeKey)}
-                        className={`px-3 py-1.5 rounded-xl border text-[11px] font-black cursor-pointer transition ${
-                          checked
-                            ? 'bg-blue-700 text-white border-blue-700'
-                            : 'bg-white text-gray-800 border-gray-200 hover:border-blue-400'
-                        }`}
-                      >
-                        {checked ? '✓ ' : ''}{b.buildingLabel} • {b.streetLabel} ({b.familiesCount})
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t">
-              <button
-                type="button"
-                onClick={() => setShowPrintPicker(false)}
-                className="px-4 py-2 border rounded-xl cursor-pointer"
-              >
-                إلغاء
-              </button>
-              <button
-                type="button"
-                onClick={executeSelectedPrint}
-                className="px-5 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
-              >
-                <Printer size={15} /> طباعة المحدد الآن
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {linkModalFam && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-55 print:hidden">
