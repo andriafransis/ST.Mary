@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { startUserSession, logActivity } from '../lib/activityLogger';
@@ -11,6 +10,7 @@ import WhatsAppComposerModal, { FALLBACK_WA_TEMPLATES, formatWaMessage } from '.
 import BellNotificationsPanel from '../components/priest/BellNotificationsPanel';
 import ConfessorProfileModal from '../components/priest/ConfessorProfileModal';
 import PriestFamilyVisitation from '../components/priest/PriestFamilyVisitation';
+import PriestInvitationsTab from './PriestInvitationsTab';
 import CertificatesRegistry from '../components/CertificatesRegistry';
 import EducationalCenterManager from '../components/EducationalCenterManager';
 import JosephArimatheaManager from '../components/JosephArimatheaManager';
@@ -117,6 +117,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
   const [masses, setMasses] = useState([]);
   const [personalItems, setPersonalItems] = useState([]);
   const [invitations, setInvitations] = useState([]);
+  const [eventInvitationsCount, setEventInvitationsCount] = useState(0);
   const [confessionIntervalDays, setConfessionIntervalDays] = useState(45);
   const [savingInterval, setSavingInterval] = useState(false);
 
@@ -242,7 +243,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     if (!priest?.id) return;
     const [
       us, sl, cb, sh, sn, vs, sr, ms, ps, fm, fa, cats, sb, uc, cc, ce, wt, jc, jm,
-      sg, commView, campRes, rewRes, notesRes, hidReqsRes, nCardsRes, cfgData, invRes, intvRes
+      sg, commView, campRes, rewRes, notesRes, hidReqsRes, nCardsRes, cfgData, invRes, intvRes, evInvRes
     ] = await Promise.all([
       supabase.from('church_users').select('*').order('created_at', { ascending: true }),
       supabase.from('priest_confession_slots').select('*').eq('priest_id', priest.id).order('slot_date', { ascending: true }),
@@ -272,7 +273,8 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
       supabase.from('nested_cards').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true }),
       loadAdminCardsConfig(),
       supabase.from('priest_invitations').select('*').or(`priest_id.is.null,priest_id.eq.${priest.id}`).order('created_at', { ascending: false }),
-      supabase.from('service_settings').select('value').eq('key', 'confession_interval_days').maybeSingle()
+      supabase.from('service_settings').select('value').eq('key', 'confession_interval_days').maybeSingle(),
+      supabase.from('church_invitations').select('id', { count: 'exact', head: true })
     ]);
 
     if (us.data) setLocalUsers(us.data);
@@ -314,6 +316,9 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     if (!invRes.error && invRes.data) setInvitations(invRes.data);
     if (!intvRes.error && intvRes.data?.value?.days) {
       setConfessionIntervalDays(Number(intvRes.data.value.days) || 45);
+    }
+    if (!evInvRes?.error && typeof evInvRes?.count === 'number') {
+      setEventInvitationsCount(evInvRes.count);
     }
   };
 
@@ -523,7 +528,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
 
   const navigateByTargetScreen = (targetScreen) => {
     if (!targetScreen) return;
-    if (['service_hub', 'confessions', 'family_visitation', 'masses', 'personal', 'cases', 'certificates', 'edu_center', 'joseph_arimathea', 'hub'].includes(targetScreen)) {
+    if (['service_hub', 'confessions', 'family_visitation', 'event_invitations', 'masses', 'personal', 'cases', 'certificates', 'edu_center', 'joseph_arimathea', 'hub'].includes(targetScreen)) {
       setSelectedNestedParentKey(null);
       setActiveCard(targetScreen);
       if (targetScreen === 'service_hub') setActiveServiceCard(null);
@@ -799,6 +804,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
       { id: 'service_hub', label: '🏫 الخدمة' },
       { id: 'confessions', label: '🙏 الاعترافات' },
       { id: 'family_visitation', label: '👨‍👩‍👧‍👦 افتقاد الأسر' },
+      { id: 'event_invitations', label: '💌 دعوات المناسبات' },
       { id: 'certificates', label: '📜 التوثيق وخلو الموانع' },
       { id: 'masses', label: '⛪ القداسات' },
       { id: 'personal', label: '📅 الجدول الخاص', badge: pendingInvitesCount },
@@ -1730,6 +1736,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
       { id: 'service_hub', icon: '🏫', title: 'الخدمة ومدارس الأحد', desc: '3 كروت مستقلة: شيت التسلسل والافتقاد والترحيم • الالتزام والكفاءة والعروض والرحلات • جدول الخدمة', count: `${stagesMap.length} خدمة • ${localUsers.length} مسجل`, color: 'border-teal-300 bg-teal-50/40' },
       { id: 'confessions', icon: '🙏', title: 'الاعترافات', desc: `المواعيد والمدة (${confessionIntervalDays} يوم)، المعترفون (داخل/خارج الكنيسة) والملف الروحي، والافتقاد`, count: `${myConfessors.length} معترف • ${confessionSlots.length} موعد`, color: 'border-red-200 bg-white' },
       { id: 'family_visitation', icon: '👨‍👩‍👧‍👦', title: 'افتقاد أسر الكاهن', desc: 'تفاصيل الأسرة: الزوج والزوجة والأبناء والوالد والوالدة، تواريخ الميلاد، الحالة الاجتماعية والدراسية والوظائف، وسجل الزيارات', count: 'سجل الأسر', color: 'border-rose-200 bg-rose-50/30' },
+      { id: 'event_invitations', icon: '💌', title: 'دعوات المناسبات والـ QR', desc: 'إرسال دعوات VIP أو عامة للمناسبات الكبرى (تدشين، مهرجان، احتفالية، يوبيل) للنوتيفيكيشن وواتساب ومتابعة السكان', count: `${eventInvitationsCount} دعوة صادرة`, color: 'border-amber-300 bg-amber-50/40' },
       { id: 'certificates', icon: '📜', title: 'التوثيق والشهادات وخلو الموانع', desc: 'شهادات المعمودية والشمامسة، وكارت خلو الموانع (تسلسل رقمي + الرقم القومي كمفتاح أساسي)', count: 'خلو الموانع والتوثيق', color: 'border-amber-300 bg-amber-50/40' },
       { id: 'masses', icon: '⛪', title: 'جدول القداسات', desc: 'اسم القداس، كاهن خادم أو شريك، والفئات', count: `${masses.length} قداس`, color: 'border-blue-200 bg-white' },
       { id: 'personal', icon: '📅', title: 'الجدول الخاص بالكاهن والدعوات', desc: 'استقبال دعوات الشعب، صلاة طشت، خطوبة، أكاليل، رحلات ومؤتمرات بالأقساط والأتوبيسات', count: pendingInvitesCount > 0 ? `💌 ${pendingInvitesCount} دعوة • ${personalItems.length} موعد` : `${personalItems.length} موعد`, color: pendingInvitesCount > 0 ? 'border-purple-400 bg-purple-50/40' : 'border-purple-200 bg-white' },
@@ -2018,7 +2025,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
             <div className="space-y-4">
               {renderTopBar('🙏 الاعترافات والمتابعة الروحية')}
 
-              {/* تحديد مدة الاعتراف الدورية لكل الشعب */}
               <div className="bg-amber-50 border-2 border-amber-300 p-4 rounded-3xl flex flex-wrap justify-between items-center gap-3">
                 <div>
                   <strong className="text-sm font-black text-amber-950 block">⏱️ تحديد مدة الاعتراف الدورية لكل الشعب</strong>
@@ -2375,6 +2381,17 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
           </div>
         )}
 
+        {activeCard === 'event_invitations' && (
+          <div className="space-y-4">
+            {renderTopBar('💌 دعوات المناسبات الكبرى والـ QR Code')}
+            <PriestInvitationsTab
+              currentUser={priest}
+              users={localUsers}
+              services={myServices}
+            />
+          </div>
+        )}
+
         {activeCard === 'certificates' && (
           <div className="space-y-4">
             {renderTopBar('📜 التوثيق والشهادات وكارت خلو الموانع')}
@@ -2420,7 +2437,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
             <div className={printBusState ? 'print:hidden space-y-4' : 'space-y-4'}>
               {renderTopBar('📅 الجدول الخاص بالكاهن والدعوات الواردة')}
 
-              {/* صندوق دعوات المناسبات الواردة من الخدام والمخدومين وأولياء الأمور */}
               {invitations.length > 0 && (
                 <div className="bg-amber-50 border-2 border-amber-300 p-4 rounded-3xl space-y-2.5">
                   <strong className="text-sm font-black text-[#7a1c24] block">
