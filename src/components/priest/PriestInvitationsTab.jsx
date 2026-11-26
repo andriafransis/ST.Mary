@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../../lib/supabase';
 import EventInvitationSender from './EventInvitationSender';
 import InvitationScannerModal from './InvitationScannerModal';
 import {
