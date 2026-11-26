@@ -140,6 +140,20 @@ function formatNotifTime(val) {
   });
 }
 
+// هل هذا الإشعار يخص اليوزر الحالي (مباشرة أو موجّه لدوره/للجميع)؟
+function isNotificationForUser(notif, user) {
+  if (!notif || !user) return false;
+  if (notif.user_id && String(notif.user_id) === String(user.id)) return true;
+  if (!notif.user_id) {
+    if (!notif.target_role || notif.target_role === 'all') return true;
+    if (String(notif.target_role) === String(user.role)) return true;
+  }
+  if ((user.role === 'admin' || user.role === 'priest') && ['hidden_family_edit_request', 'priest_invitation'].includes(notif.type)) {
+    return true;
+  }
+  return false;
+}
+
 function AppInner() {
   const [currentUser, setCurrentUser] = useState(null);
   const [authView, setAuthView] = useState('public');
@@ -335,18 +349,12 @@ function AppInner() {
     [childLinkRequests, currentUser]
   );
 
-  // التنبيهات الخاصة الحقيقية للمستخدم الحالي لعرض تفاصيلها كاملة عند الضغط
+  // إشعارات اليوزر الحالي (أي يوزر يفتح يلاقي إشعاراته هو بس أو الموجهة له/لدوره)
   const mySpecialNotifications = useMemo(() => {
     if (!currentUser) return [];
-    const role = currentUser.role;
-    return unreadSystemNotifications.filter(n => {
-      if (n.type === 'child_link_request') return false;
-      if (n.user_id === currentUser.id) return true;
-      if ((role === 'admin' || role === 'priest') && ['hidden_family_edit_request', 'priest_invitation'].includes(n.type)) {
-        return true;
-      }
-      return false;
-    });
+    return unreadSystemNotifications.filter(
+      n => n.type !== 'child_link_request' && isNotificationForUser(n, currentUser)
+    );
   }, [currentUser, unreadSystemNotifications]);
 
   const handleMarkNotificationRead = async (notifId) => {
@@ -362,12 +370,13 @@ function AppInner() {
     }
   };
 
-  // حساب إجمالي الإشعارات الفعلية للمستخدم الحالي
+  // حساب إجمالي الإشعارات الفعلية لكل يوزر حسب حسابه ودوره
   const notificationStats = useMemo(() => {
     if (!currentUser) return { total: 0, items: [] };
 
     const items = [];
     const role = currentUser.role;
+    const defaultTarget = getPostLoginScreen(currentUser, roleScreens, roleTemplates) || 'member_panel';
 
     if (role === 'admin') {
       if (pendingCount > 0) {
@@ -431,9 +440,11 @@ function AppInner() {
         });
       }
     } else if (['head_servant', 'vice_head_servant', 'servant', 'meeting_servant', 'mercy_servant'].includes(role)) {
-      const unreadNotes = memberNotes.filter(n => !n.is_read && !n.acknowledged).length;
-      if (unreadNotes > 0) {
-        items.push({ label: `ملاحظات متابعة (${unreadNotes})`, count: unreadNotes, target: 'servant_panel' });
+      const myNotes = memberNotes.filter(
+        n => !n.is_read && !n.acknowledged && (!n.servant_id || String(n.servant_id) === String(currentUser.id))
+      ).length;
+      if (myNotes > 0) {
+        items.push({ label: `ملاحظات متابعة (${myNotes})`, count: myNotes, target: 'servant_panel' });
       }
       if (mySpecialNotifications.length > 0) {
         items.push({
@@ -451,7 +462,7 @@ function AppInner() {
           label: `تنبيهات خاصة (${mySpecialNotifications.length})`,
           count: mySpecialNotifications.length,
           isSpecialGroup: true,
-          target: 'member_panel'
+          target: defaultTarget
         });
       }
     }
@@ -460,6 +471,8 @@ function AppInner() {
     return { total, items };
   }, [
     currentUser,
+    roleScreens,
+    roleTemplates,
     pendingCount,
     unreadSystemNotifications,
     pendingInvitesList,
@@ -540,11 +553,7 @@ function AppInner() {
         async ({ eventType, new: notif }) => {
           await fetchData();
           if (eventType !== 'INSERT' || !notif) return;
-          const isForMe =
-            notif.user_id === currentUser.id ||
-            (currentUser.role === 'admin' && ['hidden_family_edit_request', 'priest_invitation'].includes(notif.type)) ||
-            (currentUser.role === 'priest' && ['hidden_family_edit_request', 'priest_invitation'].includes(notif.type));
-          if (isForMe) {
+          if (isNotificationForUser(notif, currentUser)) {
             await showMobileNotification({
               title: notif.title || '🔔 إشعار جديد من الكنيسة',
               body: notif.type === 'child_link_request' ? 'لديك طلب ربط ابن بانتظار موافقتك' : (notif.message || ''),
