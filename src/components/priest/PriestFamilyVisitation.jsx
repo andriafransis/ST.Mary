@@ -5,7 +5,7 @@ import {
   Users, Plus, Search, Edit3, Trash2, Printer, MessageCircle,
   Calendar, MapPin, Phone, Briefcase, GraduationCap, Heart, X,
   UserPlus, Link2, RefreshCw, GitBranch, Network, ChevronDown, ChevronUp,
-  FileSpreadsheet, RotateCcw, UserCheck
+  FileSpreadsheet, RotateCcw, UserCheck, ShieldCheck, AlertCircle
 } from 'lucide-react';
 
 const MARITAL_STATUS_OPTIONS = ['متزوج', 'متزوجة', 'أعزب', 'آنسة', 'أرمل', 'أرملة', 'مطلق/ة'];
@@ -151,16 +151,6 @@ const emptyFamilyForm = {
   extended_relatives: [],
   excluded_children_keys: [],
   visitations_log: []
-};
-
-const emptyChildDraft = {
-  user_id: null,
-  full_name: '',
-  dob: '',
-  marital_status: 'أعزب',
-  study_status: '',
-  job_title: '',
-  phone: ''
 };
 
 const emptyVisitDraft = (today) => ({
@@ -355,7 +345,6 @@ function buildExplicitFamiliesFromDatabase({
     if (spouseMatch) userToHeadBucketKey.set(spouseMatch.id, key);
   });
 
-  // دمج أسر الأب والأم عند وجود أبناء يجمعون بينهما صراحة
   people.forEach(child => {
     const fUser =
       (child.father_id && byId.get(child.father_id)) ||
@@ -404,7 +393,6 @@ function buildExplicitFamiliesFromDatabase({
     markPriestLink(parentBucket, u);
   });
 
-  // تجميع القرابات المؤكدة صراحة في الداتابيز (أب، أم، جد، جدة، أخ، أخت، عم، خال، خالة، زوج أخت، حفيد)
   people.forEach(u => {
     const extList = Array.isArray(u.permissions?.extended_relatives) ? u.permissions.extended_relatives : [];
     if (extList.length === 0) return;
@@ -737,7 +725,8 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   const [showForm, setShowForm] = useState(false);
   const [editingSavedId, setEditingSavedId] = useState(null);
   const [form, setForm] = useState(emptyFamilyForm);
-  const [childDraft, setChildDraft] = useState(emptyChildDraft);
+  const [selectedChildDbUserId, setSelectedChildDbUserId] = useState('');
+  const [childRoleChoice, setChildRoleChoice] = useState('الابن');
   const [saving, setSaving] = useState(false);
 
   const [selectedFamily, setSelectedFamily] = useState(null);
@@ -789,10 +778,43 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     loadData();
   }, [priest?.id]);
 
-  // تصفير روابط القرابات والارتباطات القديمة في الداتابيز لإعادة بنائها بدقة من جديد
+  // تحديد الأعضاء التابعين لخط أندريا فرانسيس في الداتابيز للتحقق السريع
+  const andriaRelatedUserIds = useMemo(() => {
+    const ids = new Set();
+    const andriaUsers = churchUsers.filter(u =>
+      normalizeArabic(getDisplayQuadName(u)).includes('اندريا فرانسيس')
+    );
+
+    andriaUsers.forEach(au => {
+      ids.add(au.id);
+      if (au.father_id) ids.add(au.father_id);
+      if (au.mother_id) ids.add(au.mother_id);
+      if (au.parent_id) ids.add(au.parent_id);
+      if (au.permissions?.linked_spouse_id) ids.add(au.permissions.linked_spouse_id);
+      if (Array.isArray(au.permissions?.extended_relatives)) {
+        au.permissions.extended_relatives.forEach(r => {
+          if (r.user_id) ids.add(r.user_id);
+        });
+      }
+    });
+
+    churchUsers.forEach(u => {
+      if (ids.has(u.father_id) || ids.has(u.mother_id) || ids.has(u.parent_id)) {
+        ids.add(u.id);
+      }
+      if (Array.isArray(u.permissions?.extended_relatives)) {
+        if (u.permissions.extended_relatives.some(r => ids.has(r.user_id))) {
+          ids.add(u.id);
+        }
+      }
+    });
+
+    return ids;
+  }, [churchUsers]);
+
   const handleResetAllRelationsInDatabase = async () => {
     const firstConfirm = confirm(
-      '⚠️ تنبيه هام: سيتم تصفير كل روابط القرابات والارتباطات العائلية المحفوظة في الداتابيز (القرابات الممتدة، الزوج/الزوجة المربوطين، الأب/الأم/الوالد المربوطين) لتبدأ بإضافتها وتحديد صلة كل شخص من جديد بدقة. هل أنت متأكد؟'
+      '⚠️ تنبيه هام: سيتم تصفير كل روابط القرابات والارتباطات العائلية المحفوظة في الداتابيز (القرابات الممتدة، الزوج/الزوجة المربوطين، الأب/الأم/الوالد المربوطين) لتبدأ بإضافتها وتحديد صلة كل شخص من الداتابيز بدقة. هل أنت متأكد؟'
     );
     if (!firstConfirm) return;
 
@@ -836,7 +858,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
       await loadData();
       setExpandedCards({});
-      alert('تم تصفير الروابط القديمة بنجاح ✅ ابدأ الآن بربط كل شخص وتحديد صلته (أب، أم، جد، أخ، خال، عم، زوج...) بدقة.');
+      alert('تم تصفير الروابط القديمة بنجاح ✅ ابدأ الآن بربط كل شخص من الداتابيز وتحديد صلته.');
     } finally {
       setResettingDb(false);
     }
@@ -1032,7 +1054,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       const primaryUserId = fam.husband?.user_id || fam.wife?.user_id || fam.children?.[0]?.user_id;
       const primaryUser = churchUsers.find(u => u.id === primaryUserId);
       if (!primaryUser) {
-        alert('اختر أسرة تحتوي على حساب عضو مربوط أولاً.');
+        alert('اختر أسرة تحتوي على حساب عضو مربوط من الداتابيز أولاً.');
         return;
       }
 
@@ -1120,7 +1142,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         await safeUpdateChurchUser(targetUser.id, patch);
       }
 
-      // تسجيل القرابة بدقة في القرابات المرتبطة للطرفين (أخ، أخت، عم، خال، خالة، زوج أخت، أو أي صلة أخرى)
       const primaryRelatives = Array.isArray(primaryUser.permissions?.extended_relatives)
         ? primaryUser.permissions.extended_relatives
         : [];
@@ -1353,7 +1374,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       (form.husband?.full_name ? `أسرة ${form.husband.full_name}` : '') ||
       (form.wife?.full_name ? `أسرة ${form.wife.full_name}` : '');
 
-    if (!derivedTitle) return alert('يرجى كتابة اسم الأسرة أو اسم الزوج / الزوجة');
+    if (!derivedTitle) return alert('يرجى اختيار فرد من قاعدة بيانات الكنيسة أولاً لتحديد اسم الأسرة');
 
     setSaving(true);
     try {
@@ -1605,36 +1626,64 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     });
   }, [unifiedFamilies, scopeTab, statusFilter, searchQ]);
 
+  const dbMembersPool = useMemo(
+    () => churchUsers.filter(u => u.role !== 'admin' && u.role !== 'priest'),
+    [churchUsers]
+  );
+
   const matchedLookupUsers = useMemo(() => {
     const q = normalizeArabic(userLookupQ);
     if (q.length < 2) return [];
-    return churchUsers
+    return dbMembersPool
       .filter(u => normalizeArabic((getDisplayQuadName(u) || '') + ' ' + (u.phone || '')).includes(q))
-      .slice(0, 6);
-  }, [userLookupQ, churchUsers]);
+      .slice(0, 8);
+  }, [userLookupQ, dbMembersPool]);
 
   const linkModalCandidates = useMemo(() => {
     if (!linkModalFam) return [];
     const excludeIds = new Set(linkModalFam.linkedUserIds || []);
     const q = normalizeArabic(linkSearchQ);
-    return churchUsers
+    return dbMembersPool
       .filter(u => {
-        if (u.role === 'admin' || u.role === 'priest') return false;
         if (excludeIds.has(u.id)) return false;
         if (!q) return true;
         return normalizeArabic((getDisplayQuadName(u) || '') + ' ' + (u.phone || '')).includes(q);
       })
       .slice(0, 15);
-  }, [linkModalFam, linkSearchQ, churchUsers]);
+  }, [linkModalFam, linkSearchQ, dbMembersPool]);
 
   const renderPersonSection = (title, roleKey, allowAliveToggle = false) => {
     const p = form[roleKey] || emptyPerson();
     const setP = (patch) => setForm(prev => ({ ...prev, [roleKey]: { ...prev[roleKey], ...patch } }));
+    const isLinkedToDb = Boolean(p.user_id);
+    const isUnderAndria = p.user_id ? andriaRelatedUserIds.has(p.user_id) : false;
 
     return (
       <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-gray-200 space-y-2.5">
         <div className="flex flex-wrap justify-between items-center gap-2">
-          <strong className="text-xs font-black text-[#7a1c24]">{title}</strong>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <strong className="text-xs font-black text-[#7a1c24]">{title}</strong>
+            {isLinkedToDb ? (
+              <span className="px-2 py-0.5 bg-blue-100 text-blue-950 rounded text-[10px] font-black inline-flex items-center gap-1">
+                <ShieldCheck size={11} /> مسجل في الداتابيز
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 bg-amber-100 text-amber-950 rounded text-[10px] font-black inline-flex items-center gap-1">
+                <AlertCircle size={11} /> اختر من البحث أعلاه لربطه بالداتابيز
+              </span>
+            )}
+            {isLinkedToDb && (
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                  isUnderAndria
+                    ? 'bg-emerald-100 text-emerald-950'
+                    : 'bg-slate-200 text-slate-800'
+                }`}
+              >
+                {isUnderAndria ? '✓ تابع لخط أندريا فرانسيس' : 'مسجل خارج خط أندريا فرانسيس'}
+              </span>
+            )}
+          </div>
           {allowAliveToggle && (
             <label className="flex items-center gap-1.5 text-[11px] font-bold cursor-pointer">
               <input
@@ -1649,10 +1698,10 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
           <input
-            placeholder="الاسم الرباعي بالكامل"
-            className="p-2 border rounded-xl bg-white"
+            readOnly
+            placeholder="اختر الاسم من البحث في الداتابيز أعلاه"
+            className="p-2 border rounded-xl bg-gray-100 text-gray-900 font-black cursor-default"
             value={p.full_name || ''}
-            onChange={e => setP({ full_name: e.target.value })}
           />
           <div>
             <label className="block text-[10px] text-gray-500 mb-0.5">تاريخ الميلاد</label>
@@ -1746,7 +1795,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             <Users size={18} /> سجل افتقاد أسر ومخدومي الأب الكاهن ({unifiedFamilies.length} أسرة)
           </h3>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            تحديد صريح ودقيق لكل صلة قرابة (أب، أم، جد، أخ، أخت، خال، عم، زوج...) مع حفظ وتحديث مباشر في الداتابيز
+            تحقق مباشر من الداتابيز لبيان تبعية الفرد لخط أندريا فرانسيس وصلته الدقيقة (أب، أم، جد، أخ، خال، عم، زوج...)
           </p>
         </div>
 
@@ -1785,6 +1834,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             onClick={() => {
               setEditingSavedId(null);
               setForm(emptyFamilyForm);
+              setSelectedChildDbUserId('');
               setShowForm(true);
             }}
             className="px-4 py-2 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
@@ -1874,6 +1924,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               const confirmedExt = Array.isArray(fam.confirmedExtended) ? fam.confirmedExtended : [];
               const primaryPhone = fam.phone || fam.husband?.phone || fam.wife?.phone || '';
               const displayAddress = fam.address || fam.husband?.address || fam.wife?.address || 'غير مسجل';
+              const famBelongsToAndria = (fam.linkedUserIds || []).some(id => andriaRelatedUserIds.has(id));
 
               return (
                 <div
@@ -1890,6 +1941,11 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-1 mb-1">
+                        {famBelongsToAndria && (
+                          <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-950 rounded text-[9px] font-black">
+                            ✓ خط أندريا فرانسيس
+                          </span>
+                        )}
                         {fam.belongsToPriest && (
                           <span className="px-1.5 py-0.5 bg-red-100 text-[#7a1c24] rounded text-[9px] font-black">
                             ✝ معترفو أبونا
@@ -2147,7 +2203,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         )}
       </div>
 
-      {/* شيت الطباعة الأفقي (Landscape Excel-Style Print Sheet) */}
+      {/* شيت الطباعة الأفقي */}
       <div className="hidden print:block w-full text-black" dir="rtl">
         <div className="text-center border-b-2 border-black pb-2 mb-3">
           <h2 className="text-base font-black">كشف افتقاد الأسر والمخدومين — {priest?.full_name || 'الأب الكاهن'}</h2>
@@ -2236,10 +2292,10 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             <div className="flex justify-between items-center border-b pb-2.5">
               <div>
                 <h3 className="text-sm sm:text-base font-black text-[#7a1c24]">
-                  🔗 ربط شخص وتحديد صلته مع أسرة: {linkModalFam.family_title}
+                  🔗 تحقق من الداتابيز واربط شخصاً مع أسرة: {linkModalFam.family_title}
                 </h3>
                 <p className="text-[11px] text-gray-500 font-normal mt-0.5">
-                  اختر صلة الشخص (أخ، أخت، خال، عم، جد، أب، أم، زوج...) ثم اضغط تأكيد ليُسجَّل في الداتابيز بدقة.
+                  النتائج من قاعدة البيانات مباشرةً مع بيان هل هو ضمن خط أندريا فرانسيس أم لا، واختيار صلته من قائمة محددة.
                 </p>
               </div>
               <button type="button" onClick={() => setLinkModalFam(null)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer">
@@ -2252,7 +2308,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                 <Search size={15} className="absolute right-3 top-2.5 text-gray-400" />
                 <input
                   autoFocus
-                  placeholder="ابحث بالاسم أو رقم الموبايل..."
+                  placeholder="ابحث في الداتابيز بالاسم أو الموبايل..."
                   className="w-full pr-9 pl-3 py-2 border rounded-xl bg-[#fbfaf7]"
                   value={linkSearchQ}
                   onChange={e => setLinkSearchQ(e.target.value)}
@@ -2269,23 +2325,37 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
             <div className="space-y-2 max-h-80 overflow-y-auto">
               {linkModalCandidates.length === 0 ? (
-                <p className="text-center text-gray-400 py-4">لا توجد حسابات مطابقة.</p>
+                <p className="text-center text-rose-800 bg-rose-50 border border-rose-200 rounded-2xl py-4">
+                  غير موجود في قاعدة البيانات ضمن النتائج المطابقة.
+                </p>
               ) : (
                 linkModalCandidates.map(u => {
                   const existingFamTitle = userFamilyTitleLookup.get(u.id);
+                  const isUnderAndria = andriaRelatedUserIds.has(u.id);
                   const rk = `modal:${u.id}`;
                   const chosenRole = selectedRoleByCandidate[rk] || linkRoleChoice;
 
                   return (
                     <div key={u.id} className="p-3 bg-[#fbfaf7] border rounded-2xl flex flex-wrap justify-between items-center gap-2">
                       <div>
-                        <strong className="text-gray-900 block">{getDisplayQuadName(u)}</strong>
-                        <span className="text-[11px] text-gray-500 block">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <strong className="text-gray-900">{getDisplayQuadName(u)}</strong>
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                              isUnderAndria
+                                ? 'bg-emerald-100 text-emerald-950'
+                                : 'bg-slate-200 text-slate-800'
+                            }`}
+                          >
+                            {isUnderAndria ? '✓ تبع أندريا فرانسيس' : 'مش تبع أندريا فرانسيس'}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-gray-500 block mt-0.5">
                           {u.gender === 'أنثى' ? '♀️ أنثى' : '♂️ ذكر'} • 📞 {u.phone || '—'} {u.dob ? `• 🎂 ${u.dob}` : ''}
                         </span>
                         {existingFamTitle && (
                           <span className="mt-1 inline-block px-2 py-0.5 bg-purple-100 text-purple-950 rounded text-[10px] font-black">
-                            🏠 أسرته الحالية: {existingFamTitle}
+                            🏠 أسرته في الداتابيز: {existingFamTitle}
                           </span>
                         )}
                       </div>
@@ -2320,7 +2390,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           <div className="bg-white rounded-3xl w-full max-w-4xl p-5 sm:p-6 space-y-4 font-bold max-h-[92vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="text-sm sm:text-base font-black text-[#7a1c24]">
-                {editingSavedId ? '✏️ تعديل ملف الأسرة وتحديث قاعدة البيانات' : '➕ إضافة / تعديل بيانات الأسرة وتحديث قاعدة البيانات'}
+                {editingSavedId ? '✏️ تعديل ملف الأسرة وتحديث قاعدة البيانات' : '➕ إضافة / تعديل بيانات الأسرة من قاعدة البيانات'}
               </h3>
               <button type="button" onClick={() => setShowForm(false)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer">
                 <X size={18} />
@@ -2329,27 +2399,53 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
             <div className="bg-blue-50/60 p-3 rounded-2xl border border-blue-200 space-y-2">
               <label className="text-[11px] text-blue-950 font-black block">
-                🔍 ربط فرد من قاعدة بيانات الكنيسة بهذه الأسرة:
+                🔍 تحقق واختر فرداً من قاعدة بيانات الكنيسة (بيان تبعيته لأندريا فرانسيس تلقائياً):
               </label>
               <input
-                placeholder="ابحث بالاسم أو الموبايل لربط الزوج / الزوجة / الوالد / الوالدة..."
+                placeholder="ابحث في الداتابيز بالاسم أو الموبايل..."
                 className="w-full p-2 border rounded-xl bg-white"
                 value={userLookupQ}
                 onChange={e => setUserLookupQ(e.target.value)}
               />
+              {userLookupQ.trim().length >= 2 && matchedLookupUsers.length === 0 && (
+                <div className="p-2.5 bg-rose-50 text-rose-900 border border-rose-200 rounded-xl text-[11px]">
+                  غير موجود في قاعدة بيانات الكنيسة (ليس مسجلاً ضمن الداتابيز).
+                </div>
+              )}
               {matchedLookupUsers.length > 0 && (
-                <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                  {matchedLookupUsers.map(u => (
-                    <div key={u.id} className="bg-white p-2 rounded-xl border flex flex-wrap justify-between items-center gap-2 text-[11px]">
-                      <span><strong>{getDisplayQuadName(u)}</strong> ({u.phone || '—'})</span>
-                      <div className="flex flex-wrap gap-1">
-                        <button type="button" onClick={() => importFromChurchUser(u, 'husband')} className="px-2 py-1 bg-blue-100 text-blue-900 rounded-lg cursor-pointer">كزوج</button>
-                        <button type="button" onClick={() => importFromChurchUser(u, 'wife')} className="px-2 py-1 bg-pink-100 text-pink-900 rounded-lg cursor-pointer">كزوجة</button>
-                        <button type="button" onClick={() => importFromChurchUser(u, 'father')} className="px-2 py-1 bg-amber-100 text-amber-900 rounded-lg cursor-pointer">كوالد</button>
-                        <button type="button" onClick={() => importFromChurchUser(u, 'mother')} className="px-2 py-1 bg-purple-100 text-purple-900 rounded-lg cursor-pointer">كوالدة</button>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  {matchedLookupUsers.map(u => {
+                    const isUnderAndria = andriaRelatedUserIds.has(u.id);
+                    const famTitle = userFamilyTitleLookup.get(u.id);
+
+                    return (
+                      <div key={u.id} className="bg-white p-2 rounded-xl border flex flex-wrap justify-between items-center gap-2 text-[11px]">
+                        <div>
+                          <strong>{getDisplayQuadName(u)}</strong> ({u.phone || '—'})
+                          <span
+                            className={`mr-1.5 px-2 py-0.5 rounded text-[10px] font-black ${
+                              isUnderAndria
+                                ? 'bg-emerald-100 text-emerald-950'
+                                : 'bg-slate-200 text-slate-800'
+                            }`}
+                          >
+                            {isUnderAndria ? '✓ تبع أندريا فرانسيس' : 'مش تبع أندريا فرانسيس'}
+                          </span>
+                          {famTitle && (
+                            <span className="mr-1.5 px-2 py-0.5 bg-purple-100 text-purple-950 rounded text-[10px] font-black">
+                              {famTitle}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          <button type="button" onClick={() => importFromChurchUser(u, 'husband')} className="px-2 py-1 bg-blue-100 text-blue-900 rounded-lg cursor-pointer">كزوج</button>
+                          <button type="button" onClick={() => importFromChurchUser(u, 'wife')} className="px-2 py-1 bg-pink-100 text-pink-900 rounded-lg cursor-pointer">كزوجة</button>
+                          <button type="button" onClick={() => importFromChurchUser(u, 'father')} className="px-2 py-1 bg-amber-100 text-amber-900 rounded-lg cursor-pointer">كوالد</button>
+                          <button type="button" onClick={() => importFromChurchUser(u, 'mother')} className="px-2 py-1 bg-purple-100 text-purple-900 rounded-lg cursor-pointer">كوالدة</button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -2361,10 +2457,10 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                 </strong>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                   <input
-                    placeholder="عنوان/اسم الأسرة"
-                    className="p-2 border rounded-xl bg-white"
+                    readOnly
+                    placeholder="يُحدد تلقائياً عند اختيار فرد من الداتابيز"
+                    className="p-2 border rounded-xl bg-gray-100 text-gray-900 font-black cursor-default"
                     value={form.family_title}
-                    onChange={e => setForm({ ...form, family_title: e.target.value })}
                   />
                   <select
                     className="p-2 border rounded-xl bg-white"
@@ -2407,50 +2503,49 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               {renderPersonSection('④ بيانات الوالدة (الأم)', 'mother', true)}
 
               <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-gray-200 space-y-2.5">
-                <strong className="text-xs font-black text-[#7a1c24] block">⑤ بيانات الأبناء</strong>
-                <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-                  <input
-                    placeholder="اسم الابن / الابنة"
-                    className="lg:col-span-2 p-2 border rounded-xl bg-white"
-                    value={childDraft.full_name}
-                    onChange={e => setChildDraft({ ...childDraft, full_name: e.target.value })}
-                  />
-                  <input
-                    type="date"
-                    className="p-2 border rounded-xl bg-white"
-                    value={childDraft.dob}
-                    onChange={e => setChildDraft({ ...childDraft, dob: e.target.value })}
-                  />
+                <strong className="text-xs font-black text-[#7a1c24] block">⑤ إضافة فرد أو ابن من قاعدة بيانات الكنيسة وتحديد صلته</strong>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <select
-                    className="p-2 border rounded-xl bg-white"
-                    value={childDraft.marital_status}
-                    onChange={e => setChildDraft({ ...childDraft, marital_status: e.target.value })}
+                    className="sm:col-span-2 p-2 border rounded-xl bg-white font-bold"
+                    value={selectedChildDbUserId}
+                    onChange={e => setSelectedChildDbUserId(e.target.value)}
                   >
-                    {MARITAL_STATUS_OPTIONS.map(st => <option key={st} value={st}>{st}</option>)}
+                    <option value="">-- اختر شخصاً مسجلاً في الداتابيز --</option>
+                    {dbMembersPool.map(u => {
+                      const underAndria = andriaRelatedUserIds.has(u.id);
+                      return (
+                        <option key={u.id} value={u.id}>
+                          {getDisplayQuadName(u)} {u.phone ? `(${u.phone})` : ''} {underAndria ? '— [تبع أندريا فرانسيس]' : '— [خارج خط أندريا]'}
+                        </option>
+                      );
+                    })}
                   </select>
-                  <input
-                    placeholder="الحالة الدراسية"
-                    className="p-2 border rounded-xl bg-white"
-                    value={childDraft.study_status}
-                    onChange={e => setChildDraft({ ...childDraft, study_status: e.target.value })}
-                  />
-                  <input
-                    placeholder="الوظيفة"
-                    className="p-2 border rounded-xl bg-white"
-                    value={childDraft.job_title}
-                    onChange={e => setChildDraft({ ...childDraft, job_title: e.target.value })}
-                  />
+
+                  <select
+                    className="p-2 border rounded-xl bg-amber-50 text-amber-950 font-black"
+                    value={childRoleChoice}
+                    onChange={e => setChildRoleChoice(e.target.value)}
+                  >
+                    {KINSHIP_ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
                 </div>
+
                 <button
                   type="button"
                   onClick={() => {
-                    if (!childDraft.full_name.trim()) return;
-                    setForm(prev => ({ ...prev, children: [...(prev.children || []), childDraft] }));
-                    setChildDraft(emptyChildDraft);
+                    if (!selectedChildDbUserId) return;
+                    const dbUser = dbMembersPool.find(u => u.id === selectedChildDbUserId);
+                    if (!dbUser) return;
+                    const childObj = {
+                      ...toPersonObjectFromUser(dbUser, dbUser.gender === 'أنثى' ? 'daughter' : 'son', false),
+                      kinship_role: childRoleChoice
+                    };
+                    setForm(prev => ({ ...prev, children: [...(prev.children || []), childObj] }));
+                    setSelectedChildDbUserId('');
                   }}
                   className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs inline-flex items-center gap-1 cursor-pointer"
                 >
-                  <UserPlus size={13} /> + إضافة الابن للقائمة
+                  <UserPlus size={13} /> + إضافة من الداتابيز بالصلة المحددة ({childRoleChoice})
                 </button>
 
                 {(form.children || []).length > 0 && (
@@ -2458,7 +2553,12 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                     {form.children.map((c, idx) => (
                       <div key={idx} className="bg-white p-2 rounded-xl border flex justify-between items-center gap-2">
                         <span>
-                          • <strong>{c.full_name}</strong> ({c.marital_status})
+                          • <strong>{c.full_name}</strong> ({c.kinship_role || c.marital_status})
+                          {c.user_id && (
+                            <span className="mr-1.5 px-1.5 py-0.5 bg-blue-100 text-blue-950 rounded text-[9px] font-black">
+                              {andriaRelatedUserIds.has(c.user_id) ? 'تبع أندريا فرانسيس ✓' : 'حساب كنيسة ✓'}
+                            </span>
+                          )}
                           {c.dob && ` • ميلاد: ${c.dob}`}
                           {c.study_status && ` • دراسة: ${c.study_status}`}
                           {c.job_title && ` • وظيفة: ${c.job_title}`}
