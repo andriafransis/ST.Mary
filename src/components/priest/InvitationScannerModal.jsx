@@ -15,7 +15,10 @@ import {
   UserCheck,
   ShieldCheck,
   Volume2,
-  VolumeX
+  VolumeX,
+  LogIn,
+  LogOut,
+  Ticket
 } from 'lucide-react';
 
 const ROLE_AR_LABELS = {
@@ -72,14 +75,31 @@ function playFeedbackTone(kind = 'success', enabled = true) {
 
 export function parseQrContent(rawText = '') {
   const trimmed = String(rawText || '').trim();
-  if (!trimmed) return { token: '', embedded: null };
+  if (!trimmed) return { kind: 'empty', token: '', memberInfo: null, embedded: null };
 
   try {
     const parsed = JSON.parse(trimmed);
     if (parsed && typeof parsed === 'object') {
+      if (parsed.type === 'church_member_attendance' || parsed.user_id || parsed.username) {
+        return {
+          kind: 'member',
+          token: String(parsed.user_id || parsed.username || '').trim(),
+          memberInfo: {
+            user_id: parsed.user_id || '',
+            username: parsed.username || '',
+            full_name: parsed.full_name || '',
+            role: parsed.role || 'member',
+            role_label: parsed.role_label || ''
+          },
+          embedded: null
+        };
+      }
+
       const token = String(parsed.token || parsed.qr_token || parsed.code || '').trim();
       return {
+        kind: 'invitation',
         token,
+        memberInfo: null,
         embedded: {
           recipient_name: parsed.recipient_name || '',
           recipient_role: parsed.role_or_title || parsed.recipient_role || '',
@@ -92,23 +112,38 @@ export function parseQrContent(rawText = '') {
       };
     }
   } catch {
-    // كود نصي مباشر أو رابط
+    // نص مباشر أو رابط
   }
 
-  const urlMatch = trimmed.match(/[?&](?:token|qr|code)=([^&#]+)/i);
+  const urlMatch = trimmed.match(/[?&](?:token|qr|code|user)=([^&#]+)/i);
   if (urlMatch?.[1]) {
-    return { token: decodeURIComponent(urlMatch[1]).trim(), embedded: null };
+    const extracted = decodeURIComponent(urlMatch[1]).trim();
+    return {
+      kind: 'unknown',
+      token: extracted,
+      memberInfo: { user_id: extracted, username: extracted, full_name: '' },
+      embedded: null
+    };
   }
 
-  return { token: trimmed, embedded: null };
+  return {
+    kind: 'unknown',
+    token: trimmed,
+    memberInfo: { user_id: trimmed, username: trimmed, full_name: '' },
+    embedded: null
+  };
 }
 
-export default function InvitationScannerModal({ currentUser, onClose }) {
+export default function InvitationScannerModal({ currentUser, onClose, initialTab = 'invitations' }) {
   const scannerRef = useRef(null);
   const isProcessingRef = useRef(false);
   const isStartingRef = useRef(false);
   const soundEnabledRef = useRef(true);
+  const activeTabRef = useRef(initialTab);
+  const attendanceModeRef = useRef('auto');
 
+  const [activeTab, setActiveTab] = useState(initialTab); // 'invitations' | 'attendance'
+  const [attendanceMode, setAttendanceMode] = useState('auto'); // 'auto' | 'check_in' | 'check_out'
   const [manualCode, setManualCode] = useState('');
   const [cameraStatus, setCameraStatus] = useState('starting'); // 'starting' | 'active' | 'error'
   const [cameraErrorMsg, setCameraErrorMsg] = useState('');
@@ -122,6 +157,14 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
     soundEnabledRef.current = soundEnabled;
   }, [soundEnabled]);
 
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    attendanceModeRef.current = attendanceMode;
+  }, [attendanceMode]);
+
   const scannerDisplayName =
     currentUser?.full_name ||
     currentUser?.name ||
@@ -133,6 +176,8 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
     ROLE_AR_LABELS[currentUser?.role] ||
     currentUser?.role ||
     'مستخدم';
+
+  const actorLabel = `${scannerDisplayName} (${scannerRoleLabel})`;
 
   const applyContinuousFocusIfSupported = async (html5QrCode) => {
     try {
@@ -207,7 +252,7 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
             disableFlip: false
           },
           (decodedText) => {
-            processToken(decodedText);
+            processAnyScan(decodedText);
           },
           () => {}
         );
@@ -237,139 +282,342 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
     };
   }, [facingMode, startScanner, stopScannerSafe]);
 
-  const processToken = async (rawValue) => {
-    const { token, embedded } = parseQrContent(rawValue);
-    if (!token || isProcessingRef.current) return;
+  const handleInvitationScan = async (token, embedded) => {
+    const { data: invite, error } = await supabase
+      .from('church_invitations')
+      .select('*')
+      .eq('qr_token', token)
+      .maybeSingle();
 
-    isProcessingRef.current = true;
-    try {
-      const { data: invite, error } = await supabase
+    if (error || !invite) {
+      playFeedbackTone('error', soundEnabledRef.current);
+      setScanResult({
+        kind: 'error',
+        title: embedded?.recipient_name
+          ? `كود غير مسجل في قاعدة البيانات (${embedded.recipient_name})`
+          : 'دعوة غير موجودة أو كود غير صحيح',
+        message: `لم يتم العثور على دعوة بالكود (${token}) في سجل الدعوات.`,
+        embedded,
+        scannedAt: new Date().toISOString(),
+        scannedBy: scannerDisplayName,
+        scannedByRole: scannerRoleLabel
+      });
+      return;
+    }
+
+    const mergedInvitePreview = {
+      ...invite,
+      recipient_name: invite.recipient_name || embedded?.recipient_name || 'مدعو',
+      recipient_role: invite.recipient_role || embedded?.recipient_role || '',
+      event_title: invite.event_title || embedded?.event_title || '',
+      invite_tier: invite.invite_tier || embedded?.invite_tier || 'general',
+      seat_or_zone: invite.seat_or_zone || embedded?.seat_or_zone || ''
+    };
+
+    if (invite.status === 'checked_in') {
+      playFeedbackTone('warning', soundEnabledRef.current);
+      setScanResult({
+        kind: 'warning',
+        title: 'تم مسح هذه الدعوة مسبقاً',
+        message: `تم تسجيل دخول (${mergedInvitePreview.recipient_name}) مسبقاً${
+          invite.checked_in_at ? ` في (${formatDateTimeAr(invite.checked_in_at)})` : ''
+        }${invite.checked_in_by ? ` بواسطة (${invite.checked_in_by})` : ''}.`,
+        invite: mergedInvitePreview,
+        embedded,
+        scannedAt: invite.checked_in_at || new Date().toISOString(),
+        scannedBy: invite.checked_in_by || scannerDisplayName,
+        scannedByRole: invite.checked_in_by_role || scannerRoleLabel
+      });
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const baseUpdatePayload = {
+      status: 'checked_in',
+      checked_in_at: nowIso,
+      checked_in_by: actorLabel
+    };
+
+    const extendedUpdatePayload = {
+      ...baseUpdatePayload,
+      checked_in_by_id: currentUser?.id || null,
+      checked_in_by_name: scannerDisplayName,
+      checked_in_by_role: scannerRoleLabel
+    };
+
+    let updatedRow = null;
+    let updErr = null;
+
+    const firstAttempt = await supabase
+      .from('church_invitations')
+      .update(extendedUpdatePayload)
+      .eq('id', invite.id)
+      .select()
+      .single();
+
+    if (firstAttempt.error) {
+      const secondAttempt = await supabase
         .from('church_invitations')
-        .select('*')
-        .eq('qr_token', token)
-        .maybeSingle();
-
-      if (error || !invite) {
-        playFeedbackTone('error', soundEnabledRef.current);
-        setScanResult({
-          kind: 'error',
-          title: embedded?.recipient_name
-            ? `كود غير مسجل في قاعدة البيانات (${embedded.recipient_name})`
-            : 'دعوة غير موجودة أو كود غير صحيح',
-          message: `لم يتم العثور على دعوة بالكود (${token}) في سجل الدعوات.`,
-          embedded,
-          scannedAt: new Date().toISOString(),
-          scannedBy: scannerDisplayName,
-          scannedByRole: scannerRoleLabel
-        });
-        return;
-      }
-
-      const mergedInvitePreview = {
-        ...invite,
-        recipient_name: invite.recipient_name || embedded?.recipient_name || 'مدعو',
-        recipient_role: invite.recipient_role || embedded?.recipient_role || '',
-        event_title: invite.event_title || embedded?.event_title || '',
-        invite_tier: invite.invite_tier || embedded?.invite_tier || 'general',
-        seat_or_zone: invite.seat_or_zone || embedded?.seat_or_zone || ''
-      };
-
-      if (invite.status === 'checked_in') {
-        playFeedbackTone('warning', soundEnabledRef.current);
-        setScanResult({
-          kind: 'warning',
-          title: 'تم مسح هذه الدعوة مسبقاً',
-          message: `تم تسجيل دخول (${mergedInvitePreview.recipient_name}) مسبقاً${
-            invite.checked_in_at ? ` في (${formatDateTimeAr(invite.checked_in_at)})` : ''
-          }${invite.checked_in_by ? ` بواسطة (${invite.checked_in_by})` : ''}.`,
-          invite: mergedInvitePreview,
-          embedded,
-          scannedAt: invite.checked_in_at || new Date().toISOString(),
-          scannedBy: invite.checked_in_by || scannerDisplayName,
-          scannedByRole: invite.checked_in_by_role || scannerRoleLabel
-        });
-        return;
-      }
-
-      const nowIso = new Date().toISOString();
-      const actorLabel = `${scannerDisplayName} (${scannerRoleLabel})`;
-
-      const baseUpdatePayload = {
-        status: 'checked_in',
-        checked_in_at: nowIso,
-        checked_in_by: actorLabel
-      };
-
-      const extendedUpdatePayload = {
-        ...baseUpdatePayload,
-        checked_in_by_id: currentUser?.id || null,
-        checked_in_by_name: scannerDisplayName,
-        checked_in_by_role: scannerRoleLabel
-      };
-
-      let updatedRow = null;
-      let updErr = null;
-
-      const firstAttempt = await supabase
-        .from('church_invitations')
-        .update(extendedUpdatePayload)
+        .update(baseUpdatePayload)
         .eq('id', invite.id)
         .select()
         .single();
+      updatedRow = secondAttempt.data;
+      updErr = secondAttempt.error;
+    } else {
+      updatedRow = firstAttempt.data;
+    }
 
-      if (firstAttempt.error) {
-        const secondAttempt = await supabase
-          .from('church_invitations')
-          .update(baseUpdatePayload)
-          .eq('id', invite.id)
-          .select()
-          .single();
-        updatedRow = secondAttempt.data;
-        updErr = secondAttempt.error;
-      } else {
-        updatedRow = firstAttempt.data;
-      }
+    if (updErr) {
+      playFeedbackTone('error', soundEnabledRef.current);
+      setScanResult({
+        kind: 'error',
+        title: 'تعذر تحديث حالة الدخول في قاعدة البيانات',
+        message: updErr.message,
+        invite: mergedInvitePreview,
+        embedded,
+        scannedAt: nowIso,
+        scannedBy: scannerDisplayName,
+        scannedByRole: scannerRoleLabel
+      });
+      return;
+    }
 
-      if (updErr) {
-        playFeedbackTone('error', soundEnabledRef.current);
+    const finalInvite = {
+      ...mergedInvitePreview,
+      ...(updatedRow || {}),
+      status: 'checked_in',
+      checked_in_at: updatedRow?.checked_in_at || nowIso,
+      checked_in_by: updatedRow?.checked_in_by || actorLabel,
+      checked_in_by_name: updatedRow?.checked_in_by_name || scannerDisplayName,
+      checked_in_by_role: updatedRow?.checked_in_by_role || scannerRoleLabel
+    };
+
+    playFeedbackTone('success', soundEnabledRef.current);
+    setScanResult({
+      kind: 'success',
+      title: 'تم التحقق وتسجيل الحضور بنجاح ✅',
+      message: finalInvite.seat_or_zone
+        ? `توجيه المدعو إلى: ${finalInvite.seat_or_zone}`
+        : 'الدعوة صالحة وتم تسجيل وقت الحضور وبيانات من قام بالمسح.',
+      invite: finalInvite,
+      embedded,
+      scannedAt: finalInvite.checked_in_at,
+      scannedBy: scannerDisplayName,
+      scannedByRole: scannerRoleLabel
+    });
+
+    setRecentLogs((prev) => [
+      {
+        id: `inv-${finalInvite.id}-${finalInvite.checked_in_at}`,
+        title: finalInvite.recipient_name,
+        subtitle: `${finalInvite.invite_tier === 'vip' ? '👑 VIP' : 'عام'}${
+          finalInvite.seat_or_zone ? ` • ${finalInvite.seat_or_zone}` : ''
+        } • بواسطة: ${finalInvite.checked_in_by || actorLabel}`,
+        badge: 'حضور دعوة',
+        timeLabel: formatDateTimeAr(finalInvite.checked_in_at)
+      },
+      ...prev.slice(0, 14)
+    ]);
+  };
+
+  const handleMemberAttendanceScan = async (memberInfo, token) => {
+    const userId = String(memberInfo?.user_id || '').trim();
+    const username = String(memberInfo?.username || '').trim();
+    const lookupKey = userId || username || token;
+
+    if (!lookupKey) {
+      playFeedbackTone('error', soundEnabledRef.current);
+      setScanResult({
+        kind: 'error',
+        title: 'كود حضور غير واضح',
+        message: 'لم يتم العثور على بيانات الخادم أو المخدوم داخل الـ QR.'
+      });
+      return;
+    }
+
+    let memberQuery = supabase.from('church_users').select('*');
+    if (userId && username) {
+      memberQuery = memberQuery.or(`id.eq.${userId},username.eq.${username}`);
+    } else if (userId) {
+      memberQuery = memberQuery.or(`id.eq.${userId},username.eq.${userId}`);
+    } else {
+      memberQuery = memberQuery.eq('username', username);
+    }
+
+    const { data: member, error: memberErr } = await memberQuery.maybeSingle();
+
+    if (memberErr || !member) {
+      playFeedbackTone('error', soundEnabledRef.current);
+      setScanResult({
+        kind: 'error',
+        title: 'حساب غير موجود في قاعدة البيانات',
+        message: `لم يتم العثور على خادم أو مخدوم مطابق للكود (${lookupKey}).`
+      });
+      return;
+    }
+
+    const memberName = member.full_name || member.name || member.username || memberInfo?.full_name || 'عضو';
+    const memberRoleLabel =
+      member.permissions?.custom_role_label ||
+      ROLE_AR_LABELS[member.role] ||
+      member.role ||
+      memberInfo?.role_label ||
+      'عضو';
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const todayStr = nowIso.slice(0, 10);
+    const mode = attendanceModeRef.current;
+
+    const { data: openLog } = await supabase
+      .from('church_attendance_logs')
+      .select('*')
+      .eq('user_id', String(member.id))
+      .eq('attendance_date', todayStr)
+      .is('checked_out_at', null)
+      .order('checked_in_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const doCheckOut = mode === 'check_out' || (mode === 'auto' && Boolean(openLog));
+
+    if (!doCheckOut && openLog?.checked_in_at) {
+      const diffSec = (now.getTime() - new Date(openLog.checked_in_at).getTime()) / 1000;
+      if (diffSec < 25) {
+        playFeedbackTone('warning', soundEnabledRef.current);
         setScanResult({
-          kind: 'error',
-          title: 'تعذر تحديث حالة الدخول في قاعدة البيانات',
-          message: updErr.message,
-          invite: mergedInvitePreview,
-          embedded,
-          scannedAt: nowIso,
-          scannedBy: scannerDisplayName,
-          scannedByRole: scannerRoleLabel
+          kind: 'warning',
+          title: 'تم تسجيل الحضور للتو',
+          message: `تم تسجيل حضور (${memberName}) بالفعل منذ ثوانٍ في ${formatDateTimeAr(openLog.checked_in_at)}.`,
+          scannedAt: openLog.checked_in_at,
+          scannedBy: openLog.checked_in_by || actorLabel
+        });
+        return;
+      }
+    }
+
+    if (doCheckOut) {
+      if (!openLog?.id) {
+        playFeedbackTone('warning', soundEnabledRef.current);
+        setScanResult({
+          kind: 'warning',
+          title: 'لا يوجد تسجيل حضور مفتوح اليوم',
+          message: `يجب تسجيل حضور (${memberName}) أولاً قبل تسجيل الانصراف.`
         });
         return;
       }
 
-      const finalInvite = {
-        ...mergedInvitePreview,
-        ...(updatedRow || {}),
-        status: 'checked_in',
-        checked_in_at: updatedRow?.checked_in_at || nowIso,
-        checked_in_by: updatedRow?.checked_in_by || actorLabel,
-        checked_in_by_name: updatedRow?.checked_in_by_name || scannerDisplayName,
-        checked_in_by_role: updatedRow?.checked_in_by_role || scannerRoleLabel
-      };
+      const { data: updatedLog, error: outErr } = await supabase
+        .from('church_attendance_logs')
+        .update({
+          checked_out_at: nowIso,
+          checked_out_by: actorLabel,
+          status: 'checked_out'
+        })
+        .eq('id', openLog.id)
+        .select()
+        .single();
+
+      if (outErr) {
+        playFeedbackTone('error', soundEnabledRef.current);
+        setScanResult({
+          kind: 'error',
+          title: 'تعذر تسجيل الانصراف',
+          message: outErr.message
+        });
+        return;
+      }
 
       playFeedbackTone('success', soundEnabledRef.current);
       setScanResult({
         kind: 'success',
-        title: 'تم التحقق وتسجيل الحضور بنجاح ✅',
-        message: finalInvite.seat_or_zone
-          ? `توجيه المدعو إلى: ${finalInvite.seat_or_zone}`
-          : 'الدعوة صالحة وتم تسجيل وقت الحضور وبيانات من قام بالمسح.',
-        invite: finalInvite,
-        embedded,
-        scannedAt: finalInvite.checked_in_at,
-        scannedBy: scannerDisplayName,
-        scannedByRole: scannerRoleLabel
+        title: 'تم تسجيل الانصراف بنجاح 👋',
+        message: `انصرف (${memberName}) — ${memberRoleLabel} — في ${formatDateTimeAr(nowIso)} بواسطة ${actorLabel}.`,
+        scannedAt: nowIso,
+        scannedBy: actorLabel
       });
 
-      setRecentLogs((prev) => [finalInvite, ...prev.slice(0, 14)]);
+      setRecentLogs((prev) => [
+        {
+          id: `att-out-${updatedLog.id}-${nowIso}`,
+          title: `${memberName} (${memberRoleLabel})`,
+          subtitle: `انصراف • بواسطة: ${actorLabel}`,
+          badge: 'انصراف',
+          timeLabel: formatDateTimeAr(nowIso)
+        },
+        ...prev.slice(0, 14)
+      ]);
+      return;
+    }
+
+    const { data: createdLog, error: inErr } = await supabase
+      .from('church_attendance_logs')
+      .insert([
+        {
+          user_id: String(member.id),
+          full_name: memberName,
+          role: member.role || 'member',
+          attendance_date: todayStr,
+          checked_in_at: nowIso,
+          checked_in_by: actorLabel,
+          status: 'checked_in'
+        }
+      ])
+      .select()
+      .single();
+
+    if (inErr) {
+      playFeedbackTone('error', soundEnabledRef.current);
+      setScanResult({
+        kind: 'error',
+        title: 'تعذر تسجيل الحضور',
+        message: inErr.message
+      });
+      return;
+    }
+
+    playFeedbackTone('success', soundEnabledRef.current);
+    setScanResult({
+      kind: 'success',
+      title: 'تم تسجيل الحضور بنجاح ✅',
+      message: `حضر (${memberName}) — ${memberRoleLabel} — في ${formatDateTimeAr(nowIso)} بواسطة ${actorLabel}.`,
+      scannedAt: nowIso,
+      scannedBy: actorLabel
+    });
+
+    setRecentLogs((prev) => [
+      {
+        id: `att-in-${createdLog.id}-${nowIso}`,
+        title: `${memberName} (${memberRoleLabel})`,
+        subtitle: `حضور • بواسطة: ${actorLabel}`,
+        badge: 'حضور',
+        timeLabel: formatDateTimeAr(nowIso)
+      },
+      ...prev.slice(0, 14)
+    ]);
+  };
+
+  const processAnyScan = async (rawValue) => {
+    const parsed = parseQrContent(rawValue);
+    if (!parsed.token || isProcessingRef.current) return;
+
+    isProcessingRef.current = true;
+    try {
+      if (parsed.kind === 'member') {
+        await handleMemberAttendanceScan(parsed.memberInfo, parsed.token);
+        return;
+      }
+      if (parsed.kind === 'invitation') {
+        await handleInvitationScan(parsed.token, parsed.embedded);
+        return;
+      }
+
+      if (activeTabRef.current === 'attendance') {
+        await handleMemberAttendanceScan(parsed.memberInfo, parsed.token);
+      } else {
+        await handleInvitationScan(parsed.token, parsed.embedded);
+      }
     } finally {
       setTimeout(() => {
         isProcessingRef.current = false;
@@ -382,7 +630,7 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
     if (!manualCode.trim() || submittingManual) return;
     setSubmittingManual(true);
     try {
-      await processToken(manualCode.trim());
+      await processAnyScan(manualCode.trim());
       setManualCode('');
     } finally {
       setSubmittingManual(false);
@@ -399,14 +647,14 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
       dir="rtl"
     >
       <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl p-4 sm:p-5 space-y-4 text-xs max-h-[94vh] overflow-y-auto">
-        {/* الهيدر وبيانات الشخص الذي يقوم بالمسح الآن */}
+        {/* الهيدر وبيانات القائم بالمسح */}
         <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
           <div className="flex items-center gap-2.5 text-[#7a1c24]">
             <div className="p-2.5 rounded-2xl bg-[#f9ecee]">
               <ScanLine size={20} />
             </div>
             <div>
-              <h3 className="text-sm sm:text-base font-black">مسح QR الدعوات وتسجيل الحضور</h3>
+              <h3 className="text-sm sm:text-base font-black">سكان QR للدعوات والحضور والانصراف</h3>
               <p className="text-[11px] text-gray-500 flex items-center gap-1 flex-wrap mt-0.5">
                 <UserCheck size={12} className="text-emerald-700" />
                 <span>القائم بالمسح:</span>
@@ -436,6 +684,74 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
             </button>
           </div>
         </div>
+
+        {/* التبديل بين مسح الدعوات وحضور/انصراف الخدام والمخدومين */}
+        <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-2xl">
+          <button
+            type="button"
+            onClick={() => setActiveTab('invitations')}
+            className={`py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition ${
+              activeTab === 'invitations'
+                ? 'bg-[#7a1c24] text-white shadow'
+                : 'text-slate-700 hover:bg-white/70'
+            }`}
+          >
+            <Ticket size={14} /> مسح الدعوات
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('attendance')}
+            className={`py-2 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer transition ${
+              activeTab === 'attendance'
+                ? 'bg-[#7a1c24] text-white shadow'
+                : 'text-slate-700 hover:bg-white/70'
+            }`}
+          >
+            <Users size={14} /> حضور وانصراف (خدام / مخدومين)
+          </button>
+        </div>
+
+        {/* خيارات وضع الحضور والانصراف عند اختيار تبويب الحضور */}
+        {activeTab === 'attendance' && (
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-amber-50/80 border border-amber-200 px-3 py-2 rounded-2xl">
+            <span className="text-[11px] font-bold text-amber-950">وضع التسجيل:</span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setAttendanceMode('auto')}
+                className={`px-2.5 py-1 rounded-xl font-bold text-[11px] cursor-pointer ${
+                  attendanceMode === 'auto'
+                    ? 'bg-amber-500 text-[#4a0e13]'
+                    : 'bg-white text-gray-700 border'
+                }`}
+              >
+                تلقائي (حضور / انصراف)
+              </button>
+              <button
+                type="button"
+                onClick={() => setAttendanceMode('check_in')}
+                className={`px-2.5 py-1 rounded-xl font-bold text-[11px] flex items-center gap-1 cursor-pointer ${
+                  attendanceMode === 'check_in'
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-white text-gray-700 border'
+                }`}
+              >
+                <LogIn size={12} /> حضور
+              </button>
+              <button
+                type="button"
+                onClick={() => setAttendanceMode('check_out')}
+                className={`px-2.5 py-1 rounded-xl font-bold text-[11px] flex items-center gap-1 cursor-pointer ${
+                  attendanceMode === 'check_out'
+                    ? 'bg-rose-600 text-white'
+                    : 'bg-white text-gray-700 border'
+                }`}
+              >
+                <LogOut size={12} /> انصراف
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* أزرار التحكم في الكاميرا والفوكس */}
         <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-3 py-2 rounded-2xl border">
@@ -505,7 +821,11 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
           <div className="relative flex-1">
             <Search size={14} className="absolute right-3 top-3 text-gray-400" />
             <input
-              placeholder="إدخال أو لصق كود الدعوة يدوياً (مثال: INV-...)"
+              placeholder={
+                activeTab === 'attendance'
+                  ? 'إدخال اسم المستخدم أو المعرف يدوياً...'
+                  : 'إدخال أو لصق كود الدعوة يدوياً (مثال: INV-...)'
+              }
               className="w-full pr-9 pl-3 py-2.5 border rounded-xl text-xs font-bold focus:outline-none focus:border-[#7a1c24]"
               value={manualCode}
               onChange={(e) => setManualCode(e.target.value)}
@@ -516,11 +836,11 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
             disabled={submittingManual}
             className="px-4 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black cursor-pointer shrink-0 disabled:opacity-60"
           >
-            {submittingManual ? 'جاري التحقق...' : 'تسجيل دخول'}
+            {submittingManual ? 'جاري التحقق...' : 'تسجيل'}
           </button>
         </form>
 
-        {/* نتيجة المسح وتفاصيل المدعو والوقت ومن قام بالمسح */}
+        {/* نتيجة المسح */}
         {scanResult && (
           <div
             className={`p-4 rounded-2xl border-2 space-y-2.5 ${
@@ -581,7 +901,7 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
                   <div className="flex items-center gap-1.5">
                     <Clock size={13} className="text-[#7a1c24] shrink-0" />
                     <span>
-                      وقت الحضور / الـ Scan:{' '}
+                      الوقت:{' '}
                       <strong className="text-gray-900">
                         {formatDateTimeAr(scanResult.invite?.checked_in_at || scanResult.scannedAt)}
                       </strong>
@@ -592,8 +912,7 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
                     <span>
                       تم المسح بواسطة:{' '}
                       <strong className="text-gray-900">
-                        {scanResult.invite?.checked_in_by ||
-                          `${scanResult.scannedBy} (${scanResult.scannedByRole})`}
+                        {scanResult.invite?.checked_in_by || scanResult.scannedBy || actorLabel}
                       </strong>
                     </span>
                   </div>
@@ -603,33 +922,27 @@ export default function InvitationScannerModal({ currentUser, onClose }) {
           </div>
         )}
 
-        {/* سجل الحضور والـ Scan في الجلسة الحالية */}
+        {/* سجل العمليات في الجلسة */}
         {recentLogs.length > 0 && (
           <div className="space-y-1.5 pt-1">
             <strong className="text-gray-800 block">
-              سجل من تم تسجيل دخولهم في هذه الجلسة ({recentLogs.length}):
+              سجل العمليات في هذه الجلسة ({recentLogs.length}):
             </strong>
             <div className="space-y-1.5 max-h-44 overflow-y-auto">
               {recentLogs.map((item) => (
                 <div
-                  key={`${item.id}-${item.checked_in_at}`}
+                  key={item.id}
                   className="flex flex-wrap items-center justify-between gap-2 bg-[#fbfaf7] border px-3 py-2 rounded-xl"
                 >
                   <div>
-                    <span className="font-black text-gray-900 block">
-                      {item.recipient_name}{' '}
-                      <span className="text-[10px] font-bold text-gray-500">
-                        ({item.invite_tier === 'vip' ? '👑 VIP' : 'عام'}
-                        {item.seat_or_zone ? ` • ${item.seat_or_zone}` : ''})
-                      </span>
-                    </span>
-                    <span className="text-[10px] text-gray-600 block">
-                      بواسطة: <strong>{item.checked_in_by || scannerDisplayName}</strong>
+                    <span className="font-black text-gray-900 block">{item.title}</span>
+                    <span className="text-[10px] text-gray-600 block">{item.subtitle}</span>
+                  </div>
+                  <div className="text-left space-y-0.5">
+                    <span className="text-[10px] text-emerald-800 font-black bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg inline-block">
+                      {item.badge} • {item.timeLabel}
                     </span>
                   </div>
-                  <span className="text-[10px] text-emerald-800 font-black bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-lg">
-                    {formatDateTimeAr(item.checked_in_at)}
-                  </span>
                 </div>
               ))}
             </div>
