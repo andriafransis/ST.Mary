@@ -12,7 +12,6 @@ import {
   ScanLine
 } from 'lucide-react';
 
-// رسم QR Matrix بسيط وواضح على Canvas معتمد على قيمة qr_token
 function QrCodeBox({ value, size = 88 }) {
   const canvasRef = useRef(null);
 
@@ -56,7 +55,6 @@ function QrCodeBox({ value, size = 88 }) {
     drawFinder(0, modules - 7);
     drawFinder(modules - 7, 0);
 
-    // هاش حتمي من نص الكود
     let hash = 2166136261;
     const text = String(value);
     for (let i = 0; i < text.length; i++) {
@@ -87,12 +85,7 @@ function QrCodeBox({ value, size = 88 }) {
     for (let r = 0; r < modules; r++) {
       for (let c = 0; c < modules; c++) {
         if (grid[r][c]) {
-          ctx.fillRect(
-            (c + margin) * cell,
-            (r + margin) * cell,
-            cell,
-            cell
-          );
+          ctx.fillRect((c + margin) * cell, (r + margin) * cell, cell, cell);
         }
       }
     }
@@ -110,16 +103,17 @@ function QrCodeBox({ value, size = 88 }) {
 export default function ReceivedInvitationsSection({ currentUser, onCountChange }) {
   const [myInvites, setMyInvites] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [liveBanner, setLiveBanner] = useState('');
   const [notifPermission, setNotifPermission] = useState(
     typeof Notification !== 'undefined' ? Notification.permission : 'default'
   );
 
   const triggerMobileNotification = useCallback((inv, isScanUpdate = false) => {
     const title = isScanUpdate
-      ? `✅ تم مسح QR الدعوة: ${inv.event_title}`
+      ? `تم مسح QR الدعوة: ${inv.event_title}`
       : inv.invite_tier === 'vip'
-        ? `👑 دعوة VIP جديدة: ${inv.event_title}`
-        : `🎟️ دعوة جديدة: ${inv.event_title}`;
+        ? `دعوة VIP جديدة: ${inv.event_title}`
+        : `دعوة جديدة: ${inv.event_title}`;
 
     const body = [
       inv.seat_or_zone ? `المكان: ${inv.seat_or_zone}` : '',
@@ -129,6 +123,8 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
     ]
       .filter(Boolean)
       .join(' • ');
+
+    setLiveBanner(`${title} — ${body}`);
 
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       try {
@@ -153,22 +149,31 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
     if (!currentUser?.id || !supabase || typeof supabase.from !== 'function') return;
     setLoading(true);
     try {
+      const filters = [`recipient_user_id.eq.${currentUser.id}`];
+      const cleanPhone = String(currentUser.phone || '').trim();
+      if (cleanPhone) {
+        filters.push(`recipient_phone.eq.${cleanPhone}`);
+      }
+
       const { data, error } = await supabase
         .from('church_invitations')
         .select('*')
-        .eq('recipient_user_id', currentUser.id)
+        .or(filters.join(','))
         .order('created_at', { ascending: false });
 
       if (!error && Array.isArray(data)) {
-        setMyInvites(data);
+        const uniqueByKey = Array.from(
+          new Map(data.map((row) => [row.id || row.qr_token, row])).values()
+        );
+        setMyInvites(uniqueByKey);
         if (onCountChange) {
-          onCountChange(data.filter((i) => i.status !== 'checked_in').length);
+          onCountChange(uniqueByKey.filter((i) => i.status !== 'checked_in').length);
         }
       }
     } finally {
       setLoading(false);
     }
-  }, [currentUser?.id, onCountChange]);
+  }, [currentUser?.id, currentUser?.phone, onCountChange]);
 
   useEffect(() => {
     fetchMyInvites();
@@ -184,10 +189,16 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
         {
           event: '*',
           schema: 'public',
-          table: 'church_invitations',
-          filter: `recipient_user_id=eq.${currentUser.id}`
+          table: 'church_invitations'
         },
         (payload) => {
+          const row = payload.new || payload.old;
+          const matchesUser =
+            row?.recipient_user_id === currentUser.id ||
+            (currentUser.phone && row?.recipient_phone === currentUser.phone);
+
+          if (!matchesUser) return;
+
           fetchMyInvites();
           if (payload.eventType === 'INSERT' && payload.new) {
             triggerMobileNotification(payload.new, false);
@@ -207,10 +218,23 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
         supabase.removeChannel(channel);
       }
     };
-  }, [currentUser?.id, fetchMyInvites, triggerMobileNotification]);
+  }, [currentUser?.id, currentUser?.phone, fetchMyInvites, triggerMobileNotification]);
 
   return (
     <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3 text-xs" dir="rtl">
+      {liveBanner && (
+        <div className="p-3 rounded-2xl bg-emerald-50 border-2 border-emerald-300 text-emerald-950 font-black flex items-center justify-between gap-2">
+          <span>{liveBanner}</span>
+          <button
+            type="button"
+            onClick={() => setLiveBanner('')}
+            className="text-emerald-800 hover:text-emerald-950 cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
         <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5">
           <Ticket size={17} /> دعواتي وكود الـ QR ({myInvites.length})
@@ -266,7 +290,7 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
                         }`}
                       >
                         {isVip && <Crown size={11} />}
-                        {isVip ? '👑 دعوة VIP' : '👥 دعوة عامة'}
+                        {isVip ? 'دعوة VIP' : 'دعوة عامة'}
                       </span>
                       <span className="px-2 py-0.5 rounded-lg bg-white border text-gray-700 text-[10px] font-bold">
                         {inv.event_type || 'مناسبة كنسية'}
@@ -309,7 +333,7 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
                   </div>
                   {inv.notes && (
                     <p className="text-gray-700 pt-1 border-t border-gray-100">
-                      📌 {inv.notes}
+                      {inv.notes}
                     </p>
                   )}
                 </div>
