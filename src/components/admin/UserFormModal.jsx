@@ -11,17 +11,22 @@ import {
   normalizeDeaconRank
 } from '../../utils/churchHierarchy';
 
-const ARABIC_ONLY_REGEX = /^[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\s]+$/;
+const ARABIC_SINGLE_WORD_REGEX = /^[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]+$/;
 
-function isPureArabicName(val = '') {
-  const cleaned = String(val || '').trim();
-  if (!cleaned) return false;
-  if (/[A-Za-z]/.test(cleaned)) return false;
-  return ARABIC_ONLY_REGEX.test(cleaned);
+function hasAnySpace(val = '') {
+  return /\s/.test(String(val || ''));
 }
 
-function sanitizeArabicInput(val = '') {
-  return String(val || '').replace(/[A-Za-z]/g, '');
+function isPureArabicNoSpace(val = '') {
+  const cleaned = String(val || '');
+  if (!cleaned) return false;
+  if (/[A-Za-z]/.test(cleaned)) return false;
+  if (/\s/.test(cleaned)) return false;
+  return ARABIC_SINGLE_WORD_REGEX.test(cleaned);
+}
+
+function sanitizeArabicNoSpace(val = '') {
+  return String(val || '').replace(/[A-Za-z]/g, '').replace(/\s+/g, '');
 }
 
 function parseDobParts(dobStr = '') {
@@ -165,28 +170,38 @@ export default function UserFormModal({
   ])];
 
   const handleArabicNameChange = (field, rawValue) => {
-    const filtered = sanitizeArabicInput(rawValue);
-    if (/[A-Za-z]/.test(rawValue)) {
-      setNameError('الاسم الرباعي يجب أن يُكتب باللغة العربية فقط بدون حروف إنجليزية.');
+    const hadSpace = hasAnySpace(rawValue);
+    const hadEnglish = /[A-Za-z]/.test(rawValue);
+    const filtered = sanitizeArabicNoSpace(rawValue);
+
+    if (hadSpace) {
+      setNameError('لا، في حاجة غلط: ممنوع تدوس مسافة أو تسيب مسافة بعد الاسم؛ الاسم لازم ينتهي بآخر حرف بدون أي مسافة.');
+    } else if (hadEnglish) {
+      setNameError('لا، في حاجة غلط: الاسم الرباعي لازم يتكتب باللغة العربية فقط بدون حروف إنجليزية.');
     } else {
       setNameError('');
     }
+
     setFormData({ ...formData, [field]: filtered });
   };
 
   const validateArabicQuadName = () => {
     const parts = [
-      formData.first_name,
-      formData.second_name,
-      formData.third_name,
-      formData.fourth_name
+      formData.first_name || '',
+      formData.second_name || '',
+      formData.third_name || '',
+      formData.fourth_name || ''
     ];
-    if (parts.some(p => !(p || '').trim())) {
-      setNameError('يرجى إدخال الاسم الرباعي بالكامل (الأول، الثاني، الثالث، الرابع) باللغة العربية.');
+    if (parts.some(p => !p)) {
+      setNameError('لا، في حاجة غلط: يرجى إدخال الاسم الرباعي بالكامل (الأول، الثاني، الثالث، الرابع) باللغة العربية.');
       return false;
     }
-    if (!parts.every(p => isPureArabicName(p))) {
-      setNameError('ممنوع كتابة أي حروف إنجليزية في الاسم الرباعي؛ يجب أن يكون باللغة العربية فقط.');
+    if (parts.some(p => hasAnySpace(p))) {
+      setNameError('لا، في حاجة غلط: ممنوع وجود أي مسافة داخل أو بعد أي اسم؛ لازم الاسم يقف عند آخر حرف.');
+      return false;
+    }
+    if (!parts.every(p => isPureArabicNoSpace(p))) {
+      setNameError('لا، في حاجة غلط: الاسم الرباعي يجب أن يكون باللغة العربية فقط بدون حروف إنجليزية أو مسافات.');
       return false;
     }
     setNameError('');
@@ -259,12 +274,11 @@ export default function UserFormModal({
   };
 
   const buildStandardPayload = (forVisitor = false) => {
-    const full_name = [
-      formData.first_name,
-      formData.second_name,
-      formData.third_name,
-      formData.fourth_name
-    ].map(s => (s || '').trim()).filter(Boolean).join(' ');
+    const f1 = sanitizeArabicNoSpace(formData.first_name || '');
+    const f2 = sanitizeArabicNoSpace(formData.second_name || '');
+    const f3 = sanitizeArabicNoSpace(formData.third_name || '');
+    const f4 = sanitizeArabicNoSpace(formData.fourth_name || '');
+    const full_name = [f1, f2, f3, f4].filter(Boolean).join(' ');
 
     const cleanUser = (formData.username || '').trim().replace(/\s+/g, '');
     const resolvedEngagement =
@@ -311,10 +325,10 @@ export default function UserFormModal({
       username: forVisitor ? cleanUser.toLowerCase() : cleanUser,
       password: formData.password,
       full_name,
-      first_name: (formData.first_name || '').trim(),
-      second_name: (formData.second_name || '').trim(),
-      third_name: (formData.third_name || '').trim(),
-      fourth_name: (formData.fourth_name || '').trim(),
+      first_name: f1,
+      second_name: f2,
+      third_name: f3,
+      fourth_name: f4,
       role: resolvedRole,
       requested_role: formData.role || resolvedRole,
       status: forVisitor ? 'pending' : (formData.status || 'active'),
@@ -463,36 +477,36 @@ export default function UserFormModal({
         )}
 
         <form onSubmit={isVisitorMode ? handleVisitorSubmit : handleAdminFormSubmit} className="space-y-3">
-          {/* الاسم الرباعي الإلزامي بالعربي فقط */}
+          {/* الاسم الرباعي الإلزامي بالعربي فقط وبدون مسافات في أي اسم */}
           <div>
             <label className="block mb-1 text-[#7a1c24]">
-              الاسم الرباعي (إلزامي — عربي فقط) *
+              الاسم الرباعي (عربي فقط — بدون مسافة بعد أي اسم) *
             </label>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <input
                 required
-                placeholder="الأول (عربي) *"
+                placeholder="الأول (بدون مسافة) *"
                 className="p-2.5 border rounded-xl bg-white"
                 value={formData.first_name || ''}
                 onChange={e => handleArabicNameChange('first_name', e.target.value)}
               />
               <input
                 required
-                placeholder="الثاني (عربي) *"
+                placeholder="الثاني (بدون مسافة) *"
                 className="p-2.5 border rounded-xl bg-white"
                 value={formData.second_name || ''}
                 onChange={e => handleArabicNameChange('second_name', e.target.value)}
               />
               <input
                 required
-                placeholder="الثالث (عربي) *"
+                placeholder="الثالث (بدون مسافة) *"
                 className="p-2.5 border rounded-xl bg-white"
                 value={formData.third_name || ''}
                 onChange={e => handleArabicNameChange('third_name', e.target.value)}
               />
               <input
                 required
-                placeholder="الرابع (عربي) *"
+                placeholder="الرابع (بدون مسافة) *"
                 className="p-2.5 border rounded-xl bg-white"
                 value={formData.fourth_name || ''}
                 onChange={e => handleArabicNameChange('fourth_name', e.target.value)}
