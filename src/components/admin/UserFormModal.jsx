@@ -613,7 +613,7 @@ export default function UserFormModal({
                         : '',
                       family_role: checked
                         ? ((formData.guardian_type || (formData.gender === 'أنثى' ? 'mother' : 'father')) === 'mother' ? 'الأم' : 'الأب')
-                        : (marriedFlag ? 'متزوج' : formData.family_role)
+                        : (isMarried ? 'متزوج' : formData.family_role)
                     });
                   }}
                 />
@@ -649,18 +649,18 @@ export default function UserFormModal({
             </div>
           )}
 
-          {/* تاريخ الميلاد من الشمال: يوم / شهر / سنة */}
+          {/* تاريخ الميلاد: اليوم ثم الشهر ثم السنة من اليمين */}
           <div>
             <label className="block mb-1 text-[#7a1c24]">
-              تاريخ الميلاد (من الشمال: يوم / شهر / سنة)
+              تاريخ الميلاد (اليوم / الشهر / السنة)
             </label>
-            <div dir="ltr" className="grid grid-cols-3 gap-2">
+            <div dir="rtl" className="grid grid-cols-3 gap-2">
               <select
                 className="w-full p-2.5 border rounded-xl bg-white"
                 value={dobDay}
                 onChange={e => handleDobPartChange(e.target.value, dobMonth, dobYear)}
               >
-                <option value="">اليوم (DD)</option>
+                <option value="">اليوم</option>
                 {daysList.map(d => (
                   <option key={d} value={d}>{d.padStart(2, '0')}</option>
                 ))}
@@ -671,7 +671,7 @@ export default function UserFormModal({
                 value={dobMonth}
                 onChange={e => handleDobPartChange(dobDay, e.target.value, dobYear)}
               >
-                <option value="">الشهر (MM)</option>
+                <option value="">الشهر</option>
                 {monthsList.map(m => (
                   <option key={m.v} value={m.v}>{m.l}</option>
                 ))}
@@ -682,7 +682,7 @@ export default function UserFormModal({
                 value={dobYear}
                 onChange={e => handleDobPartChange(dobDay, dobMonth, e.target.value)}
               >
-                <option value="">السنة (YYYY)</option>
+                <option value="">السنة</option>
                 {yearsList.map(y => (
                   <option key={y} value={y}>{y}</option>
                 ))}
