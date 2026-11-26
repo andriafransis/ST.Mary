@@ -1,905 +1,764 @@
-import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
-import { logActivity } from '../lib/activityLogger';
-import {
-  BusVisualizerSection,
-  PrintBusModal,
-  createNewBus,
-  normalizeBuses,
-  buildGroupedPeopleSummary
-} from '../components/priest/BusTripManager';
-import {
-  Bus, Plus, Trash2, Edit3, Printer, Globe, Lock, X,
-  ArrowRight, BedDouble, Wind, Sun, Moon, Users, Phone, MessageCircle, ShieldAlert
-} from 'lucide-react';
+import { useState } from 'react';
+import { supabase } from '../../lib/supabase';
+import { logActivity } from '../../lib/activityLogger';
+import { Bus, Plus, Printer, Trash2, Phone, MessageCircle, X } from 'lucide-react';
 
-const TRIP_CATEGORIES = [
-  { id: 'منتظمة', icon: '📅', title: 'الرحلات المنتظمة', desc: 'الرحلات الدورية الشهرية والأسبوعية (يوم واحد غالباً)' },
-  { id: 'موسمية', icon: '🗓️', title: 'الرحلات الموسمية', desc: 'رحلات الأعياد والنهضات والصيامات' },
-  { id: 'مصيفية', icon: '🏖️', title: 'الرحلات المصيفية', desc: 'مصايف داي يوز (يوم واحد) أو مصايف مبيت بحجز الأوض' },
-  { id: 'مبيت', icon: '🏕️', title: 'رحلات المبيت والمؤتمرات', desc: 'بيوت الخلوة والمؤتمرات مع تسكين الغرف والأفراد' }
-];
+export const PAYMENT_METHODS = ['كاش', 'محفظة إلكترونية', 'إنستاباي', 'تحويل بنكي'];
 
-export default function TripsOfficePage({ currentUser, users = [] }) {
-  const todayISO = new Date().toLocaleDateString('en-CA');
-  const [activeCard, setActiveCard] = useState('hub');
-  const [trips, setTrips] = useState([]);
-  const [registrations, setRegistrations] = useState([]);
-
-  // التحقق الدقيق من الصلاحيات المركزية للشخص (من جدول الصلاحيات)
-  const isAdmin = currentUser?.role === 'admin';
-  const isPriest = currentUser?.role === 'priest';
-
-  const userPerms = currentUser?.permissions || {};
-  const screenPerms = userPerms.screen_permissions?.trips_office || {};
-
-  // هل يملك صلاحية إضافة رحلة جديدة؟
-  const canAddTrips =
-    isAdmin ||
-    Boolean(screenPerms.add) ||
-    Boolean(userPerms.manage_trips && screenPerms.add !== false);
-
-  // هل يملك صلاحية تعديل الرحلات وتسكينها؟
-  const canEditTrips =
-    isAdmin ||
-    Boolean(screenPerms.edit) ||
-    Boolean(userPerms.manage_trips && screenPerms.edit !== false);
-
-  // هل يملك صلاحية حذف الرحلات؟
-  const canDeleteTrips =
-    isAdmin ||
-    Boolean(screenPerms.delete);
-
-  const [editingId, setEditingId] = useState(null);
-  const [viewBusTrip, setViewBusTrip] = useState(null);
-  const [viewRoomsTrip, setViewRoomsTrip] = useState(null);
-  const [viewRegsTrip, setViewRegsTrip] = useState(null);
-  const [printBusState, setPrintBusState] = useState(null);
-
-  const [stayMode, setStayMode] = useState('day_use'); // 'day_use' | 'overnight'
-
-  const [newRoomForm, setNewRoomForm] = useState({
-    room_number: '',
-    ac_type: 'مكيفة ❄️',
-    capacity: 4,
-    floor_notes: '',
-    occupants_text: ''
-  });
-
-  const emptyForm = {
-    title: '',
-    trip_category: 'منتظمة',
-    trip_date: '',
-    days_count: 1,
-    cost_per_person: 0,
-    gathering_time: '',
-    departure_time: '',
-    return_time: '',
-    monasteries: '',
-    supervisors: '',
-    daily_program: '',
-    notes: '',
-    is_public: true,
-    bus_seats: [createNewBus(1, 'الأتوبيس الأول')],
-    rooms: []
-  };
-  const [form, setForm] = useState(emptyForm);
-
-  const loadTrips = async () => {
-    const [tr, reg] = await Promise.all([
-      supabase.from('church_trips').select('*').order('trip_date', { ascending: true }),
-      supabase.from('trip_registrations').select('*').order('created_at', { ascending: false })
-    ]);
-    if (tr.data) setTrips(tr.data);
-    if (reg.data) setRegistrations(reg.data);
-  };
-
-  useEffect(() => {
-    loadTrips();
-  }, []);
-
-  const toManagerTrip = (t) => ({
-    ...t,
-    event_date: t.trip_date,
-    event_time: t.departure_time,
-    trip_cost: Number(t.cost_per_person || 0),
-    activity_kind: `رحلة ${t.trip_category || 'عامة'}`
-  });
-
-  const handleOpenWhatsApp = ({ name = '', phone = '' }) => {
-    const clean = String(phone || '').replace(/\D/g, '');
-    if (!clean) return alert('لا يوجد رقم تليفون مسجل لهذا الشخص');
-    const intl = clean.startsWith('2') ? clean : `2${clean}`;
-    const msg = encodeURIComponent(`سلام ونعمة يا ${name || 'أخي'} ✝ — مكتب رحلات الكنيسة`);
-    window.open(`https://wa.me/${intl}?text=${msg}`, '_blank');
-  };
-
-  const generateProgramTemplate = () => {
-    if (stayMode === 'day_use') {
-      const tpl = form.trip_category === 'مصيفية'
-        ? [
-          '• التجمع أمام الكنيسة: 5:30 ص',
-          '• التحرك بالأتوبيسات: 6:00 ص',
-          '• الوصول للشاطئ / القرية المصيفية واستلام الشماسي والكراسي:',
-          '• فقرة ترفيهية / ألعاب ومسابقات:',
-          '• الغداء الجماعي:',
-          '• التحرك للعودة للكنيسة: 6:00 م'
-        ].join('\n')
-        : [
-          '• التجمع أمام الكنيسة: 6:00 ص',
-          '• التحرك بالأتوبيسات: 6:30 ص',
-          '• الزيارة الأولى (الدير / الكنيسة):',
-          '• صلاة القداس / أخذ البركة والمزارات:',
-          '• وقت الغداء والراحة:',
-          '• الزيارة الثانية / النشاط الروحي:',
-          '• التحرك والعودة للكنيسة: 7:00 م'
-        ].join('\n');
-      setForm(prev => ({ ...prev, daily_program: tpl }));
+export const generateDefaultBusSeats = () => {
+  const seats = [];
+  let seatNum = 1;
+  for (let row = 1; row <= 11; row++) {
+    seats.push({ id: `S${seatNum}`, number: seatNum++, row, side: 'left', pos: 'window', occupant: '' });
+    seats.push({ id: `S${seatNum}`, number: seatNum++, row, side: 'left', pos: 'aisle', occupant: '' });
+    if (row === 6) {
+      seats.push({ id: `DOOR_BACK`, number: null, row, side: 'right', isDoor: true, label: 'باب خلفي 🚪' });
     } else {
-      const days = Math.max(2, Number(form.days_count || 2));
-      const lines = [];
-      for (let d = 1; d <= days; d++) {
-        lines.push(`--- اليوم ${d} ---`);
-        lines.push(
-          d === 1
-            ? '• التجمع والتحرك:\n• الوصول وتسكين الأوض:\n• الزيارات وبرنامج المساء:'
-            : d === days
-              ? '• القداس الإلهي:\n• تسليم الأوض:\n• الزيارات والتحرك والعودة للكنيسة:'
-              : '• صلاة باكر والقداس:\n• الزيارات / الأنشطة:\n• السهرة الروحية:'
-        );
-        lines.push('');
+      seats.push({ id: `S${seatNum}`, number: seatNum++, row, side: 'right', pos: 'aisle', occupant: '' });
+      seats.push({ id: `S${seatNum}`, number: seatNum++, row, side: 'right', pos: 'window', occupant: '' });
+    }
+  }
+  for (let b = 1; b <= 5; b++) {
+    seats.push({ id: `S${seatNum}`, number: seatNum++, row: 12, side: 'back', pos: `back-${b}`, occupant: '' });
+  }
+  return seats;
+};
+
+export const createNewBus = (index = 1, customName = '') => ({
+  id: `bus_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+  name: customName || (index === 1 ? 'الأتوبيس الأول' : `أتوبيس ${index}`),
+  supervisor_name: '',
+  seats: generateDefaultBusSeats()
+});
+
+export const normalizeBuses = (rawBusSeats) => {
+  if (Array.isArray(rawBusSeats) && rawBusSeats.length > 0) {
+    if (rawBusSeats[0] && Array.isArray(rawBusSeats[0].seats)) return rawBusSeats;
+    return [{ id: 'bus_1', name: 'الأتوبيس الأول', supervisor_name: '', seats: rawBusSeats }];
+  }
+  return [createNewBus(1, 'الأتوبيس الأول')];
+};
+
+export const getSeatPositionLabel = (seat) => {
+  if (seat.row === 12) return 'الكنبة الخلفية';
+  const sideLabel = seat.side === 'right' ? 'يمين' : 'يسار';
+  const posLabel = seat.pos === 'window' ? 'شباك' : 'ممر';
+  return `صف ${seat.row} - ${sideLabel} (${posLabel})`;
+};
+
+export const getSeatFinancials = (seat, defaultCost = 0) => {
+  const totalDue = seat.total_due !== undefined && seat.total_due !== null && seat.total_due !== ''
+    ? Number(seat.total_due)
+    : Number(defaultCost || 0);
+  const payments = Array.isArray(seat.payments) ? seat.payments : [];
+  const paidFromList = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const paid = payments.length > 0 ? paidFromList : Number(seat.paid_amount || 0);
+  const remaining = Math.max(0, totalDue - paid);
+  return { totalDue, paid, remaining, payments };
+};
+
+export const buildGroupedPeopleSummary = (buses, defaultCost, localUsers = []) => {
+  const map = new Map();
+  buses.forEach(bus => {
+    (bus.seats || []).forEach(s => {
+      if (s.isDoor || !s.occupant) return;
+      const cleanPhone = (s.phone || '').replace(/\s+/g, '');
+      const key = s.user_id || (cleanPhone.length >= 6 ? cleanPhone : s.occupant.trim());
+      const fin = getSeatFinancials(s, defaultCost);
+
+      const linkedUser = s.user_id
+        ? localUsers.find(u => u.id === s.user_id)
+        : localUsers.find(u => (cleanPhone && (u.phone || '').replace(/\s+/g, '') === cleanPhone) || u.full_name === s.occupant.trim());
+
+      const isInside = s.is_member_in_meeting !== undefined ? s.is_member_in_meeting : Boolean(linkedUser);
+      const meetingLabel = s.meeting_label || linkedUser?.detailed_stage || linkedUser?.service_stage || '';
+
+      if (!map.has(key)) {
+        map.set(key, {
+          key, name: s.occupant, phone: s.phone || linkedUser?.phone || '',
+          isInside, meetingLabel, seats: [],
+          totalDue: 0, totalPaid: 0, totalRemaining: 0, cashPaid: 0, walletPaid: 0
+        });
       }
-      setForm(prev => ({ ...prev, daily_program: lines.join('\n') }));
-    }
-  };
-
-  const handleSelectStayMode = (mode) => {
-    setStayMode(mode);
-    if (mode === 'day_use') {
-      setForm(prev => ({ ...prev, days_count: 1, rooms: [] }));
-    } else {
-      setForm(prev => ({ ...prev, days_count: Math.max(2, Number(prev.days_count || 2)) }));
-    }
-  };
-
-  const handleSave = async (e) => {
-    e.preventDefault();
-    if (editingId && !canEditTrips) {
-      return alert('🔒 غير مصرح لك بتعديل الرحلات.');
-    }
-    if (!editingId && !canAddTrips) {
-      return alert('🔒 غير مصرح لك بإضافة رحلات جديدة. حسابك للمشاهدة فقط.');
-    }
-
-    const busesClean = normalizeBuses(form.bus_seats);
-    const isDayUse = stayMode === 'day_use';
-    const payload = {
-      title: form.title.trim(),
-      trip_category: form.trip_category || 'منتظمة',
-      target_service: 'مكتب الرحلات العام',
-      trip_date: form.trip_date || null,
-      days_count: isDayUse ? 1 : Math.max(2, Number(form.days_count || 2)),
-      cost_per_person: Number(form.cost_per_person || 0),
-      gathering_time: form.gathering_time || '',
-      departure_time: form.departure_time || '',
-      return_time: form.return_time || '',
-      monasteries: form.monasteries || '',
-      supervisors: form.supervisors || '',
-      daily_program: form.daily_program || '',
-      notes: form.notes || '',
-      is_public: Boolean(form.is_public),
-      bus_seats: busesClean,
-      rooms: isDayUse ? [] : (Array.isArray(form.rooms) ? form.rooms : []),
-      manager_id: currentUser?.id || null
-    };
-
-    if (editingId) {
-      const { data, error } = await supabase
-        .from('church_trips')
-        .update(payload)
-        .eq('id', editingId)
-        .select()
-        .single();
-      if (error) return alert('خطأ: ' + error.message);
-      setTrips(trips.map(t => (t.id === editingId ? data : t)));
-      logActivity({
-        user: currentUser,
-        actionType: 'تعديل_رحلة_مكتب_الرحلات',
-        targetTable: 'church_trips',
-        targetId: data.id,
-        description: `عدل رحلة (${data.trip_category}): ${data.title}`
+      const entry = map.get(key);
+      entry.seats.push({ busName: bus.name, seatNumber: s.number });
+      entry.totalDue += fin.totalDue;
+      entry.totalPaid += fin.paid;
+      entry.totalRemaining += fin.remaining;
+      fin.payments.forEach(p => {
+        const amt = Number(p.amount || 0);
+        if (p.method === 'كاش') entry.cashPaid += amt;
+        else entry.walletPaid += amt;
       });
-      setEditingId(null);
-      setActiveCard(data.trip_category || 'منتظمة');
-      setForm({ ...emptyForm, bus_seats: [createNewBus(1, 'الأتوبيس الأول')] });
-    } else {
-      const { data, error } = await supabase
-        .from('church_trips')
-        .insert([payload])
-        .select()
-        .single();
-      if (error) return alert('خطأ: ' + error.message);
-      setTrips([...trips, data]);
-      logActivity({
-        user: currentUser,
-        actionType: 'إضافة_رحلة_مكتب_الرحلات',
-        targetTable: 'church_trips',
-        targetId: data.id,
-        description: `أضاف رحلة (${data.trip_category}): ${data.title}`
-      });
-      setActiveCard(data.trip_category || 'منتظمة');
-      setForm({ ...emptyForm, bus_seats: [createNewBus(1, 'الأتوبيس الأول')] });
-    }
-  };
-
-  const persistTripBuses = async (updatedBuses) => {
-    if (!viewBusTrip) return;
-    if (!canEditTrips) {
-      return alert('🔒 غير مصرح لك بتعديل المقاعد أو الحجوزات.');
-    }
-    const { data, error } = await supabase
-      .from('church_trips')
-      .update({ bus_seats: updatedBuses })
-      .eq('id', viewBusTrip.id)
-      .select()
-      .single();
-    if (error) return alert('خطأ في حفظ المقاعد: ' + error.message);
-    if (data) {
-      setTrips(trips.map(t => (t.id === data.id ? data : t)));
-      setViewBusTrip(data);
-      logActivity({
-        user: currentUser,
-        actionType: 'تحديث_أتوبيسات_رحلة',
-        targetTable: 'church_trips',
-        targetId: data.id,
-        description: `حدّث مقاعد أو أقساط رحلة: ${data.title}`
-      });
-    }
-  };
-
-  const persistTripRooms = async (tripId, updatedRooms) => {
-    if (!canEditTrips) {
-      return alert('🔒 غير مصرح لك بتعديل الغرف.');
-    }
-    const { data, error } = await supabase
-      .from('church_trips')
-      .update({ rooms: updatedRooms })
-      .eq('id', tripId)
-      .select()
-      .single();
-    if (error) return alert('خطأ في حفظ الغرف: ' + error.message);
-    if (data) {
-      setTrips(trips.map(t => (t.id === data.id ? data : t)));
-      setViewRoomsTrip(data);
-      logActivity({
-        user: currentUser,
-        actionType: 'تحديث_غرف_رحلة',
-        targetTable: 'church_trips',
-        targetId: data.id,
-        description: `حدّث حجوزات أوض رحلة: ${data.title}`
-      });
-    }
-  };
-
-  const handleAddRoom = async () => {
-    if (!canEditTrips) return alert('🔒 غير مصرح لك بإضافة أوض.');
-    if (!newRoomForm.room_number.trim()) return alert('اكتب رقم أو اسم الأوضة أولاً');
-    const roomObj = {
-      id: `rm_${Date.now()}`,
-      room_number: newRoomForm.room_number.trim(),
-      ac_type: newRoomForm.ac_type,
-      capacity: Number(newRoomForm.capacity || 2),
-      floor_notes: newRoomForm.floor_notes || '',
-      occupants_text: newRoomForm.occupants_text || ''
-    };
-    if (viewRoomsTrip) {
-      const updated = [...(Array.isArray(viewRoomsTrip.rooms) ? viewRoomsTrip.rooms : []), roomObj];
-      await persistTripRooms(viewRoomsTrip.id, updated);
-    } else {
-      setForm(prev => ({ ...prev, rooms: [...(prev.rooms || []), roomObj] }));
-    }
-    setNewRoomForm({ room_number: '', ac_type: 'مكيفة ❄️', capacity: 4, floor_notes: '', occupants_text: '' });
-  };
-
-  const handleUpdateRoomOccupants = async (roomId, occupantsText) => {
-    if (!viewRoomsTrip) return;
-    if (!canEditTrips) return alert('🔒 غير مصرح لك بالتعديل.');
-    const updated = (viewRoomsTrip.rooms || []).map(r => (r.id === roomId ? { ...r, occupants_text: occupantsText } : r));
-    await persistTripRooms(viewRoomsTrip.id, updated);
-  };
-
-  const handleDeleteRoom = async (roomId) => {
-    if (!canEditTrips) return alert('🔒 غير مصرح لك بالحذف.');
-    if (viewRoomsTrip) {
-      const updated = (viewRoomsTrip.rooms || []).filter(r => r.id !== roomId);
-      await persistTripRooms(viewRoomsTrip.id, updated);
-    } else {
-      setForm(prev => ({ ...prev, rooms: (prev.rooms || []).filter(r => r.id !== roomId) }));
-    }
-  };
-
-  const togglePublic = async (t) => {
-    if (!canEditTrips) return alert('🔒 غير مصرح لك بتغيير حالة النشر.');
-    const { data } = await supabase
-      .from('church_trips')
-      .update({ is_public: !t.is_public })
-      .eq('id', t.id)
-      .select()
-      .single();
-    if (data) {
-      setTrips(trips.map(x => (x.id === t.id ? data : x)));
-      logActivity({
-        user: currentUser,
-        actionType: 'تغيير_ظهور_رحلة',
-        targetTable: 'church_trips',
-        targetId: t.id,
-        description: `${data.is_public ? 'أظهر' : 'أخفى'} رحلة (${t.title}) في الصفحة الرئيسية`
-      });
-    }
-  };
-
-  const deleteTrip = async (t) => {
-    if (!canDeleteTrips) return alert('🔒 غير مصرح لك بحذف الرحلات.');
-    if (!confirm(`حذف رحلة "${t.title}" من مكتب الرحلات نهائياً؟`)) return;
-    const { error } = await supabase.from('church_trips').delete().eq('id', t.id);
-    if (!error) {
-      setTrips(trips.filter(x => x.id !== t.id));
-      logActivity({
-        user: currentUser,
-        actionType: 'حذف_رحلة_مكتب_الرحلات',
-        targetTable: 'church_trips',
-        targetId: t.id,
-        description: `حذف رحلة: ${t.title}`
-      });
-    }
-  };
-
-  const deleteRegistration = async (regId) => {
-    if (!canEditTrips && !canDeleteTrips) return alert('🔒 غير مصرح لك بإدارة الاشتراكات.');
-    if (!confirm('حذف طلب الاشتراك؟')) return;
-    const { error } = await supabase.from('trip_registrations').delete().eq('id', regId);
-    if (!error) setRegistrations(registrations.filter(r => r.id !== regId));
-  };
-
-  const openAddScreen = (defaultCategory = 'منتظمة') => {
-    if (!canAddTrips) {
-      alert('🔒 غير مصرح لك بإضافة رحلات جديدة. صلاحيتك هي المشاهدة فقط.');
-      return;
-    }
-    setEditingId(null);
-    const defaultMode = defaultCategory === 'مبيت' ? 'overnight' : 'day_use';
-    setStayMode(defaultMode);
-    setForm({
-      ...emptyForm,
-      trip_category: defaultCategory,
-      days_count: defaultMode === 'overnight' ? 2 : 1,
-      bus_seats: [createNewBus(1, 'الأتوبيس الأول')]
     });
-    setActiveCard('add');
-  };
+  });
+  return Array.from(map.values());
+};
 
-  const openEditTrip = (t) => {
-    if (!canEditTrips) {
-      alert('🔒 غير مصرح لك بتعديل بيانات الرحلات.');
-      return;
-    }
-    setEditingId(t.id);
-    const isOvernight = Number(t.days_count || 1) > 1 || (Array.isArray(t.rooms) && t.rooms.length > 0);
-    setStayMode(isOvernight ? 'overnight' : 'day_use');
-    setForm({
-      ...emptyForm,
-      ...t,
-      bus_seats: normalizeBuses(t.bus_seats),
-      rooms: Array.isArray(t.rooms) ? t.rooms : []
+export const syncTripPaymentsTable = async (scheduleId, busesList, priestId, todayISO) => {
+  if (!scheduleId) return;
+  try {
+    await supabase.from('trip_payments').delete().eq('schedule_id', scheduleId);
+    const rows = [];
+    busesList.forEach(bus => {
+      (bus.seats || []).forEach(s => {
+        if (s.isDoor || !s.occupant) return;
+        (Array.isArray(s.payments) ? s.payments : []).forEach(p => {
+          rows.push({
+            schedule_id: scheduleId,
+            priest_id: priestId,
+            bus_id: bus.id,
+            bus_name: bus.name,
+            seat_number: s.number,
+            passenger_name: s.occupant,
+            passenger_phone: s.phone || '',
+            user_id: s.user_id || null,
+            amount: Number(p.amount || 0),
+            payment_method: p.method || 'كاش',
+            payment_date: p.date || todayISO,
+            notes: p.note || ''
+          });
+        });
+      });
     });
-    setActiveCard('add');
+    if (rows.length > 0) await supabase.from('trip_payments').insert(rows);
+  } catch (e) {
+    console.warn('trip_payments sync skipped:', e);
+  }
+};
+
+export function BusVisualizerSection({
+  rawBusesData,
+  tripCost = 0,
+  isViewMode = false,
+  tripObj = null,
+  localUsers = [],
+  priest,
+  todayISO,
+  onSaveBuses,
+  onLocalRenameBuses,
+  onOpenPrint,
+  onOpenWhatsApp
+}) {
+  const [busIdx, setBusIdx] = useState(0);
+  const [busViewTab, setBusViewTab] = useState('map');
+  const [summaryFilter, setSummaryFilter] = useState('all');
+  const [selectedSeatModal, setSelectedSeatModal] = useState(null);
+  const [seatForm, setSeatForm] = useState({
+    occupant: '', phone: '', user_id: '', is_member_in_meeting: true,
+    meeting_label: '', total_due: 0, payments: [], notes: ''
+  });
+  const [newPayment, setNewPayment] = useState({ amount: '', method: 'كاش', date: todayISO, note: '' });
+  const [memberPickSearch, setMemberPickSearch] = useState('');
+
+  const buses = normalizeBuses(rawBusesData);
+  const activeIdx = Math.min(busIdx, buses.length - 1);
+  const activeBus = buses[activeIdx] || buses[0];
+  const seats = activeBus.seats || generateDefaultBusSeats();
+
+  const bookedCount = seats.filter(s => !s.isDoor && s.occupant).length;
+  const totalSeats = seats.filter(s => !s.isDoor).length;
+  const allBookedCount = buses.reduce((acc, b) => acc + (b.seats || []).filter(s => !s.isDoor && s.occupant).length, 0);
+  const allTotalSeats = buses.reduce((acc, b) => acc + (b.seats || []).filter(s => !s.isDoor).length, 0);
+
+  const peopleSummary = buildGroupedPeopleSummary(buses, Number(tripCost || 0), localUsers);
+  const totalCollectedAll = peopleSummary.reduce((sum, p) => sum + p.totalPaid, 0);
+  const totalRemainingAll = peopleSummary.reduce((sum, p) => sum + p.totalRemaining, 0);
+  const totalCashAll = peopleSummary.reduce((sum, p) => sum + p.cashPaid, 0);
+  const totalWalletAll = peopleSummary.reduce((sum, p) => sum + p.walletPaid, 0);
+
+  const filteredPeopleSummary = peopleSummary.filter(p => {
+    if (summaryFilter === 'owing') return p.totalRemaining > 0;
+    if (summaryFilter === 'paid') return p.totalRemaining === 0;
+    if (summaryFilter === 'inside') return p.isInside;
+    if (summaryFilter === 'outside') return !p.isInside;
+    return true;
+  });
+
+  const getPersonMultiBusSummary = () => {
+    const tName = (seatForm.occupant || '').trim();
+    const tPhone = (seatForm.phone || '').replace(/\s+/g, '');
+    const tUserId = seatForm.user_id || '';
+    if (!tName && !tUserId && !tPhone) return null;
+
+    const matchedSeats = [];
+    buses.forEach(bus => {
+      (bus.seats || []).forEach(s => {
+        if (s.isDoor || !s.occupant) return;
+        const sPhone = (s.phone || '').replace(/\s+/g, '');
+        if ((tUserId && s.user_id === tUserId) || (tPhone.length >= 6 && sPhone === tPhone) || (tName && s.occupant.trim() === tName)) {
+          matchedSeats.push({ busName: bus.name, seatNumber: s.number, ...getSeatFinancials(s, tripCost) });
+        }
+      });
+    });
+
+    return {
+      count: matchedSeats.length,
+      seats: matchedSeats,
+      totalDueAll: matchedSeats.reduce((sum, x) => sum + x.totalDue, 0),
+      totalPaidAll: matchedSeats.reduce((sum, x) => sum + x.paid, 0),
+      totalRemainingAll: matchedSeats.reduce((sum, x) => sum + x.remaining, 0)
+    };
   };
 
-  const renderTopBack = (title) => (
-    <div className="bg-white p-4 rounded-2xl border shadow-2xs flex flex-wrap justify-between items-center gap-2">
-      <div className="flex items-center gap-3 flex-wrap">
-        <button type="button" onClick={() => setActiveCard('hub')} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer">
-          <ArrowRight size={15} /> رجوع لكروت مكتب الرحلات
-        </button>
-        <h2 className="text-base md:text-lg font-black text-[#7a1c24]">{title}</h2>
+  const handleSeatClick = (seat) => {
+    if (seat.isDoor) return;
+    const fin = getSeatFinancials(seat, tripCost);
+    setSelectedSeatModal({ isSupervisor: false, seat });
+    setSeatForm({
+      occupant: seat.occupant || '',
+      phone: seat.phone || '',
+      user_id: seat.user_id || '',
+      is_member_in_meeting: seat.is_member_in_meeting !== undefined ? seat.is_member_in_meeting : true,
+      meeting_label: seat.meeting_label || '',
+      total_due: fin.totalDue,
+      payments: fin.payments,
+      notes: seat.notes || ''
+    });
+    setNewPayment({ amount: '', method: 'كاش', date: todayISO, note: '' });
+    setMemberPickSearch('');
+  };
+
+  const handleAddBus = async () => {
+    const updated = [...buses, createNewBus(buses.length + 1)];
+    setBusIdx(updated.length - 1);
+    await onSaveBuses(updated);
+    if (isViewMode && tripObj) {
+      logActivity({ user: priest, actionType: 'إضافة_أتوبيس', targetTable: 'priest_personal_schedule', targetId: tripObj.id, description: `أضاف أتوبيس جديد لـ: ${tripObj.title}` });
+    }
+  };
+
+  const handleDeleteBus = async () => {
+    if (buses.length <= 1) return alert('لا يمكن حذف آخر أتوبيس.');
+    const hasPassengers = activeBus.supervisor_name || activeBus.seats.some(s => !s.isDoor && s.occupant);
+    if (hasPassengers && !confirm(`الأتوبيس "${activeBus.name}" به أسماء مسجلة، هل أنت متأكد من حذفه؟`)) return;
+    const updated = buses.filter((_, i) => i !== activeIdx);
+    setBusIdx(Math.max(0, activeIdx - 1));
+    await onSaveBuses(updated);
+  };
+
+  const saveSeatAssignment = async (clearSeat = false) => {
+    if (!selectedSeatModal) return;
+    const { isSupervisor, seat } = selectedSeatModal;
+    const updatedBuses = buses.map((b, idx) => {
+      if (idx !== activeIdx) return b;
+      if (isSupervisor) return { ...b, supervisor_name: clearSeat ? '' : seatForm.occupant.trim() };
+      return {
+        ...b,
+        seats: b.seats.map(s => {
+          if (s.id !== seat.id) return s;
+          if (clearSeat) {
+            return { id: s.id, number: s.number, row: s.row, side: s.side, pos: s.pos, occupant: '', phone: '', user_id: '', is_member_in_meeting: true, meeting_label: '', total_due: null, paid_amount: 0, payments: [], notes: '' };
+          }
+          const totalPaid = (seatForm.payments || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+          return {
+            ...s,
+            occupant: seatForm.occupant.trim(),
+            phone: seatForm.phone.trim(),
+            user_id: seatForm.user_id || '',
+            is_member_in_meeting: Boolean(seatForm.is_member_in_meeting),
+            meeting_label: seatForm.meeting_label || '',
+            total_due: Number(seatForm.total_due || 0),
+            paid_amount: totalPaid,
+            payments: seatForm.payments || [],
+            notes: seatForm.notes || ''
+          };
+        })
+      };
+    });
+
+    await onSaveBuses(updatedBuses);
+    if (isViewMode && tripObj) {
+      logActivity({
+        user: priest,
+        actionType: clearSeat ? 'إخلاء_مقعد_رحلة' : 'حجز_أو_دفع_مقعد',
+        targetTable: 'priest_personal_schedule',
+        targetId: tripObj.id,
+        description: isSupervisor
+          ? `${clearSeat ? 'أخلى' : 'عيّن'} مشرف الأتوبيس (${seatForm.occupant}) في ${tripObj.title}`
+          : `${clearSeat ? 'أخلى' : 'حدّث حجز/دفع'} مقعد #${seat.number} (${seatForm.occupant}) في ${tripObj.title}`
+      });
+    }
+    setSelectedSeatModal(null);
+  };
+
+  const rows = [];
+  for (let r = 1; r <= 11; r++) {
+    rows.push({ rowNum: r, left: seats.filter(s => s.row === r && s.side === 'left'), right: seats.filter(s => s.row === r && s.side === 'right') });
+  }
+  const backBench = seats.filter(s => s.row === 12);
+
+  const renderSeatButton = (seat) => {
+    const fin = getSeatFinancials(seat, tripCost);
+    let btnClass = 'bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border-emerald-300';
+    let statusBadge = 'متاح';
+    if (seat.occupant) {
+      if (fin.totalDue > 0 && fin.paid === 0) {
+        btnClass = 'bg-red-700 hover:bg-red-800 text-white border-red-900 shadow-xs';
+        statusBadge = `لم يدفع (${fin.remaining}ج)`;
+      } else if (fin.remaining > 0) {
+        btnClass = 'bg-amber-500 hover:bg-amber-600 text-slate-950 border-amber-700 shadow-xs';
+        statusBadge = `باقي ${fin.remaining}ج`;
+      } else {
+        btnClass = 'bg-[#7a1c24] hover:bg-[#5c1319] text-white border-[#4a0e13] shadow-xs';
+        statusBadge = 'خالص ✅';
+      }
+    }
+    return (
+      <button key={seat.id} type="button" onClick={() => handleSeatClick(seat)} className={`p-1.5 rounded-xl border-2 text-center transition cursor-pointer flex flex-col items-center justify-center min-h-[58px] ${btnClass}`}>
+        <span className="text-xs font-black leading-none">{seat.number}</span>
+        <span className="text-[11px] font-bold truncate w-full px-0.5 mt-0.5">{seat.occupant || 'متاح'}</span>
+        {seat.occupant && <span className="text-[10px] font-black opacity-95 truncate w-full">{statusBadge}</span>}
+      </button>
+    );
+  };
+
+  const currentSeatPaid = (seatForm.payments || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const currentSeatRemaining = Math.max(0, Number(seatForm.total_due || 0) - currentSeatPaid);
+  const personMultiBus = selectedSeatModal && !selectedSeatModal.isSupervisor ? getPersonMultiBusSummary() : null;
+  const filteredUsersPick = localUsers.filter(u => u.role !== 'admin' && ((u.full_name || '') + ' ' + (u.phone || '') + ' ' + (u.detailed_stage || '')).toLowerCase().includes(memberPickSearch.toLowerCase()));
+
+  return (
+    <div className="bg-slate-50 border-2 border-slate-300 rounded-3xl p-4 space-y-4">
+      <div className="flex flex-wrap justify-between items-center gap-2 border-b border-slate-200 pb-3">
+        <div className="flex items-center gap-2">
+          <Bus className="text-[#7a1c24]" size={22} />
+          <div>
+            <strong className="text-base text-slate-900 block">إدارة الأتوبيسات والمقاعد والتحصيل ({buses.length} أتوبيس)</strong>
+            <span className="text-xs md:text-sm text-slate-600">
+              المحجوز: <strong>{allBookedCount}/{allTotalSeats}</strong> • المحصل: <strong className="text-emerald-700">{totalCollectedAll} ج.م</strong> • المتبقي: <strong className="text-red-700">{totalRemainingAll} ج.م</strong>
+            </span>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setBusViewTab(busViewTab === 'map' ? 'summary' : 'map')} className={`px-3.5 py-2 rounded-xl text-xs md:text-sm font-black cursor-pointer border-2 ${busViewTab === 'summary' ? 'bg-indigo-700 text-white border-indigo-900' : 'bg-white text-indigo-900 border-indigo-300'}`}>
+            {busViewTab === 'map' ? `📊 كشف الحساب المجمع (${peopleSummary.length})` : '💺 العودة لخريطة الكراسي'}
+          </button>
+          <button type="button" onClick={handleAddBus} className="px-3.5 py-2 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl text-xs md:text-sm font-bold flex items-center gap-1 cursor-pointer">
+            <Plus size={16} /> إضافة أتوبيس
+          </button>
+          {isViewMode && tripObj && (
+            <>
+              <button type="button" onClick={() => onOpenPrint({ trip: tripObj, buses: [activeBus] })} className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs md:text-sm font-bold flex items-center gap-1 cursor-pointer">
+                <Printer size={16} /> طباعة كشف: {activeBus.name}
+              </button>
+              {buses.length > 1 && (
+                <button type="button" onClick={() => onOpenPrint({ trip: tripObj, buses })} className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs md:text-sm font-bold flex items-center gap-1 cursor-pointer">
+                  <Printer size={16} /> طباعة الكل ({buses.length})
+                </button>
+              )}
+            </>
+          )}
+        </div>
       </div>
-      {canAddTrips && (
-        <button
-          type="button"
-          onClick={() => openAddScreen(activeCard === 'add' ? 'منتظمة' : activeCard)}
-          className="px-4 py-2 bg-[#7a1c24] text-white rounded-xl text-xs font-black cursor-pointer flex items-center gap-1"
-        >
-          <Plus size={14} /> إضافة رحلة جديدة
-        </button>
+
+      {busViewTab === 'summary' ? (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 text-sm">
+            <div className="bg-white p-3 rounded-2xl border"><span className="text-gray-500 text-xs block">إجمالي المحصل</span><strong className="text-lg text-emerald-700">{totalCollectedAll} ج.م</strong></div>
+            <div className="bg-white p-3 rounded-2xl border"><span className="text-gray-500 text-xs block">💵 محصل كاش</span><strong className="text-lg text-slate-900">{totalCashAll} ج.م</strong></div>
+            <div className="bg-white p-3 rounded-2xl border"><span className="text-gray-500 text-xs block">📱 محفظة / تحويل</span><strong className="text-lg text-blue-800">{totalWalletAll} ج.م</strong></div>
+            <div className="bg-red-50 p-3 rounded-2xl border border-red-200"><span className="text-red-800 text-xs block font-bold">⚠️ إجمالي المتبقي</span><strong className="text-lg text-red-700">{totalRemainingAll} ج.م</strong></div>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              { id: 'all', label: `الكل (${peopleSummary.length})` },
+              { id: 'owing', label: `⚠️ عليه باقي (${peopleSummary.filter(p => p.totalRemaining > 0).length})` },
+              { id: 'paid', label: `✅ خالص (${peopleSummary.filter(p => p.totalRemaining === 0).length})` },
+              { id: 'inside', label: `داخل الاجتماع (${peopleSummary.filter(p => p.isInside).length})` },
+              { id: 'outside', label: `خارج الاجتماع (${peopleSummary.filter(p => !p.isInside).length})` }
+            ].map(f => (
+              <button key={f.id} type="button" onClick={() => setSummaryFilter(f.id)} className={`px-3 py-1.5 rounded-xl text-xs font-bold border cursor-pointer ${summaryFilter === f.id ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-gray-800'}`}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {filteredPeopleSummary.length === 0 ? (
+            <div className="bg-white p-6 rounded-2xl border text-center text-sm text-gray-500">لا توجد بيانات مطابقة.</div>
+          ) : (
+            <div className="grid gap-2.5">
+              {filteredPeopleSummary.map(p => (
+                <div key={p.key} className="bg-white p-4 rounded-2xl border-2 border-gray-200 flex flex-wrap justify-between items-center gap-3">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <strong className="text-base text-gray-900">{p.name}</strong>
+                      <span className={`px-2.5 py-0.5 rounded-lg text-xs font-bold ${p.isInside ? 'bg-blue-100 text-blue-900' : 'bg-purple-100 text-purple-900'}`}>
+                        {p.isInside ? `✅ داخل الاجتماع ${p.meetingLabel ? `(${p.meetingLabel})` : ''}` : '🌐 خارج الاجتماع'}
+                      </span>
+                      <span className="px-2.5 py-0.5 bg-amber-100 text-amber-950 rounded-lg text-xs font-black">💺 {p.seats.length} كرسي</span>
+                    </div>
+                    <p className="text-sm text-gray-600">📞 {p.phone || 'بدون رقم'} • الكراسي: {p.seats.map(s => `${s.busName} (#${s.seatNumber})`).join('، ')}</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <div className="text-center px-3 py-1.5 bg-emerald-50 rounded-xl border border-emerald-200"><span className="text-xs text-emerald-800 block">دفع</span><strong className="text-emerald-900">{p.totalPaid} ج.م</strong></div>
+                    <div className={`text-center px-3 py-1.5 rounded-xl border ${p.totalRemaining > 0 ? 'bg-red-50 border-red-300' : 'bg-gray-50 border-gray-200'}`}>
+                      <span className={`text-xs block ${p.totalRemaining > 0 ? 'text-red-800 font-bold' : 'text-gray-500'}`}>المتبقي</span>
+                      <strong className={p.totalRemaining > 0 ? 'text-red-700' : 'text-green-700'}>{p.totalRemaining > 0 ? `${p.totalRemaining} ج.م` : 'خالص ✅'}</strong>
+                    </div>
+                    {p.phone && (
+                      <>
+                        <button type="button" onClick={() => onOpenWhatsApp({ name: p.name, phone: p.phone, defaultCategory: 'افتقاد' })} className="p-2.5 bg-green-600 text-white rounded-xl cursor-pointer"><MessageCircle size={16} /></button>
+                        <a href={`tel:${p.phone}`} className="p-2.5 bg-gray-100 hover:bg-gray-200 rounded-xl text-gray-800"><Phone size={16} /></a>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-2">
+            {buses.map((b, idx) => {
+              const bBooked = (b.seats || []).filter(s => !s.isDoor && s.occupant).length;
+              const bTotal = (b.seats || []).filter(s => !s.isDoor).length;
+              return (
+                <button key={b.id || idx} type="button" onClick={() => setBusIdx(idx)} className={`px-3.5 py-2 rounded-xl border-2 text-xs md:text-sm font-black transition cursor-pointer flex items-center gap-2 ${activeIdx === idx ? 'bg-[#7a1c24] text-white border-[#5c1319] shadow-xs' : 'bg-white text-slate-800 border-slate-200 hover:border-[#7a1c24]'}`}>
+                  <span>🚌 {b.name}</span>
+                  <span className={`px-2 py-0.5 rounded text-xs ${activeIdx === idx ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'}`}>{bBooked}/{bTotal}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-wrap gap-2 text-xs font-bold">
+            <span className="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-950 border border-emerald-300">🟢 متاح</span>
+            <span className="px-2.5 py-1 rounded-lg bg-[#7a1c24] text-white">✅ محجوز وخالص</span>
+            <span className="px-2.5 py-1 rounded-lg bg-amber-500 text-slate-950">⚠️ دفع جزء وعليه باقي</span>
+            <span className="px-2.5 py-1 rounded-lg bg-red-700 text-white">❌ محجوز ولم يدفع بعد</span>
+          </div>
+
+          <div className="bg-white p-3 rounded-2xl border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 flex-1 min-w-[220px]">
+              <label className="text-sm font-black text-slate-800 whitespace-nowrap">اسم الأتوبيس:</label>
+              <input
+                type="text"
+                className="flex-1 p-2 px-3 border rounded-xl text-sm font-bold bg-slate-50 focus:bg-white"
+                value={activeBus.name}
+                onChange={e => {
+                  const updated = buses.map((b, i) => (i === activeIdx ? { ...b, name: e.target.value } : b));
+                  onLocalRenameBuses(updated);
+                }}
+                onBlur={() => { if (isViewMode) onSaveBuses(buses); }}
+              />
+            </div>
+            <div className="flex items-center gap-2 text-xs md:text-sm">
+              <span className="px-3 py-1 bg-emerald-100 text-emerald-900 rounded-lg font-bold">متاح: {totalSeats - bookedCount}</span>
+              <span className="px-3 py-1 bg-red-100 text-red-900 rounded-lg font-bold">محجوز: {bookedCount} / {totalSeats}</span>
+              {buses.length > 1 && (
+                <button type="button" onClick={handleDeleteBus} className="p-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg cursor-pointer"><Trash2 size={16} /></button>
+              )}
+            </div>
+          </div>
+
+          <div className="max-w-lg mx-auto bg-white border-4 border-slate-700 rounded-t-[44px] rounded-b-2xl p-3.5 shadow-inner space-y-2.5">
+            <div className="bg-slate-100 p-3 rounded-t-3xl border-b-2 border-dashed border-slate-300 space-y-2">
+              <div className="flex justify-between items-center gap-2">
+                <div className="px-3 py-1.5 bg-amber-100 border border-amber-400 rounded-xl text-xs font-black text-amber-950">🚪 الباب الأمامي</div>
+                <div className="px-3 py-1.5 bg-slate-800 text-white rounded-xl text-xs font-black">🛞 كرسي السائق</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setSelectedSeatModal({ isSupervisor: true }); setSeatForm({ ...seatForm, occupant: activeBus.supervisor_name || '' }); }}
+                className={`w-full py-2.5 px-3 rounded-xl border-2 text-center transition cursor-pointer flex items-center justify-between gap-2 ${activeBus.supervisor_name ? 'bg-amber-500 text-white border-amber-700 shadow-xs' : 'bg-amber-50 hover:bg-amber-100 text-amber-950 border-dashed border-amber-400'}`}
+              >
+                <span className="text-xs md:text-sm font-black">🎖️ كرسي المشرف:</span>
+                <span className="text-sm font-black truncate">{activeBus.supervisor_name || 'اضغط لتسجيل اسم مشرف الرحلة'}</span>
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {rows.map(r => (
+                <div key={r.rowNum} className="grid grid-cols-5 gap-1.5 items-center">
+                  <div className="col-span-2 grid grid-cols-2 gap-1.5">
+                    {r.right.map(seat => seat.isDoor ? (
+                      <div key={seat.id} className="col-span-2 py-3 bg-amber-50 border border-dashed border-amber-400 rounded-xl text-center text-xs font-bold text-amber-800">{seat.label}</div>
+                    ) : renderSeatButton(seat))}
+                  </div>
+                  <div className="col-span-1 text-center text-xs text-slate-400 font-bold select-none">ممر</div>
+                  <div className="col-span-2 grid grid-cols-2 gap-1.5">{r.left.map(seat => renderSeatButton(seat))}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-2 border-t-2 border-dashed border-slate-300">
+              <span className="block text-center text-xs text-slate-600 font-bold mb-1.5">الكنبة الخلفية (5 مقاعد)</span>
+              <div className="grid grid-cols-5 gap-1.5">{backBench.map(seat => renderSeatButton(seat))}</div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {selectedSeatModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-60">
+          <div className="bg-white rounded-3xl w-full max-w-lg p-5 space-y-3.5 font-bold max-h-[92vh] overflow-y-auto text-sm">
+            <div className="flex justify-between items-center border-b pb-2.5">
+              <h4 className="text-base font-black text-[#7a1c24]">
+                {selectedSeatModal.isSupervisor ? '🎖️ تسكين مشرف الأتوبيس' : `💺 مقعد رقم (${selectedSeatModal.seat.number})`}
+              </h4>
+              <button type="button" onClick={() => setSelectedSeatModal(null)} className="p-1.5 bg-gray-100 rounded-lg"><X size={16} /></button>
+            </div>
+
+            {selectedSeatModal.isSupervisor ? (
+              <>
+                <input autoFocus placeholder="اكتب اسم المشرف..." className="w-full p-2.5 border rounded-xl" value={seatForm.occupant} onChange={e => setSeatForm({ ...seatForm, occupant: e.target.value })} />
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => saveSeatAssignment(false)} className="flex-1 py-2.5 bg-[#7a1c24] text-white rounded-xl cursor-pointer">حفظ المشرف</button>
+                  {seatForm.occupant && <button type="button" onClick={() => saveSeatAssignment(true)} className="px-4 py-2.5 bg-red-50 text-red-700 rounded-xl cursor-pointer">إخلاء</button>}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="bg-blue-50/70 p-3 rounded-2xl border border-blue-200 space-y-2">
+                  <label className="block text-xs text-blue-950 font-black">🔍 اختيار سريع من أعضاء الكنيسة / الاجتماع:</label>
+                  <input type="text" placeholder="ابحث بالاسم أو التليفون..." className="w-full p-2 border rounded-xl bg-white text-xs" value={memberPickSearch} onChange={e => setMemberPickSearch(e.target.value)} />
+                  <select
+                    className="w-full p-2 border rounded-xl bg-white text-xs"
+                    value={seatForm.user_id}
+                    onChange={e => {
+                      const u = localUsers.find(x => x.id === e.target.value);
+                      if (!u) return setSeatForm({ ...seatForm, user_id: '' });
+                      setSeatForm({ ...seatForm, user_id: u.id, occupant: u.full_name || '', phone: u.phone || '', is_member_in_meeting: u.is_church_member !== false, meeting_label: u.detailed_stage || u.service_stage || '' });
+                    }}
+                  >
+                    <option value="">-- ضيف من خارج الكنيسة / إدخال يدوي --</option>
+                    {filteredUsersPick.map(u => <option key={u.id} value={u.id}>{u.full_name} {u.detailed_stage ? `(${u.detailed_stage})` : ''} {u.phone ? `- ${u.phone}` : ''}</option>)}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-xs text-gray-700 mb-1">اسم الحاجز / الراكب *</label>
+                    <input required placeholder="الاسم..." className="w-full p-2.5 border rounded-xl" value={seatForm.occupant} onChange={e => setSeatForm({ ...seatForm, occupant: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-700 mb-1">رقم التليفون</label>
+                    <div className="flex gap-1">
+                      <input type="tel" placeholder="01xxxxxxxxx" className="flex-1 p-2.5 border rounded-xl" value={seatForm.phone} onChange={e => setSeatForm({ ...seatForm, phone: e.target.value })} />
+                      {seatForm.phone && (
+                        <button type="button" onClick={() => onOpenWhatsApp({ name: seatForm.occupant, phone: seatForm.phone, targetId: seatForm.user_id, defaultCategory: 'افتقاد' })} className="px-2.5 bg-green-600 text-white rounded-xl cursor-pointer">
+                          <MessageCircle size={16} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 items-center bg-slate-50 p-2.5 rounded-xl border">
+                  <div>
+                    <label className="block text-xs text-gray-700 mb-1">الانتماء:</label>
+                    <select className="w-full p-2 border rounded-xl bg-white text-xs" value={seatForm.is_member_in_meeting ? 'inside' : 'outside'} onChange={e => setSeatForm({ ...seatForm, is_member_in_meeting: e.target.value === 'inside' })}>
+                      <option value="inside">✅ داخل الاجتماع / الخدمة</option>
+                      <option value="outside">🌐 من خارج الاجتماع</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-700 mb-1">اسم الاجتماع / المرحلة</label>
+                    <input placeholder="مثال: أولى ثانوي" className="w-full p-2 border rounded-xl bg-white text-xs" value={seatForm.meeting_label} onChange={e => setSeatForm({ ...seatForm, meeting_label: e.target.value })} />
+                  </div>
+                </div>
+
+                {personMultiBus && personMultiBus.count > 0 && (
+                  <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-3 space-y-1 text-xs">
+                    <strong className="text-amber-950 block">📌 كراسي هذا الشخص في الرحلة ({personMultiBus.count} كرسي):</strong>
+                    <p className="text-amber-900">{personMultiBus.seats.map(s => `${s.busName} (كرسي ${s.seatNumber})`).join(' • ')}</p>
+                    <p className="font-black text-amber-950">الإجمالي: المطلوب {personMultiBus.totalDueAll}ج • المدفوع {personMultiBus.totalPaidAll}ج • المتبقي {personMultiBus.totalRemainingAll}ج</p>
+                  </div>
+                )}
+
+                <div className="bg-emerald-50/50 border-2 border-emerald-200 rounded-2xl p-3.5 space-y-3">
+                  <div className="flex flex-wrap justify-between items-center gap-2 border-b border-emerald-200 pb-2">
+                    <strong className="text-sm text-emerald-950">💰 حساب الكرسي والأقساط</strong>
+                    <div className="flex items-center gap-2 text-xs">
+                      <label>المطلوب (ج.م):</label>
+                      <input type="number" min="0" className="w-24 p-1.5 border rounded-lg bg-white text-center font-black" value={seatForm.total_due} onChange={e => setSeatForm({ ...seatForm, total_due: e.target.value })} />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div className="bg-white p-2 rounded-xl border"><span className="text-gray-500 block">المطلوب</span><strong className="text-sm">{seatForm.total_due || 0} ج.م</strong></div>
+                    <div className="bg-white p-2 rounded-xl border"><span className="text-emerald-700 block">المدفوع</span><strong className="text-sm text-emerald-800">{currentSeatPaid} ج.م</strong></div>
+                    <div className={`p-2 rounded-xl border ${currentSeatRemaining > 0 ? 'bg-red-50 border-red-300' : 'bg-emerald-100 border-emerald-300'}`}>
+                      <span className={currentSeatRemaining > 0 ? 'text-red-700 block' : 'text-emerald-800 block'}>المتبقي</span>
+                      <strong className={`text-sm ${currentSeatRemaining > 0 ? 'text-red-700' : 'text-emerald-900'}`}>{currentSeatRemaining > 0 ? `${currentSeatRemaining} ج.م` : 'خالص ✅'}</strong>
+                    </div>
+                  </div>
+
+                  {(seatForm.payments || []).length > 0 && (
+                    <div className="space-y-1.5">
+                      {seatForm.payments.map(pay => (
+                        <div key={pay.id} className="bg-white p-2 rounded-xl border flex justify-between items-center text-xs">
+                          <div>
+                            <strong className="text-emerald-800">{pay.amount} ج.م</strong>
+                            <span className="mx-1.5 px-2 py-0.5 rounded bg-slate-100">{pay.method}</span>
+                            <span className="text-gray-500">({pay.date})</span>
+                            {pay.note && <span className="text-gray-600 mr-1">• {pay.note}</span>}
+                          </div>
+                          <button type="button" onClick={() => setSeatForm({ ...seatForm, payments: seatForm.payments.filter(p => p.id !== pay.id) })} className="text-red-600 p-1"><Trash2 size={14} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="bg-white p-2.5 rounded-xl border space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-black text-[#7a1c24]">+ تسجيل دفعة / قسط:</span>
+                      {currentSeatRemaining > 0 && (
+                        <div className="flex gap-1">
+                          <button type="button" onClick={() => setNewPayment({ ...newPayment, amount: String(currentSeatRemaining) })} className="px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded text-[11px] cursor-pointer">باقي المبلغ ({currentSeatRemaining}ج)</button>
+                          <button type="button" onClick={() => setNewPayment({ ...newPayment, amount: String(Math.ceil(currentSeatRemaining / 2)) })} className="px-2 py-0.5 bg-amber-100 text-amber-900 rounded text-[11px] cursor-pointer">النصف</button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <input type="number" min="1" placeholder="المبلغ" className="p-2 border rounded-lg text-xs" value={newPayment.amount} onChange={e => setNewPayment({ ...newPayment, amount: e.target.value })} />
+                      <select className="p-2 border rounded-lg text-xs bg-white" value={newPayment.method} onChange={e => setNewPayment({ ...newPayment, method: e.target.value })}>
+                        {PAYMENT_METHODS.map(pm => <option key={pm} value={pm}>{pm}</option>)}
+                      </select>
+                      <input type="date" className="p-2 border rounded-lg text-xs" value={newPayment.date} onChange={e => setNewPayment({ ...newPayment, date: e.target.value })} />
+                    </div>
+                    <div className="flex gap-1.5">
+                      <input placeholder="ملاحظة (مقدم / يوم الرحلة)" className="flex-1 p-2 border rounded-lg text-xs font-normal" value={newPayment.note} onChange={e => setNewPayment({ ...newPayment, note: e.target.value })} />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const amt = Number(newPayment.amount);
+                          if (!amt || amt <= 0) return alert('اكتب مبلغ الدفعة بشكل صحيح');
+                          setSeatForm({ ...seatForm, payments: [...(seatForm.payments || []), { id: `pay_${Date.now()}`, amount: amt, method: newPayment.method || 'كاش', date: newPayment.date || todayISO, note: newPayment.note || '' }] });
+                          setNewPayment({ amount: '', method: newPayment.method, date: todayISO, note: '' });
+                        }}
+                        className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs cursor-pointer"
+                      >
+                        + إضافة الدفعة
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <button type="button" onClick={() => { if (!seatForm.occupant.trim()) return alert('اكتب اسم الراكب'); saveSeatAssignment(false); }} className="flex-1 py-3 bg-[#7a1c24] text-white rounded-xl cursor-pointer">حفظ بيانات الكرسي والدفع</button>
+                  {selectedSeatModal.seat.occupant && <button type="button" onClick={() => { if (confirm('إخلاء الكرسي؟')) saveSeatAssignment(true); }} className="px-4 py-3 bg-red-50 text-red-700 rounded-xl cursor-pointer">إخلاء الكرسي</button>}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
+}
 
-  // ==============================================================
-  // HUB: الكروت الكبيرة لمكتب الرحلات
-  // ==============================================================
-  if (activeCard === 'hub') {
-    return (
-      <div className="space-y-4 text-xs md:text-sm" dir="rtl">
-        <div className="bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-6 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
+export function PrintBusModal({ printBusState, setPrintBusState, priest, todayISO }) {
+  if (!printBusState) return null;
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-start justify-center p-4 z-70 overflow-y-auto print:static print:bg-white print:p-0 print:block">
+      <div className="bg-white rounded-3xl w-full max-w-5xl p-6 space-y-5 shadow-2xl print:shadow-none print:rounded-none print:p-0 print:max-w-none">
+        <div className="flex flex-wrap justify-between items-center gap-2 border-b pb-3 print:hidden">
           <div>
-            <h2 className="text-xl font-black text-amber-200 flex items-center gap-2">
-              <Bus size={24} /> مكتب الرحلات العامة للكنيسة
-            </h2>
-            <p className="text-xs md:text-sm text-white/85 mt-1">
-              رحلات اليوم الواحد (داي يوز) ببرنامجها الكامل، ورحلات المبيت بحجز الأوض والأتوبيسات والمشتركين
-            </p>
+            <h3 className="text-lg font-black text-[#7a1c24]">🖨️ معاينة طباعة كشوفات الأتوبيسات ({printBusState.buses.length} كشف)</h3>
+            <p className="text-sm text-gray-600">كل أتوبيس يطبع في صفحة مستقلة بالترتيب مع اسم المشرف وحالة الدفع</p>
           </div>
-          <div className="flex flex-wrap gap-2 items-center">
-            {!canAddTrips && (
-              <span className="px-3 py-1.5 bg-black/30 border border-amber-300/40 rounded-xl text-xs font-bold text-amber-200 flex items-center gap-1.5">
-                <ShieldAlert size={14} /> وضع الاستعراض (مشاهدة فقط)
-              </span>
-            )}
-            <span className="px-4 py-2 bg-white/15 rounded-2xl text-xs font-black">الرحلات: {trips.length}</span>
-            <span className="px-4 py-2 bg-amber-400 text-[#4a0e13] rounded-2xl text-xs font-black">طلبات الاشتراك: {registrations.length}</span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                logActivity({ user: priest, actionType: 'طباعة_كشف_أتوبيس', targetTable: 'priest_personal_schedule', targetId: printBusState.trip.id, description: `طبع كشف أتوبيس رحلة: ${printBusState.trip.title}` });
+                window.print();
+              }}
+              className="px-4 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer"
+            >
+              <Printer size={16} /> طباعة / حفظ PDF
+            </button>
+            <button type="button" onClick={() => setPrintBusState(null)} className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 rounded-xl font-bold flex items-center gap-1 cursor-pointer">
+              <X size={16} /> إغلاق
+            </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {/* كارت إضافة رحلة جديدة: يظهر فقط إذا كان المستخدم يملك صلاحية الإضافة */}
-          {canAddTrips && (
-            <button
-              type="button"
-              onClick={() => openAddScreen('منتظمة')}
-              className="bg-amber-50 border-2 border-amber-300 p-6 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer"
-            >
-              <div className="flex justify-between items-start w-full">
-                <span className="text-4xl">➕</span>
-                <span className="px-3 py-1 bg-[#7a1c24] text-white rounded-full text-xs font-black">جديد</span>
-              </div>
-              <div>
-                <h3 className="text-lg font-black text-[#7a1c24]">إضافة رحلة جديدة</h3>
-                <p className="text-xs text-gray-700 mt-1">رحلة يوم واحد (داي يوز) أو رحلة مبيت، مع البرنامج والزيارات والأتوبيسات</p>
-              </div>
-            </button>
-          )}
+        <div className="space-y-8 print:space-y-0">
+          {printBusState.buses.map((bus, bIdx) => {
+            const busSeats = (bus.seats || []).filter(s => !s.isDoor);
+            const tripCost = Number(printBusState.trip.trip_cost || 0);
+            const booked = busSeats.filter(s => s.occupant).length;
+            const busPaid = busSeats.filter(s => s.occupant).reduce((sum, s) => sum + getSeatFinancials(s, tripCost).paid, 0);
+            const busRem = busSeats.filter(s => s.occupant).reduce((sum, s) => sum + getSeatFinancials(s, tripCost).remaining, 0);
+            const isLast = bIdx === printBusState.buses.length - 1;
 
-          {TRIP_CATEGORIES.map(cat => {
-            const count = trips.filter(t => (t.trip_category || 'منتظمة') === cat.id).length;
             return (
-              <button
-                key={cat.id}
-                type="button"
-                onClick={() => setActiveCard(cat.id)}
-                className="bg-white border-2 border-gray-200 p-6 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer"
-              >
-                <div className="flex justify-between items-start w-full">
-                  <span className="text-4xl">{cat.icon}</span>
-                  <span className="px-3 py-1 bg-[#f9ecee] text-[#7a1c24] rounded-full text-xs font-black">{count} رحلة</span>
+              <div key={bus.id || bIdx} className={`border-2 border-gray-300 rounded-2xl p-5 space-y-3 print:border-0 print:p-2 ${!isLast ? 'print:break-after-page' : ''}`}>
+                <div className="text-center border-b-2 border-[#7a1c24] pb-3 space-y-1">
+                  <div className="flex justify-between items-center text-xs text-gray-600">
+                    <span>الأب الكاهن: <strong>{priest.full_name}</strong></span>
+                    <span>تاريخ الطباعة: {todayISO}</span>
+                  </div>
+                  <h2 className="text-2xl font-black text-[#7a1c24]">🚌 كشف ركاب: {bus.name}</h2>
+                  <p className="text-base font-black text-gray-900">{printBusState.trip.activity_kind || 'رحلة'}: {printBusState.trip.title}</p>
+                  <div className="flex flex-wrap justify-center gap-3 text-xs md:text-sm text-gray-800 pt-1">
+                    <span>📅 التاريخ: <strong>{printBusState.trip.event_date || '—'}</strong></span>
+                    {printBusState.trip.event_time && <span>⏰ التحرك: <strong>{printBusState.trip.event_time}</strong></span>}
+                    <span>💰 الاشتراك: <strong>{tripCost} ج.م</strong></span>
+                    <span>💺 المحجوز: <strong>{booked}/{busSeats.length}</strong></span>
+                    <span>💵 المحصل: <strong>{busPaid} ج.م</strong></span>
+                    <span>⚠️ المتبقي: <strong>{busRem} ج.م</strong></span>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-lg font-black text-gray-900">{cat.title}</h3>
-                  <p className="text-xs text-gray-600 mt-1">{cat.desc}</p>
+
+                <div className="bg-amber-50 border-2 border-amber-400 rounded-xl p-3 flex justify-between items-center text-sm font-black text-amber-950">
+                  <span>🎖️ مشرف الأتوبيس: {bus.supervisor_name || '............................................'}</span>
+                  <span>ذهاب ☐ &nbsp;&nbsp; عودة ☐</span>
                 </div>
-              </button>
+
+                <table className="w-full border-collapse border border-gray-400 text-xs md:text-sm text-right">
+                  <thead>
+                    <tr className="bg-gray-100 text-gray-900">
+                      <th className="border border-gray-400 p-1.5 w-14 text-center">كرسي</th>
+                      <th className="border border-gray-400 p-1.5 w-36">الموقع</th>
+                      <th className="border border-gray-400 p-1.5">الاسم والانتماء</th>
+                      <th className="border border-gray-400 p-1.5 w-28">التليفون</th>
+                      <th className="border border-gray-400 p-1.5 w-36">الدفع / المتبقي</th>
+                      <th className="border border-gray-400 p-1.5 w-28 text-center">الحضور</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {busSeats.map(seat => {
+                      const fin = seat.occupant ? getSeatFinancials(seat, tripCost) : null;
+                      const methods = fin?.payments?.length ? [...new Set(fin.payments.map(p => p.method))].join('+') : '';
+                      return (
+                        <tr key={seat.id} className={seat.occupant ? 'bg-white' : 'bg-gray-50/50'}>
+                          <td className="border border-gray-400 p-1.5 text-center font-black">{seat.number}</td>
+                          <td className="border border-gray-400 p-1.5 text-gray-700 text-xs">{getSeatPositionLabel(seat)}</td>
+                          <td className={`border border-gray-400 p-1.5 font-bold ${seat.occupant ? 'text-gray-900' : 'text-gray-400'}`}>
+                            {seat.occupant ? (
+                              <>
+                                {seat.occupant}{' '}
+                                <span className="text-[11px] font-normal text-gray-600">
+                                  ({seat.is_member_in_meeting === false ? 'خارج الاجتماع' : seat.meeting_label || 'داخل الاجتماع'})
+                                </span>
+                              </>
+                            ) : '— متاح —'}
+                          </td>
+                          <td className="border border-gray-400 p-1.5 text-xs">{seat.phone || '—'}</td>
+                          <td className="border border-gray-400 p-1.5 text-xs font-bold">
+                            {seat.occupant ? (
+                              fin.remaining > 0
+                                ? <span className="text-red-700">دفع {fin.paid} {methods && `(${methods})`} • باقي {fin.remaining}ج</span>
+                                : <span className="text-emerald-800">خالص {fin.paid}ج {methods && `(${methods})`} ✅</span>
+                            ) : '—'}
+                          </td>
+                          <td className="border border-gray-400 p-1.5 text-center text-xs">ذهاب ☐ &nbsp; عودة ☐</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             );
           })}
         </div>
       </div>
-    );
-  }
-
-  // ==============================================================
-  // شاشة إضافة / تعديل رحلة
-  // ==============================================================
-  if (activeCard === 'add') {
-    const isOvernight = stayMode === 'overnight';
-    return (
-      <div className="space-y-4 text-xs md:text-sm" dir="rtl">
-        {renderTopBack(editingId ? '✏️ تعديل الرحلة' : '➕ إضافة رحلة جديدة بمكتب الرحلات')}
-
-        <form onSubmit={handleSave} className="bg-white p-5 rounded-3xl border shadow-sm space-y-4 font-bold">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <button
-              type="button"
-              onClick={() => handleSelectStayMode('day_use')}
-              className={`p-3.5 rounded-2xl border-2 text-right flex items-center gap-3 cursor-pointer transition ${stayMode === 'day_use' ? 'bg-amber-50 border-amber-500 text-amber-950' : 'bg-gray-50 border-gray-200 text-gray-700'}`}
-            >
-              <Sun size={22} className="text-amber-600 shrink-0" />
-              <div>
-                <strong className="block text-sm">رحلة يوم واحد / داي يوز (بدون مبيت)</strong>
-                <span className="text-[11px] font-normal">ذهاب وعودة في نفس اليوم مع برنامج الزيارات والأنشطة</span>
-              </div>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSelectStayMode('overnight')}
-              className={`p-3.5 rounded-2xl border-2 text-right flex items-center gap-3 cursor-pointer transition ${stayMode === 'overnight' ? 'bg-indigo-50 border-indigo-600 text-indigo-950' : 'bg-gray-50 border-gray-200 text-gray-700'}`}
-            >
-              <Moon size={22} className="text-indigo-700 shrink-0" />
-              <div>
-                <strong className="block text-sm">رحلة بمبيت (أكثر من يوم + حجز أوض)</strong>
-                <span className="text-[11px] font-normal">مصايف مبيت أو مؤتمرات مع تحديد عدد الأيام والأوض</span>
-              </div>
-            </button>
-          </div>
-
-          <div className="grid md:grid-cols-4 gap-2.5">
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">تصنيف الرحلة *</label>
-              <select
-                className="w-full p-2.5 border rounded-xl bg-amber-50"
-                value={form.trip_category}
-                onChange={e => {
-                  const val = e.target.value;
-                  setForm({ ...form, trip_category: val });
-                  if (val === 'مبيت') handleSelectStayMode('overnight');
-                }}
-              >
-                {TRIP_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon} {c.title}</option>)}
-              </select>
-            </div>
-            <div className="md:col-span-2">
-              <label className="block text-xs text-gray-600 mb-1">اسم الرحلة / الوجهة *</label>
-              <input required placeholder="مثال: رحلة وادي النطرون (يوم واحد) أو مصيف بلطيم..." className="w-full p-2.5 border rounded-xl" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">تاريخ الرحلة *</label>
-              <input required type="date" className="w-full p-2.5 border rounded-xl" value={form.trip_date || ''} onChange={e => setForm({ ...form, trip_date: e.target.value })} />
-            </div>
-          </div>
-
-          <div className="grid sm:grid-cols-2 md:grid-cols-5 gap-2.5">
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">{isOvernight ? 'عدد الأيام' : 'المدة'}</label>
-              {isOvernight ? (
-                <input type="number" min="2" className="w-full p-2.5 border rounded-xl" value={form.days_count} onChange={e => setForm({ ...form, days_count: e.target.value })} />
-              ) : (
-                <div className="p-2.5 border rounded-xl bg-amber-50 text-amber-950 text-xs font-black text-center">☀️ يوم واحد (داي يوز)</div>
-              )}
-            </div>
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">التكلفة للفرد (ج.م)</label>
-              <input type="number" min="0" className="w-full p-2.5 border rounded-xl" value={form.cost_per_person || ''} onChange={e => setForm({ ...form, cost_per_person: e.target.value })} />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">ميعاد التجمع</label>
-              <input placeholder="5:30 ص أمام الكنيسة" className="w-full p-2.5 border rounded-xl" value={form.gathering_time} onChange={e => setForm({ ...form, gathering_time: e.target.value })} />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">ميعاد التحرك</label>
-              <input placeholder="6:00 ص" className="w-full p-2.5 border rounded-xl" value={form.departure_time} onChange={e => setForm({ ...form, departure_time: e.target.value })} />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">ميعاد العودة المتوقع</label>
-              <input placeholder="8:00 م" className="w-full p-2.5 border rounded-xl" value={form.return_time} onChange={e => setForm({ ...form, return_time: e.target.value })} />
-            </div>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="block text-xs text-gray-700">⛪ هنزور إيه؟ (الأديرة / الأماكن / الشاطئ):</label>
-              <textarea rows="4" placeholder="اكتب كل الأماكن اللي هنزورها في الرحلة..." className="w-full p-2.5 border rounded-xl font-normal" value={form.monasteries} onChange={e => setForm({ ...form, monasteries: e.target.value })} />
-            </div>
-            <div className="space-y-1">
-              <div className="flex justify-between items-center">
-                <label className="text-xs text-[#7a1c24]">📋 برنامج الرحلة (اليوم الأول، الثاني، الثالث...):</label>
-                <button type="button" onClick={generateProgramTemplate} className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 text-amber-950 rounded-lg text-[11px] font-black cursor-pointer">
-                  ✨ توليد قالب برنامج {isOvernight ? `(${form.days_count} يوم)` : 'اليوم الواحد'}
-                </button>
-              </div>
-              <textarea rows="4" placeholder="اكتب جدول الرحلة بالتفصيل..." className="w-full p-2.5 border rounded-xl font-normal" value={form.daily_program} onChange={e => setForm({ ...form, daily_program: e.target.value })} />
-            </div>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-2.5">
-            <input placeholder="أسماء المشرفين على الرحلة" className="p-2.5 border rounded-xl" value={form.supervisors} onChange={e => setForm({ ...form, supervisors: e.target.value })} />
-            <input placeholder="ملاحظات إضافية (ما يشمله الاشتراك / وجبات / شروط)..." className="p-2.5 border rounded-xl font-normal" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
-          </div>
-
-          {isOvernight && (
-            <div className="p-4 rounded-2xl border-2 bg-blue-50/50 border-blue-200 space-y-3">
-              <strong className="text-sm text-[#7a1c24] flex items-center gap-1.5">
-                <BedDouble size={18} /> حجوزات الأوض / الغرف ({form.rooms?.length || 0} أوضة)
-              </strong>
-              <div className="grid sm:grid-cols-2 md:grid-cols-5 gap-2">
-                <input placeholder="رقم/اسم الأوضة (مثال: غرفة 101)" className="p-2 border rounded-xl bg-white" value={newRoomForm.room_number} onChange={e => setNewRoomForm({ ...newRoomForm, room_number: e.target.value })} />
-                <select className="p-2 border rounded-xl bg-white" value={newRoomForm.ac_type} onChange={e => setNewRoomForm({ ...newRoomForm, ac_type: e.target.value })}>
-                  <option value="مكيفة ❄️">مكيفة ❄️</option>
-                  <option value="مروحة 🌀">مروحة 🌀</option>
-                  <option value="عادي بدون تكييف">عادي بدون تكييف</option>
-                </select>
-                <input type="number" min="1" placeholder="عدد الأفراد" className="p-2 border rounded-xl bg-white" value={newRoomForm.capacity} onChange={e => setNewRoomForm({ ...newRoomForm, capacity: e.target.value })} />
-                <input placeholder="الدور / المواصفات" className="p-2 border rounded-xl bg-white" value={newRoomForm.floor_notes} onChange={e => setNewRoomForm({ ...newRoomForm, floor_notes: e.target.value })} />
-                <button type="button" onClick={handleAddRoom} className="px-3 py-2 bg-blue-700 text-white rounded-xl font-black cursor-pointer">+ إضافة أوضة</button>
-              </div>
-              {(form.rooms || []).length > 0 && (
-                <div className="grid sm:grid-cols-2 gap-2">
-                  {form.rooms.map(rm => (
-                    <div key={rm.id} className="bg-white p-2.5 rounded-xl border flex justify-between items-center text-xs">
-                      <div>
-                        <strong>🚪 {rm.room_number}</strong> • <span className="text-blue-800">{rm.ac_type}</span> • <span>سعة {rm.capacity} أفراد</span>
-                        {rm.floor_notes && <span className="block text-gray-500">{rm.floor_notes}</span>}
-                      </div>
-                      <button type="button" onClick={() => handleDeleteRoom(rm.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer"><Trash2 size={13} /></button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          <BusVisualizerSection
-            rawBusesData={form.bus_seats}
-            tripCost={form.cost_per_person}
-            isViewMode={false}
-            localUsers={users}
-            priest={currentUser}
-            todayISO={todayISO}
-            onSaveBuses={async (updated) => setForm(prev => ({ ...prev, bus_seats: updated }))}
-            onLocalRenameBuses={(updated) => setForm(prev => ({ ...prev, bus_seats: updated }))}
-            onOpenWhatsApp={handleOpenWhatsApp}
-          />
-
-          <div className="flex flex-wrap justify-between items-center gap-3 pt-1">
-            <label className="flex items-center gap-2 p-2.5 bg-gray-50 rounded-xl border cursor-pointer">
-              <input type="checkbox" checked={form.is_public} onChange={e => setForm({ ...form, is_public: e.target.checked })} />
-              <span>{form.is_public ? '📢 ظاهرة في صفحة الكنيسة وشاشة المخدوم' : '🔒 مخفية عن العامة'}</span>
-            </label>
-            <button type="submit" className="px-6 py-3 bg-[#7a1c24] text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer">
-              <Plus size={16} /> {editingId ? 'حفظ تعديل الرحلة' : 'نشر وحفظ الرحلة'}
-            </button>
-          </div>
-        </form>
-      </div>
-    );
-  }
-
-  // ==============================================================
-  // شاشة عرض رحلات الفئة المختارة
-  // ==============================================================
-  const catMeta = TRIP_CATEGORIES.find(c => c.id === activeCard);
-  const catTrips = trips.filter(t => (t.trip_category || 'منتظمة') === activeCard);
-
-  return (
-    <div className="space-y-4 text-xs md:text-sm" dir="rtl">
-      <div className={printBusState ? 'print:hidden space-y-4' : 'space-y-4'}>
-        {renderTopBack(`${catMeta?.icon || '🚌'} ${catMeta?.title || activeCard} (${catTrips.length})`)}
-
-        {catTrips.length === 0 ? (
-          <div className="bg-white p-10 rounded-3xl border text-center text-gray-500">
-            لا توجد رحلات مضافة في قسم "{catMeta?.title}" حتى الآن.
-          </div>
-        ) : (
-          <div className="grid gap-3">
-            {catTrips.map(t => {
-              const busesList = normalizeBuses(t.bus_seats);
-              const bookedSeats = busesList.reduce((acc, b) => acc + (b.seats || []).filter(s => !s.isDoor && s.occupant).length, 0);
-              const totalSeats = busesList.reduce((acc, b) => acc + (b.seats || []).filter(s => !s.isDoor).length, 0);
-              const roomsList = Array.isArray(t.rooms) ? t.rooms : [];
-              const tripRegs = registrations.filter(r => r.trip_id === t.id);
-              const isOvernight = Number(t.days_count || 1) > 1 || roomsList.length > 0;
-              const peopleSum = buildGroupedPeopleSummary(busesList, Number(t.cost_per_person || 0), users);
-              const collectedSum = peopleSum.reduce((sum, x) => sum + x.totalPaid, 0);
-              const remainingSum = peopleSum.reduce((sum, x) => sum + x.totalRemaining, 0);
-
-              return (
-                <div key={t.id} className="bg-white p-5 rounded-3xl border space-y-2.5 shadow-2xs">
-                  <div className="flex flex-wrap justify-between items-start gap-2">
-                    <div className="space-y-1 flex-1 min-w-[260px]">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="px-2.5 py-0.5 bg-purple-100 text-purple-950 rounded text-xs font-black">{catMeta?.icon} {t.trip_category}</span>
-                        <span className={`px-2.5 py-0.5 rounded text-xs font-black ${isOvernight ? 'bg-indigo-100 text-indigo-950' : 'bg-amber-100 text-amber-950'}`}>
-                          {isOvernight ? `🌙 مبيت (${t.days_count} أيام)` : '☀️ يوم واحد (داي يوز)'}
-                        </span>
-                        <strong className="text-base md:text-lg text-gray-900">{t.title}</strong>
-                        <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-900 rounded text-xs font-black">💰 {t.cost_per_person || 0} ج.م</span>
-                      </div>
-
-                      <p className="text-xs text-gray-600">
-                        📅 {t.trip_date || '—'}
-                        {t.gathering_time && ` • تجمع: ${t.gathering_time}`}
-                        {t.departure_time && ` • تحرك: ${t.departure_time}`}
-                        {t.return_time && ` • عودة: ${t.return_time}`}
-                        {t.supervisors && ` • مشرفون: ${t.supervisors}`}
-                      </p>
-
-                      {t.monasteries && <p className="text-xs text-gray-800">⛪ <strong>الأماكن والمزارات:</strong> {t.monasteries}</p>}
-
-                      {t.daily_program && (
-                        <div className="p-3 bg-amber-50/60 border border-amber-200 rounded-2xl text-xs text-gray-800 whitespace-pre-line">
-                          <strong className="block text-[#7a1c24] mb-1">📋 برنامج الرحلة:</strong>
-                          {t.daily_program}
-                        </div>
-                      )}
-
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        <span className="px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg text-xs font-black text-emerald-800">محصل: {collectedSum} ج.م</span>
-                        {remainingSum > 0 && <span className="px-2.5 py-1 bg-red-50 border border-red-200 rounded-lg text-xs font-black text-red-700">متبقي: {remainingSum} ج.م</span>}
-                        {isOvernight && <span className="px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-lg text-xs font-black text-blue-900">🚪 الأوض: {roomsList.length}</span>}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-1.5">
-                      <button type="button" onClick={() => setViewRegsTrip(t)} className="px-3.5 py-2 bg-emerald-700 text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer text-xs">
-                        <Users size={16} /> المشتركين ({tripRegs.length})
-                      </button>
-                      {isOvernight && (
-                        <button type="button" onClick={() => setViewRoomsTrip(t)} className="px-3.5 py-2 bg-blue-700 text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer text-xs">
-                          <BedDouble size={16} /> الأوض والغرف ({roomsList.length})
-                        </button>
-                      )}
-                      <button type="button" onClick={() => setViewBusTrip(t)} className="px-3.5 py-2 bg-amber-500 text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer text-xs">
-                        <Bus size={16} /> الأتوبيسات ({bookedSeats}/{totalSeats})
-                      </button>
-                      <button type="button" onClick={() => setPrintBusState({ trip: toManagerTrip(t), buses: busesList })} className="px-3.5 py-2 bg-slate-800 text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer text-xs">
-                        <Printer size={16} /> طباعة
-                      </button>
-
-                      {/* أزرار التعديل والحذف تظهر فقط لمن يملك الصلاحية */}
-                      {canEditTrips && (
-                        <>
-                          <button type="button" onClick={() => openEditTrip(t)} className="p-2.5 bg-gray-100 hover:bg-gray-200 rounded-xl cursor-pointer" title="تعديل">
-                            <Edit3 size={15} />
-                          </button>
-                          <button type="button" onClick={() => togglePublic(t)} className="p-2.5 bg-blue-50 rounded-xl cursor-pointer" title={t.is_public ? 'ظاهرة للعامة' : 'مخفية'}>
-                            {t.is_public ? <Globe size={15} /> : <Lock size={15} />}
-                          </button>
-                        </>
-                      )}
-                      {canDeleteTrips && (
-                        <button type="button" onClick={() => deleteTrip(t)} className="p-2.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl cursor-pointer" title="حذف">
-                          <Trash2 size={15} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* مودال المشتركين من الموبايل / شاشة المخدوم */}
-        {viewRegsTrip && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-3xl w-full max-w-2xl p-5 space-y-3 max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center border-b pb-3">
-                <div>
-                  <h3 className="text-base font-black text-[#7a1c24]">✋ المشتركين من التطبيق — {viewRegsTrip.title}</h3>
-                  <p className="text-xs text-gray-500">الأعضاء الذين ضغطوا "اشتراك في الرحلة" من حساباتهم</p>
-                </div>
-                <button type="button" onClick={() => setViewRegsTrip(null)} className="p-2 bg-gray-100 rounded-xl cursor-pointer"><X size={18} /></button>
-              </div>
-              {registrations.filter(r => r.trip_id === viewRegsTrip.id).length === 0 ? (
-                <p className="text-center text-gray-500 py-6">لا توجد اشتراكات أونلاين لهذه الرحلة بعد.</p>
-              ) : (
-                <div className="space-y-2">
-                  {registrations.filter(r => r.trip_id === viewRegsTrip.id).map(r => (
-                    <div key={r.id} className="p-3 bg-[#fbfaf7] border rounded-2xl flex flex-wrap justify-between items-center gap-2">
-                      <div>
-                        <strong className="text-sm text-gray-900 block">{r.user_name}</strong>
-                        <span className="text-xs text-gray-600">
-                          💺 عدد الأفراد: <strong>{r.seats_count}</strong>
-                          {r.user_phone && ` • 📞 ${r.user_phone}`}
-                          {r.notes && ` • 📝 ${r.notes}`}
-                        </span>
-                      </div>
-                      <div className="flex gap-1.5">
-                        {r.user_phone && (
-                          <>
-                            <button type="button" onClick={() => handleOpenWhatsApp({ name: r.user_name, phone: r.user_phone })} className="p-2 bg-green-600 text-white rounded-xl cursor-pointer"><MessageCircle size={14} /></button>
-                            <a href={`tel:${r.user_phone}`} className="p-2 bg-gray-100 text-gray-800 rounded-xl"><Phone size={14} /></a>
-                          </>
-                        )}
-                        {canDeleteTrips && (
-                          <button type="button" onClick={() => deleteRegistration(r.id)} className="p-2 bg-red-50 text-red-700 rounded-xl cursor-pointer"><Trash2 size={14} /></button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* مودال إدارة الأتوبيسات */}
-        {viewBusTrip && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-3xl w-full max-w-3xl p-5 space-y-3 max-h-[92vh] overflow-y-auto">
-              <div className="flex justify-between items-center border-b pb-3">
-                <div>
-                  <h3 className="text-lg font-black text-[#7a1c24]">🚌 الأتوبيسات والمقاعد — {viewBusTrip.title}</h3>
-                  <p className="text-xs text-gray-600">التاريخ: {viewBusTrip.trip_date} • التكلفة: {viewBusTrip.cost_per_person || 0} ج.م</p>
-                </div>
-                <button type="button" onClick={() => setViewBusTrip(null)} className="p-2 bg-gray-100 rounded-xl cursor-pointer"><X size={18} /></button>
-              </div>
-              <BusVisualizerSection
-                rawBusesData={viewBusTrip.bus_seats}
-                tripCost={viewBusTrip.cost_per_person}
-                isViewMode={true}
-                tripObj={toManagerTrip(viewBusTrip)}
-                localUsers={users}
-                priest={currentUser}
-                todayISO={todayISO}
-                onSaveBuses={persistTripBuses}
-                onLocalRenameBuses={(updated) => setViewBusTrip(prev => ({ ...prev, bus_seats: updated }))}
-                onOpenPrint={setPrintBusState}
-                onOpenWhatsApp={handleOpenWhatsApp}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* مودال إدارة الأوض والغرف */}
-        {viewRoomsTrip && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-3xl w-full max-w-3xl p-5 space-y-4 max-h-[92vh] overflow-y-auto">
-              <div className="flex justify-between items-center border-b pb-3">
-                <div>
-                  <h3 className="text-lg font-black text-[#7a1c24] flex items-center gap-2"><BedDouble size={20} /> حجز الأوض والغرف — {viewRoomsTrip.title}</h3>
-                  <p className="text-xs text-gray-600">حدد عدد الأوض، التكييف، السعة، وأسماء النزلاء في كل أوضة</p>
-                </div>
-                <button type="button" onClick={() => setViewRoomsTrip(null)} className="p-2 bg-gray-100 rounded-xl cursor-pointer"><X size={18} /></button>
-              </div>
-
-              {canEditTrips && (
-                <div className="bg-blue-50/70 p-3.5 rounded-2xl border border-blue-200 space-y-2.5 font-bold">
-                  <span className="text-xs text-blue-950 block">+ إضافة أوضة / شاليه جديد:</span>
-                  <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-2">
-                    <input placeholder="رقم/اسم الأوضة *" className="p-2 border rounded-xl bg-white" value={newRoomForm.room_number} onChange={e => setNewRoomForm({ ...newRoomForm, room_number: e.target.value })} />
-                    <select className="p-2 border rounded-xl bg-white" value={newRoomForm.ac_type} onChange={e => setNewRoomForm({ ...newRoomForm, ac_type: e.target.value })}>
-                      <option value="مكيفة ❄️">مكيفة ❄️</option>
-                      <option value="مروحة 🌀">مروحة 🌀</option>
-                      <option value="عادي بدون تكييف">عادي بدون تكييف</option>
-                    </select>
-                    <input type="number" min="1" placeholder="عدد الأفراد (السعة)" className="p-2 border rounded-xl bg-white" value={newRoomForm.capacity} onChange={e => setNewRoomForm({ ...newRoomForm, capacity: e.target.value })} />
-                    <input placeholder="الدور / المواصفات" className="p-2 border rounded-xl bg-white" value={newRoomForm.floor_notes} onChange={e => setNewRoomForm({ ...newRoomForm, floor_notes: e.target.value })} />
-                  </div>
-                  <div className="flex gap-2">
-                    <input placeholder="أسماء الأفراد المسكنين في الأوضة..." className="flex-1 p-2 border rounded-xl bg-white font-normal" value={newRoomForm.occupants_text} onChange={e => setNewRoomForm({ ...newRoomForm, occupants_text: e.target.value })} />
-                    <button type="button" onClick={handleAddRoom} className="px-4 py-2 bg-[#7a1c24] text-white rounded-xl cursor-pointer">+ إضافة</button>
-                  </div>
-                </div>
-              )}
-
-              {(viewRoomsTrip.rooms || []).length === 0 ? (
-                <div className="p-6 bg-gray-50 rounded-2xl border text-center text-gray-500">لم تُضف أوض لهذه الرحلة بعد.</div>
-              ) : (
-                <div className="grid sm:grid-cols-2 gap-3">
-                  {viewRoomsTrip.rooms.map(rm => (
-                    <div key={rm.id} className="p-3.5 bg-[#fbfaf7] border-2 border-gray-200 rounded-2xl space-y-2">
-                      <div className="flex justify-between items-start gap-2">
-                        <div>
-                          <strong className="text-sm text-[#7a1c24]">🚪 {rm.room_number}</strong>
-                          <div className="flex flex-wrap gap-1.5 mt-1 text-[11px]">
-                            <span className="px-2 py-0.5 bg-blue-100 text-blue-900 rounded font-bold flex items-center gap-1"><Wind size={11} /> {rm.ac_type}</span>
-                            <span className="px-2 py-0.5 bg-amber-100 text-amber-950 rounded font-bold">👥 {rm.capacity} أفراد</span>
-                          </div>
-                          {rm.floor_notes && <span className="text-[11px] text-gray-500 block mt-1">{rm.floor_notes}</span>}
-                        </div>
-                        {canEditTrips && (
-                          <button type="button" onClick={() => handleDeleteRoom(rm.id)} className="p-1.5 bg-red-50 text-red-700 rounded-lg cursor-pointer"><Trash2 size={13} /></button>
-                        )}
-                      </div>
-                      <div>
-                        <label className="text-[11px] text-gray-600 block mb-1 font-bold">أسماء النزلاء في الأوضة:</label>
-                        <textarea
-                          rows="2"
-                          placeholder="اكتب أسماء الأفراد..."
-                          className="w-full p-2 border rounded-xl bg-white text-xs disabled:bg-gray-100"
-                          disabled={!canEditTrips}
-                          defaultValue={rm.occupants_text || ''}
-                          onBlur={e => handleUpdateRoomOccupants(rm.id, e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <PrintBusModal printBusState={printBusState} setPrintBusState={setPrintBusState} priest={currentUser} todayISO={todayISO} />
     </div>
   );
 }
