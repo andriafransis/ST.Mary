@@ -5,7 +5,7 @@ import {
   Users, Plus, Search, Edit3, Trash2, Printer, MessageCircle,
   Calendar, MapPin, Phone, Briefcase, GraduationCap, Heart, X,
   UserPlus, Link2, RefreshCw, GitBranch, Network, ChevronDown, ChevronUp,
-  FileSpreadsheet, Check, Ban, Sparkles
+  FileSpreadsheet, RotateCcw, UserCheck
 } from 'lucide-react';
 
 const MARITAL_STATUS_OPTIONS = ['متزوج', 'متزوجة', 'أعزب', 'آنسة', 'أرمل', 'أرملة', 'مطلق/ة'];
@@ -29,23 +29,31 @@ const KINSHIP_ROLE_OPTIONS = [
   'الجدة',
   'الزوج',
   'الزوجة',
+  'الأخ',
+  'الأخت',
   'العم',
   'الخال',
   'الخالة',
-  'الأخت',
   'زوج الأخت'
 ];
 
 const REVERSE_KINSHIP_MAP = {
-  'العم': 'ابن/ابنة الأخ',
-  'الخال': 'ابن/ابنة الأخت',
-  'الخالة': 'ابن/ابنة الأخت',
-  'الأخت': 'أخ / أخت',
-  'زوج الأخت': 'نسيب / صهر',
-  'الجد': 'حفيد / حفيدة',
-  'الجدة': 'حفيد / حفيدة',
-  'الحفيد': 'جد / جدة',
-  'الحفيدة': 'جد / جدة'
+  'الأب': 'الابن / الابنة',
+  'الأم': 'الابن / الابنة',
+  'الابن': 'الأب / الأم',
+  'الابنة': 'الأب / الأم',
+  'الجد': 'الحفيد / الحفيدة',
+  'الجدة': 'الحفيد / الحفيدة',
+  'الحفيد': 'الجد / الجدة',
+  'الحفيدة': 'الجد / الجدة',
+  'الزوج': 'الزوجة',
+  'الزوجة': 'الزوج',
+  'الأخ': 'الأخ / الأخت',
+  'الأخت': 'الأخ / الأخت',
+  'العم': 'ابن / ابنة الأخ',
+  'الخال': 'ابن / ابنة الأخت',
+  'الخالة': 'ابن / ابنة الأخت',
+  'زوج الأخت': 'نسيب / صهر'
 };
 
 const normalizeArabic = (str = '') =>
@@ -58,12 +66,6 @@ const normalizeArabic = (str = '') =>
     .replace(/[\u064B-\u065F]/g, '')
     .replace(/\bعبد\s+/g, 'عبد')
     .replace(/\s+/g, ' ');
-
-const getNameTokens = (nameStr = '') =>
-  normalizeArabic(nameStr)
-    .split(' ')
-    .map(t => t.trim())
-    .filter(Boolean);
 
 const normalizePhone = (phone = '') => {
   const digits = String(phone || '').replace(/\D/g, '');
@@ -121,13 +123,6 @@ const resolveMaritalStatusForRole = (rawStatus, roleType, hasChildrenOrSpouse = 
   return cleaned || (isFemaleRole ? 'متزوجة' : 'متزوج');
 };
 
-const extractFatherLineageFromQuad = (u) => {
-  if (!u) return '';
-  if ((u.father_full_name || '').trim()) return u.father_full_name.trim();
-  const rawWords = getDisplayQuadName(u).split(/\s+/).filter(Boolean);
-  return rawWords.length >= 3 ? rawWords.slice(1).join(' ') : '';
-};
-
 const emptyPerson = (defaultMarital = 'متزوج') => ({
   user_id: null,
   full_name: '',
@@ -182,12 +177,6 @@ const calcAge = (dob) => {
   return Number.isFinite(yrs) && yrs >= 0 ? `${yrs} سنة` : '—';
 };
 
-const getNumericAge = (dob) => {
-  if (!dob) return null;
-  const yrs = Math.floor((Date.now() - new Date(dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000));
-  return Number.isFinite(yrs) && yrs >= 0 ? yrs : null;
-};
-
 const toPersonObjectFromUser = (u, roleType = 'husband', hasChildrenOrSpouse = false) => ({
   user_id: u.id,
   full_name: getDisplayQuadName(u),
@@ -227,153 +216,7 @@ async function safeUpdateChurchUser(userId, patch) {
   return { ok: false, error: retry.error.message || error.message };
 }
 
-function analyzeQuadKinship(anchorName = '', anchorUser = null, candidateUser = null) {
-  const candName = getDisplayQuadName(candidateUser);
-  const aToks = getNameTokens(anchorName);
-  const cToks = getNameTokens(candName);
-
-  if (aToks.length < 2 || cToks.length < 2) {
-    return { score: 0, inferredRole: null, reasons: [], matchedParts: [] };
-  }
-
-  const aFirst = aToks[0];
-  const aSecond = aToks[1] || '';
-  const aThird = aToks[2] || '';
-  const aFourth = aToks[3] || '';
-
-  const cFirst = cToks[0];
-  const cSecond = cToks[1] || '';
-  const cThird = cToks[2] || '';
-  const cFourth = cToks[3] || '';
-
-  const isFemale =
-    candidateUser?.gender === 'أنثى' ||
-    ['متزوجة', 'آنسة', 'أرملة'].includes(candidateUser?.marital_status);
-
-  const aAge = getNumericAge(anchorUser?.dob);
-  const cAge = getNumericAge(candidateUser?.dob);
-  const ageDiff = aAge !== null && cAge !== null ? cAge - aAge : null;
-
-  let score = 0;
-  let inferredRole = null;
-  const reasons = [];
-  const matchedParts = [];
-
-  const posLabels = ['الاسم الأول', 'الاسم الثاني', 'الاسم الثالث', 'الاسم الرابع'];
-  const maxPos = Math.min(4, aToks.length, cToks.length);
-  for (let i = 0; i < maxPos; i++) {
-    if (aToks[i] === cToks[i]) {
-      score += (4 - i) * 12;
-      matchedParts.push(`${posLabels[i]} (${aToks[i]})`);
-    }
-  }
-
-  const anchorLineageFromSecond = aToks.slice(1).join(' ');
-  const anchorLineageFromThird = aToks.slice(2).join(' ');
-  const candNorm = cToks.join(' ');
-
-  if (!isFemale && anchorLineageFromSecond && candNorm === anchorLineageFromSecond) {
-    score += 95;
-    inferredRole = 'الأب';
-    reasons.push(`الاسم الكامل للمرشح (${candName}) يطابق سلسلة الأب (${anchorLineageFromSecond})`);
-  } else if (!isFemale && anchorLineageFromThird && candNorm === anchorLineageFromThird) {
-    score += 85;
-    inferredRole = 'الجد';
-    reasons.push(`الاسم الكامل للمرشح (${candName}) يطابق سلسلة الجد (${anchorLineageFromThird})`);
-  } else if (!isFemale && aFourth && cFirst === aFourth && cToks.length >= 2) {
-    score += 70;
-    inferredRole = 'الجد';
-    reasons.push(`الاسم الأول للمرشح يطابق الاسم الرابع (${aFourth})`);
-  }
-
-  if (!inferredRole) {
-    if (cSecond === aFirst && (!isFemale || anchorUser?.gender === 'أنثى')) {
-      if (ageDiff !== null && ageDiff > 5) {
-        score += 45;
-        inferredRole = 'الأب';
-        reasons.push(`الاسم الثاني للمرشح يطابق (${aFirst}) وفارق السن يرجح كونه أباً`);
-      } else {
-        score += 85;
-        inferredRole = isFemale ? 'الابنة' : 'الابن';
-        reasons.push(`الاسم الثاني للمرشح (${cSecond}) يطابق الاسم الأول (${aFirst})`);
-      }
-    } else if (cThird === aFirst) {
-      score += 80;
-      inferredRole = isFemale ? 'الحفيدة' : 'الحفيد';
-      reasons.push(`الاسم الثالث للمرشح (${cThird}) يطابق الاسم الأول (${aFirst}) — حفيد محتمل`);
-    }
-  }
-
-  if (!inferredRole && !isFemale && cFirst !== aFirst) {
-    const sameFather = aSecond && cSecond === aSecond && aThird && cThird === aThird;
-    const sameGrandFather = aThird && cThird === aThird && (!aFourth || !cFourth || cFourth === aFourth);
-
-    if (sameFather && ageDiff !== null && ageDiff < -3) {
-      score += 75;
-      inferredRole = 'الابن';
-      reasons.push(`نفس الأب والجد (${aSecond} ${aThird}) والسن أصغر`);
-    } else if (sameFather && ageDiff !== null && ageDiff > 3) {
-      score += 80;
-      inferredRole = 'العم';
-      reasons.push(`نفس الأب والجد (${aSecond} ${aThird}) والسن أكبر — عم محتمل`);
-    } else if (sameGrandFather) {
-      score += 65;
-      inferredRole = ageDiff !== null && ageDiff < -5 ? 'الابن' : 'العم';
-      reasons.push(`اشتراك في الجد (${aThird}${aFourth ? ' ' + aFourth : ''})`);
-    }
-  }
-
-  if (!inferredRole) {
-    const sameFather = aSecond && cSecond === aSecond && aThird && cThird === aThird;
-    if (isFemale && sameFather && cFirst !== aFirst) {
-      score += 75;
-      inferredRole = 'الأخت';
-      reasons.push(`نفس الأب والجد (${aSecond} ${aThird}) — أخت محتملة`);
-    } else if (!isFemale && candidateUser?.spouse_name && normalizeArabic(candidateUser.spouse_name).includes(aSecond || aFirst)) {
-      score += 70;
-      inferredRole = 'زوج الأخت';
-      reasons.push(`اسم الزوج/العائلة يرتبط بالأسرة — زوج أخت محتمل`);
-    } else if (isFemale && ageDiff !== null && Math.abs(ageDiff) <= 15 && ['متزوجة', 'أرملة'].includes(candidateUser?.marital_status)) {
-      const commonToks = aToks.filter(t => cToks.includes(t));
-      if (commonToks.length >= 2) {
-        score += 55;
-        inferredRole = 'الزوجة';
-        reasons.push(`تطابق مقاطع الاسم والعمر — زوجة محتملة`);
-      }
-    } else if (isFemale && ageDiff !== null && ageDiff > 10) {
-      const commonToks = aToks.filter(t => cToks.includes(t));
-      if (commonToks.length >= 2) {
-        score += 55;
-        inferredRole = ageDiff > 25 ? 'الجدة' : 'الخالة';
-        reasons.push(`تطابق مقاطع الاسم وفارق السن — ${ageDiff > 25 ? 'جدة' : 'خالة'} محتملة`);
-      }
-    } else if (!isFemale && ageDiff !== null && ageDiff > 10) {
-      const commonToks = aToks.filter(t => cToks.includes(t));
-      if (commonToks.length >= 2) {
-        score += 55;
-        inferredRole = 'الخال';
-        reasons.push(`تطابق مقاطع الاسم وفارق السن — خال محتمل`);
-      }
-    }
-  }
-
-  if (score === 0) {
-    const commonToks = aToks.filter(t => cToks.includes(t));
-    if (commonToks.length >= 3) {
-      score += commonToks.length * 14;
-      inferredRole = isFemale ? 'الأخت' : 'العم';
-      reasons.push(`اشتراك في ${commonToks.length} مقاطع من الاسم الرباعي (${commonToks.join(' ')})`);
-    } else if (commonToks.length === 2 && aToks[0] === cToks[0] && aToks[1] === cToks[1]) {
-      score += 35;
-      inferredRole = isFemale ? 'الابنة' : 'الابن';
-      reasons.push(`تطابق الاسم الأول والثاني (${aToks[0]} ${aToks[1]})`);
-    }
-  }
-
-  return { score, inferredRole, reasons, matchedParts };
-}
-
-function buildAutoFamiliesFromDatabase({
+function buildExplicitFamiliesFromDatabase({
   churchUsers = [],
   userChildren = [],
   memberSiblings = [],
@@ -383,36 +226,17 @@ function buildAutoFamiliesFromDatabase({
   const people = churchUsers.filter(u => u.role !== 'admin' && u.role !== 'priest');
   const byId = new Map(people.map(u => [u.id, u]));
 
-  const findUserByNameOrPhone = (nameStr = '', phoneStr = '', expectedGender = null) => {
+  const findUserByExplicitIdOrPhone = (idVal, phoneStr = '', expectedGender = null) => {
+    if (idVal && byId.has(idVal)) return byId.get(idVal);
     const qPhone = normalizePhone(phoneStr);
-    const qName = normalizeArabic(nameStr);
     if (qPhone.length >= 8) {
-      const mPhone = people.find(
-        u =>
-          normalizePhone(u.phone) === qPhone &&
-          (!expectedGender || !u.gender || u.gender === expectedGender)
+      return (
+        people.find(
+          u =>
+            normalizePhone(u.phone) === qPhone &&
+            (!expectedGender || !u.gender || u.gender === expectedGender)
+        ) || null
       );
-      if (mPhone) return mPhone;
-    }
-    if (qName.length >= 4) {
-      const mExact = people.find(
-        u =>
-          normalizeArabic(getDisplayQuadName(u)) === qName &&
-          (!expectedGender || !u.gender || u.gender === expectedGender)
-      );
-      if (mExact) return mExact;
-
-      const qToks = qName.split(' ').filter(Boolean);
-      if (qToks.length >= 2) {
-        const prefix = qToks.slice(0, 2).join(' ');
-        return (
-          people.find(u => {
-            if (expectedGender && u.gender && u.gender !== expectedGender) return false;
-            const uName = normalizeArabic(getDisplayQuadName(u));
-            return uName.startsWith(prefix) || prefix.startsWith(uName);
-          }) || null
-        );
-      }
     }
     return null;
   };
@@ -426,6 +250,8 @@ function buildAutoFamiliesFromDatabase({
         key,
         husbandUser: null,
         wifeUser: null,
+        fatherUser: null,
+        motherUser: null,
         fatherNameHint: '',
         fatherPhoneHint: '',
         motherNameHint: '',
@@ -459,6 +285,8 @@ function buildAutoFamiliesFromDatabase({
 
     if (!t.husbandUser && s.husbandUser) t.husbandUser = s.husbandUser;
     if (!t.wifeUser && s.wifeUser) t.wifeUser = s.wifeUser;
+    if (!t.fatherUser && s.fatherUser) t.fatherUser = s.fatherUser;
+    if (!t.motherUser && s.motherUser) t.motherUser = s.motherUser;
     if (!t.fatherNameHint && s.fatherNameHint) t.fatherNameHint = s.fatherNameHint;
     if (!t.fatherPhoneHint && s.fatherPhoneHint) t.fatherPhoneHint = s.fatherPhoneHint;
     if (!t.motherNameHint && s.motherNameHint) t.motherNameHint = s.motherNameHint;
@@ -498,7 +326,7 @@ function buildAutoFamiliesFromDatabase({
     const spouseMatch =
       linkedSpouseById ||
       reverseLinkedSpouse ||
-      findUserByNameOrPhone(u.spouse_name, u.spouse_phone, isFemale ? 'ذكر' : 'أنثى');
+      findUserByExplicitIdOrPhone(null, u.spouse_phone, isFemale ? 'ذكر' : 'أنثى');
 
     const existingSpouseKey = spouseMatch ? userToHeadBucketKey.get(spouseMatch.id) : null;
     const key = existingSpouseKey || `fam_head_${u.id}`;
@@ -527,16 +355,15 @@ function buildAutoFamiliesFromDatabase({
     if (spouseMatch) userToHeadBucketKey.set(spouseMatch.id, key);
   });
 
+  // دمج أسر الأب والأم عند وجود أبناء يجمعون بينهما صراحة
   people.forEach(child => {
     const fUser =
       (child.father_id && byId.get(child.father_id)) ||
-      (child.parent_id && byId.get(child.parent_id)?.gender !== 'أنثى' ? byId.get(child.parent_id) : null) ||
-      findUserByNameOrPhone(child.father_full_name, child.father_phone, 'ذكر');
+      (child.parent_id && byId.get(child.parent_id)?.gender !== 'أنثى' ? byId.get(child.parent_id) : null);
 
     const mUser =
       (child.mother_id && byId.get(child.mother_id)) ||
-      (child.parent_id && byId.get(child.parent_id)?.gender === 'أنثى' ? byId.get(child.parent_id) : null) ||
-      findUserByNameOrPhone(child.mother_full_name, child.mother_phone, 'أنثى');
+      (child.parent_id && byId.get(child.parent_id)?.gender === 'أنثى' ? byId.get(child.parent_id) : null);
 
     if (fUser && mUser && fUser.id !== mUser.id) {
       const fKey = userToHeadBucketKey.get(fUser.id);
@@ -547,98 +374,29 @@ function buildAutoFamiliesFromDatabase({
     }
   });
 
-  const resolveParentBucketKeyForUser = (u) => {
+  const resolveExplicitParentBucketKey = (u) => {
     if (!u) return null;
-    const fatherNameStr = extractFatherLineageFromQuad(u);
-    const motherNameStr = (u.mother_full_name || '').trim();
-    const fPhone = normalizePhone(u.father_phone);
-    const mPhone = normalizePhone(u.mother_phone);
-
     const directIds = [u.father_id, u.mother_id, u.parent_id].filter(id => id && id !== u.id);
     for (const pid of directIds) {
       if (userToHeadBucketKey.has(pid)) return userToHeadBucketKey.get(pid);
-    }
-
-    if (fatherNameStr || fPhone) {
-      const matchedFather = findUserByNameOrPhone(fatherNameStr, fPhone, 'ذكر');
-      if (matchedFather && matchedFather.id !== u.id && userToHeadBucketKey.has(matchedFather.id)) {
-        return userToHeadBucketKey.get(matchedFather.id);
-      }
-    }
-
-    if (motherNameStr || mPhone) {
-      const matchedMother = findUserByNameOrPhone(motherNameStr, mPhone, 'أنثى');
-      if (matchedMother && matchedMother.id !== u.id && userToHeadBucketKey.has(matchedMother.id)) {
-        return userToHeadBucketKey.get(matchedMother.id);
-      }
-    }
-
-    const normFather = normalizeArabic(fatherNameStr);
-    const normMother = normalizeArabic(motherNameStr);
-    for (const [bKey, bObj] of buckets.entries()) {
-      if (bObj.husbandUser?.id === u.id || bObj.wifeUser?.id === u.id) continue;
-
-      const bFatherNorm = normalizeArabic(bObj.husbandUser ? getDisplayQuadName(bObj.husbandUser) : bObj.fatherNameHint);
-      const bMotherNorm = normalizeArabic(bObj.wifeUser ? getDisplayQuadName(bObj.wifeUser) : bObj.motherNameHint);
-      const bFatherPhone = normalizePhone(bObj.husbandUser?.phone || bObj.fatherPhoneHint);
-      const bMotherPhone = normalizePhone(bObj.wifeUser?.phone || bObj.motherPhoneHint);
-
-      const sameFPhone = fPhone.length >= 8 && bFatherPhone && fPhone === bFatherPhone;
-      const sameMPhone = mPhone.length >= 8 && bMotherPhone && mPhone === bMotherPhone;
-      const sameFatherName =
-        normFather.length >= 5 &&
-        bFatherNorm &&
-        (normFather === bFatherNorm || bFatherNorm.startsWith(normFather) || normFather.startsWith(bFatherNorm));
-      const sameMotherName =
-        normMother.length >= 5 &&
-        bMotherNorm &&
-        (normMother === bMotherNorm || bMotherNorm.startsWith(normMother) || normMother.startsWith(bMotherNorm));
-
-      if (sameFPhone || sameMPhone || sameFatherName || sameMotherName) {
-        return bKey;
-      }
     }
     return null;
   };
 
   people.forEach(u => {
-    const fatherNameStr = extractFatherLineageFromQuad(u);
-    const motherNameStr = (u.mother_full_name || '').trim();
-    const fPhone = normalizePhone(u.father_phone);
-    const mPhone = normalizePhone(u.mother_phone);
-
     const isHeadItself = userToHeadBucketKey.has(u.id);
-    const hasParentLink = Boolean(
-      u.father_id || u.mother_id || u.parent_id || fatherNameStr || fPhone || motherNameStr || mPhone
-    );
+    const hasExplicitParent = Boolean(u.father_id || u.mother_id || u.parent_id);
+    if (isHeadItself && !hasExplicitParent) return;
 
-    if (isHeadItself && !hasParentLink) return;
-
-    let targetParentBucketKey = resolveParentBucketKeyForUser(u);
-
-    if (!targetParentBucketKey) {
-      const normFather = normalizeArabic(fatherNameStr);
-      if (fPhone.length >= 8) targetParentBucketKey = `fam_fphone_${fPhone}`;
-      else if (normFather.length >= 4) targetParentBucketKey = `fam_fname_${normFather}`;
-      else if (mPhone.length >= 8) targetParentBucketKey = `fam_mphone_${mPhone}`;
-      else if (!isHeadItself) targetParentBucketKey = `fam_solo_${u.id}`;
-      else return;
+    let targetParentBucketKey = resolveExplicitParentBucketKey(u);
+    if (!targetParentBucketKey && !isHeadItself) {
+      targetParentBucketKey = `fam_solo_${u.id}`;
     }
+    if (!targetParentBucketKey) return;
 
     const parentBucket = ensureBucket(targetParentBucketKey);
     if (parentBucket.husbandUser?.id === u.id || parentBucket.wifeUser?.id === u.id) return;
 
-    if (
-      (parentBucket.husbandUser?.father_id && parentBucket.husbandUser.father_id === u.id) ||
-      (parentBucket.wifeUser?.father_id && parentBucket.wifeUser.father_id === u.id)
-    ) {
-      return;
-    }
-
-    if (!parentBucket.fatherNameHint && fatherNameStr) parentBucket.fatherNameHint = fatherNameStr;
-    if (!parentBucket.fatherPhoneHint && u.father_phone) parentBucket.fatherPhoneHint = u.father_phone;
-    if (!parentBucket.motherNameHint && motherNameStr) parentBucket.motherNameHint = motherNameStr;
-    if (!parentBucket.motherPhoneHint && u.mother_phone) parentBucket.motherPhoneHint = u.mother_phone;
     const uAddr = extractUserAddress(u);
     if (!parentBucket.addressHint && uAddr) parentBucket.addressHint = uAddr;
 
@@ -646,6 +404,7 @@ function buildAutoFamiliesFromDatabase({
     markPriestLink(parentBucket, u);
   });
 
+  // تجميع القرابات المؤكدة صراحة في الداتابيز (أب، أم، جد، جدة، أخ، أخت، عم، خال، خالة، زوج أخت، حفيد)
   people.forEach(u => {
     const extList = Array.isArray(u.permissions?.extended_relatives) ? u.permissions.extended_relatives : [];
     if (extList.length === 0) return;
@@ -747,12 +506,12 @@ function buildAutoFamiliesFromDatabase({
     const wUser = bucket.wifeUser;
 
     if (hUser) {
-      const hParentKey = resolveParentBucketKeyForUser(hUser);
+      const hParentKey = resolveExplicitParentBucketKey(hUser);
       if (hParentKey && hParentKey !== bKey) {
         addFamilyRelation(
           bKey,
           hParentKey,
-          'الأب / أصل العائلة',
+          'أسرة الوالد',
           bucketTitleMap.get(hParentKey).replace(/^أسرة\s+/, '')
         );
         addFamilyRelation(
@@ -765,18 +524,18 @@ function buildAutoFamiliesFromDatabase({
     }
 
     if (wUser) {
-      const wParentKey = resolveParentBucketKeyForUser(wUser);
+      const wParentKey = resolveExplicitParentBucketKey(wUser);
       if (wParentKey && wParentKey !== bKey) {
         addFamilyRelation(
           bKey,
           wParentKey,
-          'مصاهرة (أسرة والد الزوجة)',
+          'أسرة والد الزوجة',
           bucketTitleMap.get(wParentKey).replace(/^أسرة\s+/, '')
         );
         addFamilyRelation(
           wParentKey,
           bKey,
-          `مصاهرة: زواج الابنة (${getDisplayQuadName(wUser)})`,
+          `زواج الابنة (${getDisplayQuadName(wUser)})`,
           getDisplayQuadName(wUser)
         );
       }
@@ -847,34 +606,14 @@ function buildAutoFamiliesFromDatabase({
     let fatherObj = emptyPerson('متزوج');
     let motherObj = emptyPerson('متزوجة');
     if (rootRef) {
-      const grandFatherName = extractFatherLineageFromQuad(rootRef);
-      const grandFatherUser =
-        (rootRef.father_id && byId.get(rootRef.father_id)) ||
-        findUserByNameOrPhone(grandFatherName, rootRef.father_phone, 'ذكر');
-      const grandMotherUser =
-        (rootRef.mother_id && byId.get(rootRef.mother_id)) ||
-        findUserByNameOrPhone(rootRef.mother_full_name, rootRef.mother_phone, 'أنثى');
+      const explicitFather = rootRef.father_id ? byId.get(rootRef.father_id) : null;
+      const explicitMother = rootRef.mother_id ? byId.get(rootRef.mother_id) : null;
 
-      if (grandFatherUser && grandFatherUser.id !== rootRef.id) {
-        fatherObj = toPersonObjectFromUser(grandFatherUser, 'father', true);
-      } else if (grandFatherName) {
-        fatherObj = {
-          ...emptyPerson('متزوج'),
-          full_name: grandFatherName,
-          phone: rootRef.father_phone || '',
-          marital_status: 'متزوج'
-        };
+      if (explicitFather && explicitFather.id !== rootRef.id) {
+        fatherObj = toPersonObjectFromUser(explicitFather, 'father', true);
       }
-
-      if (grandMotherUser && grandMotherUser.id !== rootRef.id) {
-        motherObj = toPersonObjectFromUser(grandMotherUser, 'mother', true);
-      } else if (rootRef.mother_full_name) {
-        motherObj = {
-          ...emptyPerson('متزوجة'),
-          full_name: rootRef.mother_full_name,
-          phone: rootRef.mother_phone || '',
-          marital_status: 'متزوجة'
-        };
+      if (explicitMother && explicitMother.id !== rootRef.id) {
+        motherObj = toPersonObjectFromUser(explicitMother, 'mother', true);
       }
     }
 
@@ -983,16 +722,15 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   const [userChildren, setUserChildren] = useState([]);
   const [memberSiblings, setMemberSiblings] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [resettingDb, setResettingDb] = useState(false);
 
   const [scopeTab, setScopeTab] = useState('all');
   const [searchQ, setSearchQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
   const [selectedRoleByCandidate, setSelectedRoleByCandidate] = useState({});
-  const [dismissedSuggestions, setDismissedSuggestions] = useState({});
-  const [confirmingUserId, setConfirmingUserId] = useState(null);
   const [editingRelationKey, setEditingRelationKey] = useState(null);
-  const [editingRelationRole, setEditingRelationRole] = useState('العم');
+  const [editingRelationRole, setEditingRelationRole] = useState('الأخ');
 
   const [expandedCards, setExpandedCards] = useState({});
 
@@ -1008,6 +746,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
   const [linkModalFam, setLinkModalFam] = useState(null);
   const [linkSearchQ, setLinkSearchQ] = useState('');
+  const [linkRoleChoice, setLinkRoleChoice] = useState('الأخ');
   const [linkBusy, setLinkBusy] = useState(false);
 
   const toggleCardExpand = (id) => {
@@ -1050,7 +789,59 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     loadData();
   }, [priest?.id]);
 
-  // ضمان وجود وتحديث سجل الأسرة في priest_family_visitations عند أي تأكيد أو تعديل
+  // تصفير روابط القرابات والارتباطات القديمة في الداتابيز لإعادة بنائها بدقة من جديد
+  const handleResetAllRelationsInDatabase = async () => {
+    const firstConfirm = confirm(
+      '⚠️ تنبيه هام: سيتم تصفير كل روابط القرابات والارتباطات العائلية المحفوظة في الداتابيز (القرابات الممتدة، الزوج/الزوجة المربوطين، الأب/الأم/الوالد المربوطين) لتبدأ بإضافتها وتحديد صلة كل شخص من جديد بدقة. هل أنت متأكد؟'
+    );
+    if (!firstConfirm) return;
+
+    const secondConfirm = confirm(
+      'تأكيد أخير: هل تريد مسح الروابط القديمة الآن والبدء من صفحة نظيفة؟ (لن يتم حذف حسابات الأعضاء أنفسهم).'
+    );
+    if (!secondConfirm) return;
+
+    setResettingDb(true);
+    try {
+      const targetUsers = churchUsers.filter(u => u.role !== 'admin' && u.role !== 'priest');
+      for (const u of targetUsers) {
+        const cleanedPermissions = { ...(u.permissions || {}) };
+        delete cleanedPermissions.extended_relatives;
+        delete cleanedPermissions.linked_spouse_id;
+
+        await safeUpdateChurchUser(u.id, {
+          father_id: null,
+          mother_id: null,
+          parent_id: null,
+          spouse_name: null,
+          spouse_phone: null,
+          permissions: cleanedPermissions
+        });
+      }
+
+      if (priest?.id) {
+        await supabase
+          .from('priest_family_visitations')
+          .delete()
+          .eq('priest_id', priest.id);
+      }
+
+      logActivity({
+        user: priest,
+        actionType: 'تصفير_روابط_القرابات_والأسر',
+        targetTable: 'church_users',
+        targetId: priest?.id,
+        description: 'تم تصفير روابط القرابات والأسر القديمة لإعادة تسجيلها وتحديد صلاتها بدقة'
+      });
+
+      await loadData();
+      setExpandedCards({});
+      alert('تم تصفير الروابط القديمة بنجاح ✅ ابدأ الآن بربط كل شخص وتحديد صلته (أب، أم، جد، أخ، خال، عم، زوج...) بدقة.');
+    } finally {
+      setResettingDb(false);
+    }
+  };
+
   const upsertFamilyVisitationRecord = async (fam, extraPatch = {}) => {
     if (!priest?.id || !fam) return null;
     const basePayload = {
@@ -1091,53 +882,8 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     return data || null;
   };
 
-  const findKinshipCandidatesForFamily = useMemo(() => {
-    const people = churchUsers.filter(u => u.role !== 'admin' && u.role !== 'priest');
-    const byId = new Map(people.map(p => [p.id, p]));
-
-    return (fam) => {
-      const linkedSet = new Set(fam.linkedUserIds || []);
-      const dismissedSet = new Set(dismissedSuggestions[fam.id] || []);
-
-      const anchors = [
-        { name: fam.husband?.full_name, user: fam.husband?.user_id ? byId.get(fam.husband.user_id) : null },
-        { name: fam.wife?.full_name, user: fam.wife?.user_id ? byId.get(fam.wife.user_id) : null },
-        { name: fam.father?.full_name, user: fam.father?.user_id ? byId.get(fam.father.user_id) : null },
-        { name: fam.mother?.full_name, user: fam.mother?.user_id ? byId.get(fam.mother.user_id) : null },
-        ...(Array.isArray(fam.children)
-          ? fam.children.map(c => ({ name: c.full_name, user: c.user_id ? byId.get(c.user_id) : null }))
-          : [])
-      ].filter(a => a.name);
-
-      if (anchors.length === 0) return [];
-
-      const candidates = [];
-      for (const u of people) {
-        if (linkedSet.has(u.id) || dismissedSet.has(u.id)) continue;
-
-        let bestAnalysis = { score: 0, inferredRole: 'العم', reasons: [], matchedParts: [] };
-        for (const anc of anchors) {
-          const res = analyzeQuadKinship(anc.name, anc.user, u);
-          if (res.score > bestAnalysis.score) {
-            bestAnalysis = res;
-          }
-        }
-
-        if (bestAnalysis.score >= 35) {
-          candidates.push({
-            user: u,
-            fullName: getDisplayQuadName(u),
-            ...bestAnalysis
-          });
-        }
-      }
-
-      return candidates.sort((a, b) => b.score - a.score).slice(0, 6);
-    };
-  }, [churchUsers, dismissedSuggestions]);
-
   const unifiedFamilies = useMemo(() => {
-    const autoList = buildAutoFamiliesFromDatabase({
+    const autoList = buildExplicitFamiliesFromDatabase({
       churchUsers,
       userChildren,
       memberSiblings,
@@ -1270,20 +1016,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     });
   }, [churchUsers, userChildren, memberSiblings, savedRecords, priest?.id, priest?.full_name]);
 
-  const quadSearchMatches = useMemo(() => {
-    const q = searchQ.trim();
-    if (getNameTokens(q).length < 2) return [];
-    const people = churchUsers.filter(u => u.role !== 'admin' && u.role !== 'priest');
-    return people
-      .map(u => {
-        const analysis = analyzeQuadKinship(q, null, u);
-        return { user: u, fullName: getDisplayQuadName(u), ...analysis };
-      })
-      .filter(x => x.score >= 35)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 8);
-  }, [searchQ, churchUsers]);
-
   const userFamilyTitleLookup = useMemo(() => {
     const map = new Map();
     unifiedFamilies.forEach(f => {
@@ -1293,7 +1025,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     return map;
   }, [unifiedFamilies]);
 
-  const handleLinkPersonInDatabase = async (fam, targetUser, relationType, kinshipLabel = '') => {
+  const handleLinkPersonInDatabase = async (fam, targetUser, kinshipLabel = 'الأخ') => {
     if (!fam || !targetUser) return;
     setLinkBusy(true);
     try {
@@ -1306,6 +1038,12 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
       const primaryName = getDisplayQuadName(primaryUser);
       const targetName = getDisplayQuadName(targetUser);
+
+      let relationType = 'extended';
+      if (kinshipLabel === 'الأب' || kinshipLabel === 'الجد') relationType = 'father';
+      else if (kinshipLabel === 'الأم' || kinshipLabel === 'الجدة') relationType = 'mother';
+      else if (kinshipLabel === 'الابن' || kinshipLabel === 'الابنة' || kinshipLabel === 'الحفيد' || kinshipLabel === 'الحفيدة') relationType = 'child';
+      else if (kinshipLabel === 'الزوج' || kinshipLabel === 'الزوجة') relationType = 'spouse';
 
       if (relationType === 'spouse') {
         const primaryIsFemale = primaryUser.gender === 'أنثى';
@@ -1380,70 +1118,70 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         }
 
         await safeUpdateChurchUser(targetUser.id, patch);
-      } else {
-        const primaryRelatives = Array.isArray(primaryUser.permissions?.extended_relatives)
-          ? primaryUser.permissions.extended_relatives
-          : [];
-        const nextPrimaryRelatives = [
-          ...primaryRelatives.filter(r => r.user_id !== targetUser.id),
-          {
-            user_id: targetUser.id,
-            full_name: targetName,
-            kinship_role: kinshipLabel || 'قريب عائلة',
-            phone: targetUser.phone || ''
-          }
-        ];
-
-        const targetRelatives = Array.isArray(targetUser.permissions?.extended_relatives)
-          ? targetUser.permissions.extended_relatives
-          : [];
-        const reverseRole = REVERSE_KINSHIP_MAP[kinshipLabel] || `قريب (${primaryName})`;
-        const nextTargetRelatives = [
-          ...targetRelatives.filter(r => r.user_id !== primaryUser.id),
-          {
-            user_id: primaryUser.id,
-            full_name: primaryName,
-            kinship_role: reverseRole,
-            phone: primaryUser.phone || ''
-          }
-        ];
-
-        await Promise.all([
-          safeUpdateChurchUser(primaryUser.id, {
-            permissions: {
-              ...(primaryUser.permissions || {}),
-              extended_relatives: nextPrimaryRelatives
-            }
-          }),
-          safeUpdateChurchUser(targetUser.id, {
-            permissions: {
-              ...(targetUser.permissions || {}),
-              extended_relatives: nextTargetRelatives
-            }
-          })
-        ]);
       }
+
+      // تسجيل القرابة بدقة في القرابات المرتبطة للطرفين (أخ، أخت، عم، خال، خالة، زوج أخت، أو أي صلة أخرى)
+      const primaryRelatives = Array.isArray(primaryUser.permissions?.extended_relatives)
+        ? primaryUser.permissions.extended_relatives
+        : [];
+      const nextPrimaryRelatives = [
+        ...primaryRelatives.filter(r => r.user_id !== targetUser.id),
+        {
+          user_id: targetUser.id,
+          full_name: targetName,
+          kinship_role: kinshipLabel,
+          phone: targetUser.phone || ''
+        }
+      ];
+
+      const targetRelatives = Array.isArray(targetUser.permissions?.extended_relatives)
+        ? targetUser.permissions.extended_relatives
+        : [];
+      const reverseRole = REVERSE_KINSHIP_MAP[kinshipLabel] || `قريب (${primaryName})`;
+      const nextTargetRelatives = [
+        ...targetRelatives.filter(r => r.user_id !== primaryUser.id),
+        {
+          user_id: primaryUser.id,
+          full_name: primaryName,
+          kinship_role: reverseRole,
+          phone: primaryUser.phone || ''
+        }
+      ];
+
+      await Promise.all([
+        safeUpdateChurchUser(primaryUser.id, {
+          permissions: {
+            ...(primaryUser.permissions || {}),
+            extended_relatives: nextPrimaryRelatives
+          }
+        }),
+        safeUpdateChurchUser(targetUser.id, {
+          permissions: {
+            ...(targetUser.permissions || {}),
+            extended_relatives: nextTargetRelatives
+          }
+        })
+      ]);
 
       await upsertFamilyVisitationRecord(fam);
 
       logActivity({
         user: priest,
-        actionType: 'تعديل_وتحديث_داتابيز_الأسرة',
+        actionType: 'تحديد_وتحديث_صلة_قرابة',
         targetTable: 'church_users',
         targetId: primaryUser.id,
-        description: `تعديل وتحديث الداتابيز: تأكيد صلة (${kinshipLabel || relationType}) لـ (${targetName}) مع أسرة (${fam.family_title})`
+        description: `تحديث الداتابيز: ربط (${targetName}) بصفة (${kinshipLabel}) مع أسرة (${fam.family_title})`
       });
 
       await loadData();
       setLinkModalFam(null);
       setLinkSearchQ('');
-      alert(`تم تعديل وتحديث الداتابيز بنجاح (${kinshipLabel || 'تبع العيلة'}) ✅`);
+      alert(`تم حفظ صلة (${kinshipLabel}) لـ (${targetName}) في الداتابيز بنجاح ✅`);
     } finally {
       setLinkBusy(false);
     }
   };
 
-  // تعديل صلة قرابة مؤكدة مباشرة من الكارت وتحديث الداتابيز
   const handleUpdateConfirmedRelation = async (fam, extItem, nextRole) => {
     if (!fam || !extItem?.user_id) return;
     const primaryUserId = extItem.anchor_user_id || fam.husband?.user_id || fam.wife?.user_id;
@@ -1480,7 +1218,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     setEditingRelationKey(null);
   };
 
-  // حذف صلة قرابة مؤكدة من الداتابيز
   const handleRemoveConfirmedRelation = async (fam, extItem) => {
     if (!fam || !extItem?.user_id) return;
     if (!confirm(`إزالة صلة القرابة (${extItem.full_name}) من الداتابيز؟`)) return;
@@ -1515,35 +1252,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
     await loadData();
     setEditingRelationKey(null);
-  };
-
-  const handleConfirmKinshipCandidate = async (fam, candidate) => {
-    if (!fam || !candidate) return;
-    setConfirmingUserId(candidate.user.id);
-    try {
-      const chosenRole =
-        selectedRoleByCandidate[`${fam.id}:${candidate.user.id}`] ||
-        candidate.inferredRole ||
-        'العم';
-
-      let relationType = 'extended';
-      if (chosenRole === 'الأب' || chosenRole === 'الجد') relationType = 'father';
-      else if (chosenRole === 'الأم' || chosenRole === 'الجدة') relationType = 'mother';
-      else if (chosenRole === 'الابن' || chosenRole === 'الابنة' || chosenRole === 'الحفيد' || chosenRole === 'الحفيدة') relationType = 'child';
-      else if (chosenRole === 'الزوج' || chosenRole === 'الزوجة') relationType = 'spouse';
-
-      await handleLinkPersonInDatabase(fam, candidate.user, relationType, chosenRole);
-    } finally {
-      setConfirmingUserId(null);
-    }
-  };
-
-  const handleDismissSuggestion = (famId, userId) => {
-    setDismissedSuggestions(prev => {
-      const existing = new Set(prev[famId] || []);
-      existing.add(userId);
-      return { ...prev, [famId]: Array.from(existing) };
-    });
   };
 
   const handleRemoveChildItem = async (idx) => {
@@ -1714,7 +1422,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       setShowForm(false);
       setEditingSavedId(null);
       setForm(emptyFamilyForm);
-      alert('تم التعديل وتحديث الداتابيز بنجاح ✅');
+      alert('تم الحفظ وتحديث الداتابيز بنجاح ✅');
     } finally {
       setSaving(false);
     }
@@ -2035,14 +1743,22 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       <div className="bg-white p-4 rounded-3xl border border-gray-200 shadow-2xs flex flex-wrap justify-between items-center gap-3 print:hidden">
         <div>
           <h3 className="text-sm sm:text-base font-black text-[#7a1c24] flex items-center gap-1.5">
-            <Users size={18} /> سجل افتقاد أسر ومخدومي الأب الكاهن ({unifiedFamilies.length} أسرة متصلة)
+            <Users size={18} /> سجل افتقاد أسر ومخدومي الأب الكاهن ({unifiedFamilies.length} أسرة)
           </h3>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            تحليل الاسم الرباعي (1-2-3-4) وتحديد القرابة وتحديث قاعدة البيانات فوراً عند التأكيد أو التعديل
+            تحديد صريح ودقيق لكل صلة قرابة (أب، أم، جد، أخ، أخت، خال، عم، زوج...) مع حفظ وتحديث مباشر في الداتابيز
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={resettingDb}
+            onClick={handleResetAllRelationsInDatabase}
+            className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-900 border border-rose-300 rounded-xl font-black flex items-center gap-1 cursor-pointer"
+          >
+            <RotateCcw size={14} /> {resettingDb ? 'جاري التصفير...' : 'تصفير الروابط والبدء من جديد'}
+          </button>
           <button
             type="button"
             onClick={loadData}
@@ -2087,7 +1803,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               scopeTab === 'all' ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-800'
             }`}
           >
-            🔗 كل الأسر المترابطة ({unifiedFamilies.length})
+            🔗 كل الأسر ({unifiedFamilies.length})
           </button>
           <button
             type="button"
@@ -2113,7 +1829,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           <div className="relative flex-1">
             <Search size={15} className="absolute right-3 top-2.5 text-gray-400" />
             <input
-              placeholder="بحث بالاسم الرباعي (1-2-3-4)، الزوج، الزوجة، الوالد، الوالدة، الأبناء، أو العنوان..."
+              placeholder="بحث بالاسم، الزوج، الزوجة، الوالد، الوالدة، الأبناء، أو العنوان..."
               className="w-full pr-9 pl-3 py-2 bg-[#fbfaf7] border rounded-xl outline-none focus:border-[#7a1c24]"
               value={searchQ}
               onChange={e => setSearchQ(e.target.value)}
@@ -2139,65 +1855,11 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             ))}
           </select>
         </div>
-
-        {quadSearchMatches.length > 0 && (
-          <div className="bg-amber-50/80 border border-amber-300 rounded-2xl p-3 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <strong className="text-[11px] font-black text-amber-950 flex items-center gap-1">
-                <Sparkles size={14} className="text-amber-700" />
-                تحليل الاسم الرباعي والقرابات من الداتابيز لـ "{searchQ}":
-              </strong>
-              <span className="text-[10px] text-amber-800">اختر القرابة وأكد لتحديث الداتابيز فوراً</span>
-            </div>
-            <div className="grid sm:grid-cols-2 gap-2">
-              {quadSearchMatches.map(m => {
-                const targetFam = filteredRecords[0] || unifiedFamilies[0];
-                const roleKey = targetFam ? `${targetFam.id}:${m.user.id}` : `search:${m.user.id}`;
-                const chosenRole = selectedRoleByCandidate[roleKey] || m.inferredRole || 'العم';
-
-                return (
-                  <div key={m.user.id} className="bg-white border border-amber-200 rounded-xl p-2.5 space-y-1.5">
-                    <div className="flex justify-between items-start gap-2">
-                      <div>
-                        <strong className="text-gray-900 block">{m.fullName}</strong>
-                        <span className="text-[10px] text-amber-900 font-bold block">
-                          قرابة محتملة: {m.inferredRole || 'قريب'} {m.user.phone ? `• 📞 ${m.user.phone}` : ''}
-                        </span>
-                        {m.reasons?.[0] && (
-                          <span className="text-[10px] text-gray-500 block">{m.reasons[0]}</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {targetFam && (
-                      <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-gray-100">
-                        <select
-                          className="p-1 border rounded-lg bg-[#fbfaf7] text-[10px] font-black"
-                          value={chosenRole}
-                          onChange={e => setSelectedRoleByCandidate(prev => ({ ...prev, [roleKey]: e.target.value }))}
-                        >
-                          {KINSHIP_ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => handleConfirmKinshipCandidate(targetFam, { ...m, inferredRole: chosenRole })}
-                          className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-[10px] font-black inline-flex items-center gap-1 cursor-pointer"
-                        >
-                          <Check size={11} /> أيوه تبع العيلة ({chosenRole})
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="print:hidden">
         {loading ? (
-          <div className="bg-white p-8 rounded-3xl border text-center text-gray-500 font-bold">جاري ربط وتجميع بيانات الأسر من الداتابيز...</div>
+          <div className="bg-white p-8 rounded-3xl border text-center text-gray-500 font-bold">جاري تحميل بيانات الأسر من الداتابيز...</div>
         ) : filteredRecords.length === 0 ? (
           <div className="bg-white p-8 rounded-3xl border border-dashed text-center text-gray-400 font-bold">
             لا توجد أسر مطابقة لخيار البحث الحالي.
@@ -2210,7 +1872,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               const visits = Array.isArray(fam.visitations_log) ? fam.visitations_log : [];
               const connected = Array.isArray(fam.connectedFamilies) ? fam.connectedFamilies : [];
               const confirmedExt = Array.isArray(fam.confirmedExtended) ? fam.confirmedExtended : [];
-              const suggestions = findKinshipCandidatesForFamily(fam);
               const primaryPhone = fam.phone || fam.husband?.phone || fam.wife?.phone || '';
               const displayAddress = fam.address || fam.husband?.address || fam.wife?.address || 'غير مسجل';
 
@@ -2240,14 +1901,14 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                         <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-900 rounded text-[9px] font-bold">
                           🕊️ {visits.length}
                         </span>
-                        {connected.length > 0 && (
-                          <span className="px-1.5 py-0.5 bg-purple-100 text-purple-950 rounded text-[9px] font-black">
-                            🔗 {connected.length} صلة
+                        {confirmedExt.length > 0 && (
+                          <span className="px-1.5 py-0.5 bg-sky-100 text-sky-950 rounded text-[9px] font-black">
+                            <UserCheck size={10} className="inline ml-0.5" /> {confirmedExt.length} صلة محددة
                           </span>
                         )}
-                        {suggestions.length > 0 && (
-                          <span className="px-1.5 py-0.5 bg-sky-100 text-sky-950 rounded text-[9px] font-black">
-                            ✨ {suggestions.length} مرشح قرابة
+                        {connected.length > 0 && (
+                          <span className="px-1.5 py-0.5 bg-purple-100 text-purple-950 rounded text-[9px] font-black">
+                            🔗 {connected.length} ارتباط
                           </span>
                         )}
                       </div>
@@ -2274,75 +1935,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                       </span>
                     </div>
                   </div>
-
-                  {suggestions.length > 0 && (
-                    <div
-                      onClick={e => e.stopPropagation()}
-                      className="bg-sky-50/80 border border-sky-200 rounded-xl p-2.5 space-y-1.5"
-                    >
-                      <div className="text-[10px] font-black text-sky-950 flex items-center gap-1">
-                        <Sparkles size={12} className="text-sky-700" />
-                        <span>مطابقة الاسم الرباعي — هل ده تبع العيلة ولا لأ؟ (تحديث مباشر في الداتابيز)</span>
-                      </div>
-                      <div className="space-y-1.5">
-                        {suggestions.map(sug => {
-                          const roleKey = `${fam.id}:${sug.user.id}`;
-                          const chosenRole = selectedRoleByCandidate[roleKey] || sug.inferredRole || 'العم';
-
-                          return (
-                            <div
-                              key={sug.user.id}
-                              className="bg-white border border-sky-200 rounded-lg p-2 space-y-1.5 text-[11px]"
-                            >
-                              <div className="flex justify-between items-start gap-2">
-                                <div>
-                                  <strong className="text-gray-900">{sug.fullName}</strong>
-                                  <span className="block text-[10px] text-sky-900 font-bold">
-                                    قرابة محتملة: {sug.inferredRole || 'قريب'}
-                                    {sug.user.phone ? ` • 📞 ${sug.user.phone}` : ''}
-                                  </span>
-                                  {sug.reasons?.[0] && (
-                                    <span className="block text-[10px] text-gray-500">{sug.reasons[0]}</span>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div className="flex flex-wrap items-center gap-1">
-                                <select
-                                  className="p-1 border rounded-lg bg-[#fbfaf7] text-[10px] font-black"
-                                  value={chosenRole}
-                                  onChange={e =>
-                                    setSelectedRoleByCandidate(prev => ({ ...prev, [roleKey]: e.target.value }))
-                                  }
-                                >
-                                  {KINSHIP_ROLE_OPTIONS.map(r => (
-                                    <option key={r} value={r}>{r}</option>
-                                  ))}
-                                </select>
-                                <button
-                                  type="button"
-                                  disabled={confirmingUserId === sug.user.id}
-                                  onClick={() =>
-                                    handleConfirmKinshipCandidate(fam, { ...sug, inferredRole: chosenRole })
-                                  }
-                                  className="px-2 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-[10px] font-black inline-flex items-center gap-0.5 cursor-pointer"
-                                >
-                                  <Check size={11} /> أيوه تبع العيلة
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDismissSuggestion(fam.id, sug.user.id)}
-                                  className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg text-[10px] font-black inline-flex items-center gap-0.5 cursor-pointer"
-                                >
-                                  <Ban size={11} /> لأ مش تبعها
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
 
                   {isExpanded && (
                     <div className="pt-3 border-t border-gray-100 space-y-3">
@@ -2375,10 +1967,14 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                           )}
                           <button
                             type="button"
-                            onClick={() => { setLinkModalFam(fam); setLinkSearchQ(''); }}
+                            onClick={() => {
+                              setLinkModalFam(fam);
+                              setLinkSearchQ('');
+                              setLinkRoleChoice('الأخ');
+                            }}
                             className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-950 border border-indigo-200 rounded-xl font-black inline-flex items-center gap-1 cursor-pointer"
                           >
-                            <Link2 size={13} /> ربط أفراد وقرابات
+                            <Link2 size={13} /> ربط شخص وتحديد صلته
                           </button>
                           <button
                             type="button"
@@ -2409,7 +2005,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                       {confirmedExt.length > 0 && (
                         <div className="bg-emerald-50/70 p-2.5 rounded-2xl border border-emerald-200 space-y-1.5">
                           <strong className="text-[10px] text-emerald-950 block">
-                            ✅ أقارب وقرابات مؤكدة ومحدثة في الداتابيز ({confirmedExt.length}):
+                            ✅ القرابات والصلات المحددة في الداتابيز ({confirmedExt.length}):
                           </strong>
                           <div className="flex flex-wrap gap-1.5">
                             {confirmedExt.map((ext, idx) => {
@@ -2457,11 +2053,11 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                                             type="button"
                                             onClick={() => {
                                               setEditingRelationKey(relKey);
-                                              setEditingRelationRole(ext.kinship_role || 'العم');
+                                              setEditingRelationRole(ext.kinship_role || 'الأخ');
                                             }}
                                             className="px-1.5 py-0.5 bg-amber-100 text-amber-950 rounded text-[9px] cursor-pointer"
                                           >
-                                            تعديل
+                                            تعديل الصلة
                                           </button>
                                           <button
                                             type="button"
@@ -2484,7 +2080,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                       {connected.length > 0 && (
                         <div className="bg-purple-50/60 p-2.5 rounded-2xl border border-purple-200 space-y-1.5">
                           <strong className="text-[10px] text-purple-950 flex items-center gap-1">
-                            <Network size={12} /> أسر متصلة بالنسب والمصاهرة ({connected.length}):
+                            <Network size={12} /> أسر مرتبطة صراحة ({connected.length}):
                           </strong>
                           <div className="flex flex-wrap gap-1.5">
                             {connected.map(rel => (
@@ -2640,10 +2236,10 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             <div className="flex justify-between items-center border-b pb-2.5">
               <div>
                 <h3 className="text-sm sm:text-base font-black text-[#7a1c24]">
-                  🔗 ربط أفراد وقرابات أسرة: {linkModalFam.family_title}
+                  🔗 ربط شخص وتحديد صلته مع أسرة: {linkModalFam.family_title}
                 </h3>
                 <p className="text-[11px] text-gray-500 font-normal mt-0.5">
-                  اربط الشخص وتأكد من صلة القرابة ليتم تعديل وتحديث الداتابيز مباشرة.
+                  اختر صلة الشخص (أخ، أخت، خال، عم، جد، أب، أم، زوج...) ثم اضغط تأكيد ليُسجَّل في الداتابيز بدقة.
                 </p>
               </div>
               <button type="button" onClick={() => setLinkModalFam(null)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer">
@@ -2651,15 +2247,24 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               </button>
             </div>
 
-            <div className="relative">
-              <Search size={15} className="absolute right-3 top-2.5 text-gray-400" />
-              <input
-                autoFocus
-                placeholder="ابحث بالاسم أو رقم الموبايل..."
-                className="w-full pr-9 pl-3 py-2 border rounded-xl bg-[#fbfaf7]"
-                value={linkSearchQ}
-                onChange={e => setLinkSearchQ(e.target.value)}
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="sm:col-span-2 relative">
+                <Search size={15} className="absolute right-3 top-2.5 text-gray-400" />
+                <input
+                  autoFocus
+                  placeholder="ابحث بالاسم أو رقم الموبايل..."
+                  className="w-full pr-9 pl-3 py-2 border rounded-xl bg-[#fbfaf7]"
+                  value={linkSearchQ}
+                  onChange={e => setLinkSearchQ(e.target.value)}
+                />
+              </div>
+              <select
+                className="p-2 border rounded-xl bg-amber-50 text-amber-950 font-black"
+                value={linkRoleChoice}
+                onChange={e => setLinkRoleChoice(e.target.value)}
+              >
+                {KINSHIP_ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
             </div>
 
             <div className="space-y-2 max-h-80 overflow-y-auto">
@@ -2668,10 +2273,8 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               ) : (
                 linkModalCandidates.map(u => {
                   const existingFamTitle = userFamilyTitleLookup.get(u.id);
-                  const anchorName = linkModalFam.husband?.full_name || linkModalFam.wife?.full_name || '';
-                  const guessed = analyzeQuadKinship(anchorName, null, u).inferredRole || 'العم';
                   const rk = `modal:${u.id}`;
-                  const chosenRole = selectedRoleByCandidate[rk] || guessed;
+                  const chosenRole = selectedRoleByCandidate[rk] || linkRoleChoice;
 
                   return (
                     <div key={u.id} className="p-3 bg-[#fbfaf7] border rounded-2xl flex flex-wrap justify-between items-center gap-2">
@@ -2682,7 +2285,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                         </span>
                         {existingFamTitle && (
                           <span className="mt-1 inline-block px-2 py-0.5 bg-purple-100 text-purple-950 rounded text-[10px] font-black">
-                            🏠 كارت أسرته الحالي: {existingFamTitle}
+                            🏠 أسرته الحالية: {existingFamTitle}
                           </span>
                         )}
                       </div>
@@ -2697,17 +2300,10 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                         <button
                           type="button"
                           disabled={linkBusy}
-                          onClick={() => {
-                            let relType = 'extended';
-                            if (chosenRole === 'الأب' || chosenRole === 'الجد') relType = 'father';
-                            else if (chosenRole === 'الأم' || chosenRole === 'الجدة') relType = 'mother';
-                            else if (chosenRole === 'الابن' || chosenRole === 'الابنة' || chosenRole === 'الحفيد' || chosenRole === 'الحفيدة') relType = 'child';
-                            else if (chosenRole === 'الزوج' || chosenRole === 'الزوجة') relType = 'spouse';
-                            handleLinkPersonInDatabase(linkModalFam, u, relType, chosenRole);
-                          }}
+                          onClick={() => handleLinkPersonInDatabase(linkModalFam, u, chosenRole)}
                           className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-[11px] font-black cursor-pointer"
                         >
-                          ✅ تأكيد وتحديث ({chosenRole})
+                          ✅ تأكيد ({chosenRole})
                         </button>
                       </div>
                     </div>
@@ -2724,7 +2320,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           <div className="bg-white rounded-3xl w-full max-w-4xl p-5 sm:p-6 space-y-4 font-bold max-h-[92vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="text-sm sm:text-base font-black text-[#7a1c24]">
-                {editingSavedId ? '✏️ تعديل ملف الأسرة وتحديث قاعدة البيانات' : '➕ حفظ / تعديل بيانات الأسرة وتحديث قاعدة البيانات'}
+                {editingSavedId ? '✏️ تعديل ملف الأسرة وتحديث قاعدة البيانات' : '➕ إضافة / تعديل بيانات الأسرة وتحديث قاعدة البيانات'}
               </h3>
               <button type="button" onClick={() => setShowForm(false)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer">
                 <X size={18} />
@@ -2733,7 +2329,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
             <div className="bg-blue-50/60 p-3 rounded-2xl border border-blue-200 space-y-2">
               <label className="text-[11px] text-blue-950 font-black block">
-                🔍 ربط فرد إضافي من قاعدة بيانات الكنيسة بهذه الأسرة:
+                🔍 ربط فرد من قاعدة بيانات الكنيسة بهذه الأسرة:
               </label>
               <input
                 placeholder="ابحث بالاسم أو الموبايل لربط الزوج / الزوجة / الوالد / الوالدة..."
@@ -2761,7 +2357,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             <form onSubmit={handleSaveFamily} className="space-y-4">
               <div className="bg-amber-50/40 p-3.5 rounded-2xl border border-amber-200 space-y-2.5">
                 <strong className="text-xs font-black text-amber-950 flex items-center gap-1">
-                  <Heart size={14} /> البيانات العامة والعنوان والحالة الأسرية (تُحدَّث تلقائياً في الداتابيز)
+                  <Heart size={14} /> البيانات العامة والعنوان والحالة الأسرية
                 </strong>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                   <input
@@ -2922,7 +2518,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
             {Array.isArray(selectedFamily.connectedFamilies) && selectedFamily.connectedFamilies.length > 0 && (
               <div className="bg-purple-50/60 p-3 rounded-2xl border border-purple-200 space-y-1.5">
-                <strong className="text-xs text-purple-950 block">🔗 الأسر المتصلة بالنسب والمصاهرة:</strong>
+                <strong className="text-xs text-purple-950 block">🔗 الأسر المرتبطة صراحة:</strong>
                 <div className="flex flex-wrap gap-1.5">
                   {selectedFamily.connectedFamilies.map(rel => (
                     <span
