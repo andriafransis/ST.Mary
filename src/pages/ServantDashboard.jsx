@@ -13,6 +13,7 @@ import { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/Serv
 import MonthlyAnalyticsAndRewards from '../components/MonthlyAnalyticsAndRewards';
 import PriestInvitationModal from '../components/priest/PriestInvitationModal';
 import InvitationScannerModal from '../components/priest/InvitationScannerModal';
+import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
 
 const STAGE_OPTIONS = [
   'حضانة',
@@ -208,6 +209,8 @@ export default function ServantDashboard({
   const [tripSubTab, setTripSubTab] = useState('my_service'); // 'my_service' | 'general'
 
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [receivedInvitesCount, setReceivedInvitesCount] = useState(0);
+  const [liveInviteToast, setLiveInviteToast] = useState('');
 
   const [noteTags, setNoteTags] = useState(() => {
     try {
@@ -397,6 +400,44 @@ export default function ServantDashboard({
     };
   }, []);
 
+  useEffect(() => {
+    if (!servant?.id || !supabase || typeof supabase.channel !== 'function') return;
+
+    const channel = supabase
+      .channel(`servant-invites-alert-${servant.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'church_invitations'
+        },
+        (payload) => {
+          const row = payload.new || payload.old;
+          const matchesServant =
+            row?.recipient_user_id === servant.id ||
+            (servant.phone && row?.recipient_phone === servant.phone);
+          if (!matchesServant) return;
+
+          if (payload.eventType === 'INSERT' && payload.new) {
+            const tierLabel = payload.new.invite_tier === 'vip' ? 'VIP' : 'عامة';
+            setLiveInviteToast(
+              `وصلتك دعوة ${tierLabel}: ${payload.new.event_title}${payload.new.seat_or_zone ? ` (${payload.new.seat_or_zone})` : ''} — كود: ${payload.new.qr_token}`
+            );
+          } else if (payload.eventType === 'UPDATE' && payload.new?.status === 'checked_in') {
+            setLiveInviteToast(`تم مسح QR الدعوة (${payload.new.event_title}) وتسجيل دخولك.`);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (typeof supabase.removeChannel === 'function') {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [servant?.id, servant?.phone]);
+
   const triggerMemberPhotoCapture = (member) => {
     if (!member?.id) return;
     pendingPhotoMemberRef.current = member;
@@ -543,7 +584,6 @@ export default function ServantDashboard({
     ...localGroups.map(g => [g.group_name, g])
   ]).values()];
 
-  // يظهر فقط لمن لديه ارتباط أو بند أو صلاحية الكشافة
   const canScanInvitations = useMemo(
     () => isScoutServant(servant, localServices, localGroups),
     [servant, localServices, localGroups]
@@ -1462,6 +1502,7 @@ export default function ServantDashboard({
     { id: 'attendance', label: '📋 تسجيل الحضور الفوري', badge: scopeMembers.length },
     { id: 'followup', label: '⚠️ افتقاد وغياب', badge: followUpMembers.length },
     { id: 'cases', label: '🤝 المتابعة وملاحظات الحالة', badge: caseTrackingMembers.length },
+    { id: 'my_invites', label: 'دعواتي QR', badge: receivedInvitesCount },
     { id: 'trips', label: '🚌 الرحلات', badge: myServiceTripsForServant.length + generalTripsForServant.length },
     { id: 'analytics', label: '📊 تحليلات ومكافآت الشهر' },
     { id: 'birthdays', label: `🎂 أعياد الميلاد (${activeBirthdayList.length})` },
@@ -1470,6 +1511,28 @@ export default function ServantDashboard({
 
   return (
     <div className="space-y-3 text-xs" dir="rtl">
+      {liveInviteToast && (
+        <div className="bg-emerald-50 border-2 border-emerald-400 p-3 rounded-2xl flex items-center justify-between gap-2 text-emerald-950 font-black">
+          <span>{liveInviteToast}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setActiveTab('my_invites')}
+              className="px-3 py-1 bg-emerald-700 text-white rounded-xl cursor-pointer"
+            >
+              عرض الـ QR
+            </button>
+            <button
+              type="button"
+              onClick={() => setLiveInviteToast('')}
+              className="text-emerald-800 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       <input
         ref={cameraInputRef}
         type="file"
@@ -1950,6 +2013,13 @@ export default function ServantDashboard({
       )}
 
       <div ref={scrollBoxRef} className="max-h-[calc(100vh-270px)] overflow-y-auto pr-1 space-y-3">
+        {activeTab === 'my_invites' && (
+          <ReceivedInvitationsSection
+            currentUser={servant}
+            onCountChange={setReceivedInvitesCount}
+          />
+        )}
+
         {activeTab === 'trips' && (
           <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3.5">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
