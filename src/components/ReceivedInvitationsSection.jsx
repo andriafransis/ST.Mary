@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import QRCode from 'qrcode';
 import { supabase } from '../lib/supabase';
 import {
   Ticket,
@@ -9,7 +10,10 @@ import {
   CheckCircle2,
   RefreshCw,
   BellRing,
-  ScanLine
+  ScanLine,
+  Copy,
+  Check,
+  Download
 } from 'lucide-react';
 
 function normalizeArabicName(value = '') {
@@ -41,12 +45,10 @@ function isInvitationStrictlyMine(row, currentUser) {
   const userId = String(currentUser.id || '').trim();
   const rowRecipientId = String(row.recipient_user_id || '').trim();
 
-  // إذا كانت الدعوة مرتبطة بـ recipient_user_id محدد، يجب أن تطابقه بالضبط ولا تظهر لغيره
   if (rowRecipientId) {
     return Boolean(userId) && rowRecipientId === userId;
   }
 
-  // عند غياب recipient_user_id، نطابق رقم التليفون الموحد أو الاسم الكامل بدقة فقط
   const userPhones = [
     currentUser.phone,
     currentUser.father_phone,
@@ -69,91 +71,130 @@ function isInvitationStrictlyMine(row, currentUser) {
   return false;
 }
 
-function QrCodeBox({ value, size = 88 }) {
-  const canvasRef = useRef(null);
+export function buildInvitationQrPayload(inv = {}) {
+  const token = String(inv.qr_token || inv.code || inv.id || '').trim();
+  return JSON.stringify({
+    v: 1,
+    type: 'church_invitation',
+    attendance_mode: 'check_in',
+    token,
+    recipient_name: inv.recipient_name || '',
+    role_or_title: inv.recipient_role || inv.recipient_type || 'مدعو',
+    event_title: inv.event_title || '',
+    event_type: inv.event_type || '',
+    event_date: inv.event_date || '',
+    event_time: inv.event_time || '',
+    tier: inv.invite_tier === 'vip' ? 'vip' : 'general',
+    seat_or_zone: inv.seat_or_zone || inv.location || '',
+    status: inv.status || 'issued'
+  });
+}
+
+function RealQrCodeBox({ invite, size = 128 }) {
+  const [qrUrl, setQrUrl] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const token = String(invite?.qr_token || '').trim();
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !value) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    let active = true;
+    const payload = buildInvitationQrPayload(invite);
+    if (!payload || !token) {
+      setQrUrl('');
+      return;
+    }
 
-    const modules = 21;
-    const margin = 2;
-    const total = modules + margin * 2;
-    const cell = Math.floor(size / total);
-    const actualSize = cell * total;
-
-    canvas.width = actualSize;
-    canvas.height = actualSize;
-
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, actualSize, actualSize);
-
-    const grid = Array.from({ length: modules }, () => Array(modules).fill(false));
-    const reserved = Array.from({ length: modules }, () => Array(modules).fill(false));
-
-    const drawFinder = (r0, c0) => {
-      for (let r = -1; r <= 7; r++) {
-        for (let c = -1; c <= 7; c++) {
-          const rr = r0 + r;
-          const cc = c0 + c;
-          if (rr < 0 || rr >= modules || cc < 0 || cc >= modules) continue;
-          reserved[rr][cc] = true;
-          const inBox = r >= 0 && r <= 6 && c >= 0 && c <= 6;
-          const isBorder = r === 0 || r === 6 || c === 0 || c === 6;
-          const isCenter = r >= 2 && r <= 4 && c >= 2 && c <= 4;
-          grid[rr][cc] = inBox && (isBorder || isCenter);
-        }
+    QRCode.toDataURL(payload, {
+      errorCorrectionLevel: 'H',
+      margin: 3,
+      width: Math.max(280, size * 2),
+      color: {
+        dark: '#0f172a',
+        light: '#ffffff'
       }
+    })
+      .then((url) => {
+        if (active) setQrUrl(url);
+      })
+      .catch(() => {
+        if (active) setQrUrl('');
+      });
+
+    return () => {
+      active = false;
     };
+  }, [
+    token,
+    size,
+    invite?.recipient_name,
+    invite?.recipient_role,
+    invite?.recipient_type,
+    invite?.event_title,
+    invite?.event_type,
+    invite?.event_date,
+    invite?.event_time,
+    invite?.invite_tier,
+    invite?.seat_or_zone,
+    invite?.location,
+    invite?.status
+  ]);
 
-    drawFinder(0, 0);
-    drawFinder(0, modules - 7);
-    drawFinder(modules - 7, 0);
-
-    let hash = 2166136261;
-    const text = String(value);
-    for (let i = 0; i < text.length; i++) {
-      hash ^= text.charCodeAt(i);
-      hash = Math.imul(hash, 16777619);
+  const handleCopy = async () => {
+    if (!token) return;
+    try {
+      await navigator.clipboard.writeText(token);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore
     }
+  };
 
-    let seed = hash >>> 0;
-    const nextBit = () => {
-      seed ^= seed << 13;
-      seed >>>= 0;
-      seed ^= seed >>> 17;
-      seed >>>= 0;
-      seed ^= seed << 5;
-      seed >>>= 0;
-      return (seed & 1) === 1;
-    };
-
-    for (let r = 0; r < modules; r++) {
-      for (let c = 0; c < modules; c++) {
-        if (!reserved[r][c]) {
-          grid[r][c] = nextBit();
-        }
-      }
-    }
-
-    ctx.fillStyle = '#111827';
-    for (let r = 0; r < modules; r++) {
-      for (let c = 0; c < modules; c++) {
-        if (grid[r][c]) {
-          ctx.fillRect((c + margin) * cell, (r + margin) * cell, cell, cell);
-        }
-      }
-    }
-  }, [value, size]);
+  const handleDownload = () => {
+    if (!qrUrl) return;
+    const link = document.createElement('a');
+    link.href = qrUrl;
+    link.download = `QR-${token || 'invitation'}.png`;
+    link.click();
+  };
 
   return (
-    <canvas
-      ref={canvasRef}
-      aria-label={`QR Code ${value}`}
-      className="block rounded-lg"
-    />
+    <div className="flex flex-col items-center gap-2 shrink-0">
+      <div
+        className="p-2 bg-white border-2 border-gray-900 rounded-2xl flex items-center justify-center"
+        style={{ width: size + 16, height: size + 16 }}
+      >
+        {qrUrl ? (
+          <img
+            src={qrUrl}
+            alt={`QR Code ${token}`}
+            className="w-full h-full object-contain rounded-xl"
+          />
+        ) : (
+          <span className="text-[10px] text-gray-400 font-bold">جاري التوليد...</span>
+        )}
+      </div>
+
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="px-2.5 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold text-[10px] inline-flex items-center gap-1 cursor-pointer"
+        >
+          {copied ? <Check size={11} className="text-emerald-700" /> : <Copy size={11} />}
+          {copied ? 'تم النسخ' : 'نسخ'}
+        </button>
+        {qrUrl && (
+          <button
+            type="button"
+            onClick={handleDownload}
+            className="px-2.5 py-1 rounded-lg bg-[#7a1c24] hover:bg-[#5c1319] text-white font-bold text-[10px] inline-flex items-center gap-1 cursor-pointer"
+          >
+            <Download size={11} /> حفظ QR
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -164,6 +205,7 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
   const [notifPermission, setNotifPermission] = useState(
     typeof Notification !== 'undefined' ? Notification.permission : 'default'
   );
+  const fetchTimerRef = useRef(null);
 
   const normalizedUserPhones = useMemo(() => {
     if (!currentUser) return [];
@@ -257,7 +299,11 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
           const row = payload.new || payload.old;
           if (!isInvitationStrictlyMine(row, currentUser)) return;
 
-          fetchMyInvites();
+          if (fetchTimerRef.current) clearTimeout(fetchTimerRef.current);
+          fetchTimerRef.current = setTimeout(() => {
+            fetchMyInvites();
+          }, 250);
+
           if (payload.eventType === 'INSERT' && payload.new) {
             triggerMobileNotification(payload.new, false);
           } else if (
@@ -272,6 +318,7 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
       .subscribe();
 
     return () => {
+      if (fetchTimerRef.current) clearTimeout(fetchTimerRef.current);
       if (typeof supabase.removeChannel === 'function') {
         supabase.removeChannel(channel);
       }
@@ -428,9 +475,7 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
                     )}
                   </div>
 
-                  <div className="p-2 bg-white border-2 border-gray-900 rounded-2xl shrink-0">
-                    <QrCodeBox value={inv.qr_token} size={88} />
-                  </div>
+                  <RealQrCodeBox invite={inv} size={116} />
                 </div>
               </div>
             );
