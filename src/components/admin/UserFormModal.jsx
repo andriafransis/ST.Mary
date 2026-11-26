@@ -50,18 +50,30 @@ function buildIsoDob(day, month, year) {
   return `${y}-${m}-${d}`;
 }
 
+function formatStreetLabel(rawStreet = '') {
+  const s = String(rawStreet || '').trim();
+  if (!s) return '';
+  return /^شارع\s/i.test(s) ? s : `شارع ${s}`;
+}
+
+function formatAreaLabel(rawArea = '') {
+  const a = String(rawArea || '').trim();
+  if (!a) return '';
+  return /^منطقة\s/i.test(a) ? a : `منطقة ${a}`;
+}
+
+function composeLinkedZoneLabel(streetName = '', sector = '') {
+  const areaLbl = formatAreaLabel(sector);
+  const streetLbl = formatStreetLabel(streetName);
+  return [areaLbl, streetLbl].filter(Boolean).join(' - ');
+}
+
 function composeFullAddress({ streetName, sector, buildingNo, floorNo, apartmentNo, addressNotes, rawAddress }) {
   const manual = String(rawAddress || '').trim();
-  const cleanStreet = String(streetName || '').trim();
-  const cleanArea = String(sector || '').trim();
+  const zoneLabel = composeLinkedZoneLabel(streetName, sector);
   const pieces = [];
 
-  if (cleanStreet) {
-    pieces.push(/^شارع\s/i.test(cleanStreet) ? cleanStreet : `شارع ${cleanStreet}`);
-  }
-  if (cleanArea) {
-    pieces.push(/^منطقة\s/i.test(cleanArea) ? cleanArea : `منطقة ${cleanArea}`);
-  }
+  if (zoneLabel) pieces.push(zoneLabel);
   if (String(buildingNo || '').trim()) pieces.push(`عمارة ${String(buildingNo).trim()}`);
   if (String(floorNo || '').trim()) pieces.push(`دور ${String(floorNo).trim()}`);
   if (String(apartmentNo || '').trim()) pieces.push(`شقة ${String(apartmentNo).trim()}`);
@@ -80,18 +92,18 @@ async function resolveOrCreateStreetId({ streetName, sector }) {
   if (!supabase || typeof supabase.from !== 'function') return null;
 
   try {
-    const targetStreet = cleanStreet || cleanArea;
-    const targetArea = cleanArea || 'عام';
+    const formattedStreet = formatStreetLabel(cleanStreet) || formatAreaLabel(cleanArea);
+    const formattedArea = formatAreaLabel(cleanArea) || 'منطقة عامة';
 
     const { data: existingRows } = await supabase
       .from('visitation_streets')
       .select('id, street_name, area_name')
-      .ilike('street_name', targetStreet)
+      .ilike('street_name', formattedStreet)
       .limit(5);
 
     if (Array.isArray(existingRows) && existingRows.length > 0) {
       const exactAreaMatch = existingRows.find(
-        r => String(r.area_name || '').trim().toLowerCase() === targetArea.toLowerCase()
+        r => String(r.area_name || '').trim().toLowerCase() === formattedArea.toLowerCase()
       );
       return (exactAreaMatch || existingRows[0]).id;
     }
@@ -99,8 +111,8 @@ async function resolveOrCreateStreetId({ streetName, sector }) {
     const { data: inserted } = await supabase
       .from('visitation_streets')
       .insert([{
-        area_name: targetArea,
-        street_name: targetStreet,
+        area_name: formattedArea,
+        street_name: formattedStreet,
         sort_order: 0
       }])
       .select('id')
@@ -270,6 +282,22 @@ export default function UserFormModal({
     return true;
   };
 
+  const validateRequiredStreetAndArea = () => {
+    const cleanStreet = String(formData.street_name || '').trim();
+    const cleanArea = String(formData.sector || '').trim();
+
+    if (!cleanStreet) {
+      setNameError('يرجى كتابة اسم الشارع الأساسي؛ لا يمكن ترك حقل اسم الشارع فارغاً.');
+      return false;
+    }
+    if (!cleanArea) {
+      setNameError('يرجى كتابة المنطقة / القطاع الأساسي؛ لا يمكن ترك حقل المنطقة فارغاً.');
+      return false;
+    }
+    setNameError('');
+    return true;
+  };
+
   const toggleMultiFieldValue = (fieldName, value) => {
     const current = splitList(formData[fieldName]);
     const next = current.includes(value)
@@ -374,16 +402,9 @@ export default function UserFormModal({
     const resolvedClass = inService ? (formData.assigned_class || '') : '';
     const cleanStreetInput = (formData.street_name || '').trim();
     const cleanSectorInput = (formData.sector || '').trim();
+    const linkedZoneLabel = composeLinkedZoneLabel(cleanStreetInput, cleanSectorInput);
 
-    const resolvedSector =
-      observer
-        ? (cleanSectorInput || 'زائر موقع (خارج الخدمة)')
-        : (resolvedEngagement === 'hall_meeting'
-            ? (cleanSectorInput || 'اجتماع الصالة')
-            : (formData.role === 'parish' || guardianActive || resolvedEngagement === 'parish_only'
-                ? (cleanSectorInput || 'شعب (رعية)')
-                : cleanSectorInput));
-
+    const resolvedSector = cleanSectorInput || linkedZoneLabel;
     const resolvedStreetId =
       formData.street_id ||
       (await resolveOrCreateStreetId({ streetName: cleanStreetInput, sector: cleanSectorInput }));
@@ -394,7 +415,7 @@ export default function UserFormModal({
     const cleanAddressNotes = (formData.address_notes || '').trim();
     const resolvedAddress = composeFullAddress({
       streetName: cleanStreetInput,
-      sector: resolvedSector,
+      sector: cleanSectorInput,
       buildingNo: cleanBuilding,
       floorNo: cleanFloor,
       apartmentNo: cleanApartment,
@@ -454,7 +475,9 @@ export default function UserFormModal({
         after_accept_action: observer ? 'click_out_non_member' : 'standard_access',
         view_parent_panel: guardianActive,
         ...(resolvedGuardianType ? { guardian_type: resolvedGuardianType } : {}),
-        ...(cleanStreetInput ? { street_name: cleanStreetInput } : {}),
+        ...(cleanStreetInput ? { street_name: formatStreetLabel(cleanStreetInput) } : {}),
+        ...(cleanSectorInput ? { area_name: formatAreaLabel(cleanSectorInput) } : {}),
+        ...(linkedZoneLabel ? { linked_zone_label: linkedZoneLabel } : {}),
         ...(resolvedStreetId ? { street_id: resolvedStreetId } : {}),
         ...(cleanBuilding ? { building_no: cleanBuilding } : {}),
         ...(cleanFloor ? { floor_no: cleanFloor } : {}),
@@ -466,6 +489,7 @@ export default function UserFormModal({
   const handleAdminFormSubmit = async (e) => {
     e.preventDefault();
     if (!validateArabicQuadName()) return;
+    if (!validateRequiredStreetAndArea()) return;
     const payload = await buildStandardPayload(false);
     if (typeof onSubmit === 'function') {
       onSubmit(e, payload);
@@ -477,6 +501,7 @@ export default function UserFormModal({
     setVisitorStatus({ type: '', msg: '' });
 
     if (!validateArabicQuadName()) return;
+    if (!validateRequiredStreetAndArea()) return;
 
     const cleanUser = (formData.username || '').trim().replace(/\s+/g, '');
     if (cleanUser.length < 3 || cleanUser.toLowerCase() === 'admin') {
@@ -491,7 +516,7 @@ export default function UserFormModal({
 
     const builtPayload = await buildStandardPayload(true);
     if (!(builtPayload.address || '').trim()) {
-      return setVisitorStatus({ type: 'error', msg: 'يرجى كتابة الشارع أو المنطقة أو العنوان التفصيلي.' });
+      return setVisitorStatus({ type: 'error', msg: 'يرجى كتابة العنوان التفصيلي.' });
     }
 
     setSubmittingVisitor(true);
@@ -1149,37 +1174,51 @@ export default function UserFormModal({
             </div>
           </div>
 
-          {/* بيانات السكن والمنطقة والشارع (كتابة حرة مفتوحة للتخزين المباشر) */}
-          <div className="bg-[#fbfaf7] p-3 rounded-2xl border border-amber-200 space-y-2.5">
-            <div className="flex items-center justify-between gap-2">
+          {/* المنطقة والشارع وتفاصيل السكن — بنفس تخطيط الصورة */}
+          <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-amber-200 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <strong className="text-[#7a1c24] font-extrabold">
                 🏠 المنطقة والشارع وتفاصيل السكن (كتابة حرة مفتوحة وتخزين مباشر)
               </strong>
               <span className="text-[10px] text-gray-500">اكتب اسم الشارع أو المنطقة كما تريد تخزينه</span>
             </div>
 
+            {/* الصف الأول: اسم الشارع الأساسي (إجباري *) ثم المنطقة / القطاع الأساسي (إجباري *) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
-                <label className="block mb-1">اسم الشارع الأساسي (كتابة حرة)</label>
+                <label className="block mb-1 text-[#7a1c24]">
+                  اسم الشارع الأساسي (كتابة حرة) *
+                </label>
                 <input
-                  placeholder="مثال: أحمد جبر..."
+                  required
+                  placeholder="مثال: عين شمس أو أحمد جبر..."
                   className="w-full p-2.5 border rounded-xl bg-white"
                   value={formData.street_name || ''}
-                  onChange={e => setFormData({ ...formData, street_name: e.target.value, street_id: '' })}
+                  onChange={e => {
+                    if (nameError) setNameError('');
+                    setFormData({ ...formData, street_name: e.target.value, street_id: '' });
+                  }}
                 />
               </div>
 
               <div>
-                <label className="block mb-1">المنطقة / القطاع الأساسي (كتابة حرة)</label>
+                <label className="block mb-1 text-[#7a1c24]">
+                  المنطقة / القطاع الأساسي (كتابة حرة) *
+                </label>
                 <input
+                  required
+                  placeholder="مثال: منطقة عين شمس أو النعام..."
                   className="w-full p-2.5 border rounded-xl bg-white"
-                  placeholder="مثال: المنطقة الأساسية..."
                   value={formData.sector || ''}
-                  onChange={e => setFormData({ ...formData, sector: e.target.value })}
+                  onChange={e => {
+                    if (nameError) setNameError('');
+                    setFormData({ ...formData, sector: e.target.value });
+                  }}
                 />
               </div>
             </div>
 
+            {/* الصف الثاني: رقم / اسم العمارة + الدور + رقم الشقة */}
             <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="block mb-1 text-[11px]">رقم / اسم العمارة</label>
@@ -1210,10 +1249,12 @@ export default function UserFormModal({
               </div>
             </div>
 
+            {/* الصف الثالث: العنوان التفصيلي * + ملاحظات العنوان / علامة مميزة */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
                 <label className="block mb-1">العنوان التفصيلي *</label>
                 <input
+                  required
                   placeholder="الشارع، رقم العقار، المنطقة..."
                   className="w-full p-2.5 border rounded-xl bg-white"
                   value={formData.address || ''}
