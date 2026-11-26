@@ -18,6 +18,24 @@ const FAMILY_STATUS_OPTIONS = [
   'خلافات أسرية تحتاج رعاية'
 ];
 
+const KINSHIP_ROLE_OPTIONS = [
+  'الأب',
+  'الأم',
+  'الابن',
+  'الابنة',
+  'الحفيد',
+  'الحفيدة',
+  'الجد',
+  'الجدة',
+  'الزوج',
+  'الزوجة',
+  'العم',
+  'الخال',
+  'الخالة',
+  'الأخت',
+  'زوج الأخت'
+];
+
 const normalizeArabic = (str = '') =>
   String(str || '')
     .trim()
@@ -123,6 +141,7 @@ const emptyFamilyForm = {
   father: emptyPerson('متزوج'),
   mother: emptyPerson('متزوجة'),
   children: [],
+  extended_relatives: [],
   excluded_children_keys: [],
   visitations_log: []
 };
@@ -151,6 +170,12 @@ const calcAge = (dob) => {
   return Number.isFinite(yrs) && yrs >= 0 ? `${yrs} سنة` : '—';
 };
 
+const getNumericAge = (dob) => {
+  if (!dob) return null;
+  const yrs = Math.floor((Date.now() - new Date(dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+  return Number.isFinite(yrs) && yrs >= 0 ? yrs : null;
+};
+
 const toPersonObjectFromUser = (u, roleType = 'husband', hasChildrenOrSpouse = false) => ({
   user_id: u.id,
   full_name: getDisplayQuadName(u),
@@ -175,40 +200,159 @@ const isUserMarriedOrParent = (u, allPeople, userChildren) => {
   return false;
 };
 
-// حساب درجة التطابق الرباعي (الأول، الثاني، الثالث، الرابع) بين اسمين
-function scoreQuadNameMatch(nameA = '', nameB = '') {
-  const toksA = getNameTokens(nameA);
-  const toksB = getNameTokens(nameB);
-  if (toksA.length < 2 || toksB.length < 2) return { score: 0, matchedParts: [] };
+/**
+ * تحليل الاسم الرباعي (1: الأول، 2: الثاني/الأب، 3: الثالث/الجد، 4: الرابع/جد الجد)
+ * وتحديد القرابة المحتملة بين شخص مرجعي وشخص مرشح من قاعدة البيانات
+ */
+function analyzeQuadKinship(anchorName = '', anchorUser = null, candidateUser = null) {
+  const candName = getDisplayQuadName(candidateUser);
+  const aToks = getNameTokens(anchorName);
+  const cToks = getNameTokens(candName);
 
-  const matchedParts = [];
+  if (aToks.length < 2 || cToks.length < 2) {
+    return { score: 0, inferredRole: null, reasons: [], matchedParts: [] };
+  }
+
+  const aFirst = aToks[0];
+  const aSecond = aToks[1] || '';
+  const aThird = aToks[2] || '';
+  const aFourth = aToks[3] || '';
+
+  const cFirst = cToks[0];
+  const cSecond = cToks[1] || '';
+  const cThird = cToks[2] || '';
+  const cFourth = cToks[3] || '';
+
+  const isFemale =
+    candidateUser?.gender === 'أنثى' ||
+    ['متزوجة', 'آنسة', 'أرملة'].includes(candidateUser?.marital_status);
+
+  const aAge = getNumericAge(anchorUser?.dob);
+  const cAge = getNumericAge(candidateUser?.dob);
+  const ageDiff = aAge !== null && cAge !== null ? cAge - aAge : null; // موجب = المرشح أكبر، سالب = المرشح أصغر
+
   let score = 0;
+  let inferredRole = null;
+  const reasons = [];
+  const matchedParts = [];
 
   const posLabels = ['الاسم الأول', 'الاسم الثاني', 'الاسم الثالث', 'الاسم الرابع'];
-  const maxPos = Math.min(4, toksA.length, toksB.length);
+  const maxPos = Math.min(4, aToks.length, cToks.length);
   for (let i = 0; i < maxPos; i++) {
-    if (toksA[i] === toksB[i]) {
-      score += (4 - i) * 15;
-      matchedParts.push(`${posLabels[i]} (${toksA[i]})`);
+    if (aToks[i] === cToks[i]) {
+      score += (4 - i) * 12;
+      matchedParts.push(`${posLabels[i]} (${aToks[i]})`);
     }
   }
 
-  // تطابق سلسلة متتابعة من 3 مقاطع أو أكثر
-  const normA = toksA.join(' ');
-  const normB = toksB.join(' ');
-  if (toksA.length >= 3 && toksB.length >= 3 && (normA.includes(normB) || normB.includes(normA))) {
-    score += 45;
+  // 1. هل هو الأب أو الجد أو الجد الرابع؟ (الاسم الرباعي للمرشح يطابق سلسلة نسب المرجع)
+  const anchorLineageFromSecond = aToks.slice(1).join(' ');
+  const anchorLineageFromThird = aToks.slice(2).join(' ');
+  const candNorm = cToks.join(' ');
+
+  if (!isFemale && anchorLineageFromSecond && candNorm === anchorLineageFromSecond) {
+    score += 95;
+    inferredRole = 'الأب';
+    reasons.push(`الاسم الكامل للمرشح (${candName}) يطابق سلسلة الأب (${anchorLineageFromSecond})`);
+  } else if (!isFemale && anchorLineageFromThird && candNorm === anchorLineageFromThird) {
+    score += 85;
+    inferredRole = 'الجد';
+    reasons.push(`الاسم الكامل للمرشح (${candName}) يطابق سلسلة الجد (${anchorLineageFromThird})`);
+  } else if (!isFemale && aFourth && cFirst === aFourth && cToks.length >= 2) {
+    score += 70;
+    inferredRole = 'الجد';
+    reasons.push(`الاسم الأول للمرشح يطابق الاسم الرابع (${aFourth})`);
   }
 
-  // تطابق مقاطع مشتركة في أي ترتيب
-  const setB = new Set(toksB);
-  const common = toksA.filter(t => setB.has(t));
-  if (common.length >= 3 && matchedParts.length === 0) {
-    score += common.length * 10;
-    matchedParts.push(`مقاطع مشتركة: ${common.join(' ')}`);
+  // 2. هل هو الابن أو الحفيد؟ (اسم المرجع الأول موجود في موقع الأب أو الجد لدى المرشح)
+  if (!inferredRole) {
+    if (cSecond === aFirst && (!isFemale || anchorUser?.gender === 'أنثى')) {
+      if (ageDiff !== null && ageDiff > 5) {
+        score += 45;
+        inferredRole = 'الأب';
+        reasons.push(`الاسم الثاني للمرشح يطابق (${aFirst}) وفارق السن يرجح كونه أباً`);
+      } else {
+        score += 85;
+        inferredRole = isFemale ? 'الابنة' : 'الابن';
+        reasons.push(`الاسم الثاني للمرشح (${cSecond}) يطابق الاسم الأول (${aFirst})`);
+      }
+    } else if (cThird === aFirst) {
+      score += 80;
+      inferredRole = isFemale ? 'الحفيدة' : 'الحفيد';
+      reasons.push(`الاسم الثالث للمرشح (${cThird}) يطابق الاسم الأول (${aFirst}) — حفيد محتمل`);
+    }
   }
 
-  return { score, matchedParts, commonCount: common.length };
+  // 3. هل هو العم (نفس الأب أو نفس الجد الثالث/الرابع، باسم أول مختلف)؟
+  if (!inferredRole && !isFemale && cFirst !== aFirst) {
+    const sameFather = aSecond && cSecond === aSecond && aThird && cThird === aThird;
+    const sameGrandFather = aThird && cThird === aThird && (!aFourth || !cFourth || cFourth === aFourth);
+
+    if (sameFather && ageDiff !== null && ageDiff < -3) {
+      score += 75;
+      inferredRole = 'الابن';
+      reasons.push(`نفس الأب والجد (${aSecond} ${aThird}) والسن أصغر`);
+    } else if (sameFather && ageDiff !== null && ageDiff > 3) {
+      score += 80;
+      inferredRole = 'العم';
+      reasons.push(`نفس الأب والجد (${aSecond} ${aThird}) والسن أكبر — عم محتمل`);
+    } else if (sameGrandFather) {
+      score += 65;
+      inferredRole = ageDiff !== null && ageDiff < -5 ? 'الابن' : 'العم';
+      reasons.push(`اشتراك في الجد (${aThird}${aFourth ? ' ' + aFourth : ''})`);
+    }
+  }
+
+  // 4. الأخت أو زوج الأخت أو الخال أو الخالة أو الزوجة
+  if (!inferredRole) {
+    const sameFather = aSecond && cSecond === aSecond && aThird && cThird === aThird;
+    if (isFemale && sameFather && cFirst !== aFirst) {
+      score += 75;
+      inferredRole = 'الأخت';
+      reasons.push(`نفس الأب والجد (${aSecond} ${aThird}) — أخت محتملة`);
+    } else if (!isFemale && candidateUser?.spouse_name && normalizeArabic(candidateUser.spouse_name).includes(aSecond || aFirst)) {
+      score += 70;
+      inferredRole = 'زوج الأخت';
+      reasons.push(`اسم الزوج/العائلة يرتبط بالأسرة — زوج أخت محتمل`);
+    } else if (isFemale && ageDiff !== null && Math.abs(ageDiff) <= 15 && ['متزوجة', 'أرملة'].includes(candidateUser?.marital_status)) {
+      const commonToks = aToks.filter(t => cToks.includes(t));
+      if (commonToks.length >= 2) {
+        score += 55;
+        inferredRole = 'الزوجة';
+        reasons.push(`تطابق مقاطع الاسم والعمر — زوجة محتملة`);
+      }
+    } else if (isFemale && ageDiff !== null && ageDiff > 10) {
+      const commonToks = aToks.filter(t => cToks.includes(t));
+      if (commonToks.length >= 2) {
+        score += 55;
+        inferredRole = ageDiff > 25 ? 'الجدة' : 'الخالة';
+        reasons.push(`تطابق مقاطع الاسم وفارق السن — ${ageDiff > 25 ? 'جدة' : 'خالة'} محتملة`);
+      }
+    } else if (!isFemale && ageDiff !== null && ageDiff > 10) {
+      const commonToks = aToks.filter(t => cToks.includes(t));
+      if (commonToks.length >= 2) {
+        score += 55;
+        inferredRole = 'الخال';
+        reasons.push(`تطابق مقاطع الاسم وفارق السن — خال محتمل`);
+      }
+    }
+  }
+
+  // تطابق عام في مقاطع الاسم الرباعي (1-2-3-4)
+  if (score === 0) {
+    const commonToks = aToks.filter(t => cToks.includes(t));
+    if (commonToks.length >= 3) {
+      score += commonToks.length * 14;
+      inferredRole = isFemale ? 'الأخت' : 'العم';
+      reasons.push(`اشتراك في ${commonToks.length} مقاطع من الاسم الرباعي (${commonToks.join(' ')})`);
+    } else if (commonToks.length === 2 && aToks[0] === cToks[0] && aToks[1] === cToks[1]) {
+      score += 35;
+      inferredRole = isFemale ? 'الابنة' : 'الابن';
+      reasons.push(`تطابق الاسم الأول والثاني (${aToks[0]} ${aToks[1]})`);
+    }
+  }
+
+  return { score, inferredRole, reasons, matchedParts };
 }
 
 function buildAutoFamiliesFromDatabase({
@@ -569,13 +713,13 @@ function buildAutoFamiliesFromDatabase({
         addFamilyRelation(
           bKey,
           hParentKey,
-          'أصل العائلة (والد الزوج)',
+          'الأب / أصل العائلة',
           bucketTitleMap.get(hParentKey).replace(/^أسرة\s+/, '')
         );
         addFamilyRelation(
           hParentKey,
           bKey,
-          `أسرة الابن المتزوج (${getDisplayQuadName(hUser)})`,
+          `الابن المتزوج (${getDisplayQuadName(hUser)})`,
           getDisplayQuadName(hUser)
         );
       }
@@ -605,13 +749,13 @@ function buildAutoFamiliesFromDatabase({
         addFamilyRelation(
           bKey,
           childOwnKey,
-          `أسرة مستقلة للابن/الابنة (${getDisplayQuadName(cu)})`,
+          `أسرة الابن/الابنة (${getDisplayQuadName(cu)})`,
           getDisplayQuadName(cu)
         );
         addFamilyRelation(
           childOwnKey,
           bKey,
-          `أسرة الوالدين (${bucketTitleMap.get(bKey).replace(/^أسرة\s+/, '')})`,
+          `الوالدين (${bucketTitleMap.get(bKey).replace(/^أسرة\s+/, '')})`,
           bucketTitleMap.get(bKey).replace(/^أسرة\s+/, '')
         );
       }
@@ -790,7 +934,8 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   const [searchQ, setSearchQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  // قائمة الأعضاء المقترحين المستبعدين مؤقتاً أو نهائياً من التأكيد لكل أسرة
+  // الدور المختار لكل مرشح قبل الضغط على "تأكيد إنه تبع العيلة"
+  const [selectedRoleByCandidate, setSelectedRoleByCandidate] = useState({});
   const [dismissedSuggestions, setDismissedSuggestions] = useState({});
   const [confirmingUserId, setConfirmingUserId] = useState(null);
 
@@ -850,48 +995,44 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     loadData();
   }, [priest?.id]);
 
-  // استخراج المرشحين من الداتابيز بالاسم الرباعي (1-2-3-4) لأي أسرة أو لأي بحث
-  const findQuadCandidatesForFamily = useMemo(() => {
+  // استخراج المرشحين من الداتابيز بالاسم الرباعي (1-2-3-4) وتحديد صلة القرابة المحتملة
+  const findKinshipCandidatesForFamily = useMemo(() => {
     const people = churchUsers.filter(u => u.role !== 'admin' && u.role !== 'priest');
+    const byId = new Map(people.map(p => [p.id, p]));
 
     return (fam) => {
       const linkedSet = new Set(fam.linkedUserIds || []);
       const dismissedSet = new Set(dismissedSuggestions[fam.id] || []);
 
-      const anchorNames = [
-        fam.husband?.full_name,
-        fam.wife?.full_name,
-        fam.father?.full_name,
-        fam.mother?.full_name,
-        ...(Array.isArray(fam.children) ? fam.children.map(c => c.full_name) : [])
-      ].filter(Boolean);
+      const anchors = [
+        { name: fam.husband?.full_name, user: fam.husband?.user_id ? byId.get(fam.husband.user_id) : null },
+        { name: fam.wife?.full_name, user: fam.wife?.user_id ? byId.get(fam.wife.user_id) : null },
+        { name: fam.father?.full_name, user: fam.father?.user_id ? byId.get(fam.father.user_id) : null },
+        { name: fam.mother?.full_name, user: fam.mother?.user_id ? byId.get(fam.mother.user_id) : null },
+        ...(Array.isArray(fam.children)
+          ? fam.children.map(c => ({ name: c.full_name, user: c.user_id ? byId.get(c.user_id) : null }))
+          : [])
+      ].filter(a => a.name);
 
-      if (anchorNames.length === 0) return [];
+      if (anchors.length === 0) return [];
 
       const candidates = [];
       for (const u of people) {
         if (linkedSet.has(u.id) || dismissedSet.has(u.id)) continue;
-        const uQuad = getDisplayQuadName(u);
-        if (!uQuad) continue;
 
-        let bestScore = 0;
-        let bestParts = [];
-
-        for (const anc of anchorNames) {
-          const res = scoreQuadNameMatch(anc, uQuad);
-          if (res.score > bestScore) {
-            bestScore = res.score;
-            bestParts = res.matchedParts;
+        let bestAnalysis = { score: 0, inferredRole: 'العم', reasons: [], matchedParts: [] };
+        for (const anc of anchors) {
+          const res = analyzeQuadKinship(anc.name, anc.user, u);
+          if (res.score > bestAnalysis.score) {
+            bestAnalysis = res;
           }
         }
 
-        // لو في تطابق في الاسم الرباعي (مثل الأول+الثاني أو الثاني+الثالث+الرابع)
-        if (bestScore >= 30) {
+        if (bestAnalysis.score >= 35) {
           candidates.push({
             user: u,
-            fullName: uQuad,
-            score: bestScore,
-            matchedParts: bestParts
+            fullName: getDisplayQuadName(u),
+            ...bestAnalysis
           });
         }
       }
@@ -1034,17 +1175,17 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     });
   }, [churchUsers, userChildren, memberSiblings, savedRecords, priest?.id, priest?.full_name]);
 
-  // نتائج بحث فورية في الداتابيز بالاسم الرباعي (1-2-3-4) عند الكتابة في مربع البحث
+  // بحث فوري بالاسم الرباعي (1-2-3-4) مع تحليل صلة القرابة المحتملة
   const quadSearchMatches = useMemo(() => {
     const q = searchQ.trim();
     if (getNameTokens(q).length < 2) return [];
     const people = churchUsers.filter(u => u.role !== 'admin' && u.role !== 'priest');
     return people
       .map(u => {
-        const res = scoreQuadNameMatch(q, getDisplayQuadName(u));
-        return { user: u, fullName: getDisplayQuadName(u), ...res };
+        const analysis = analyzeQuadKinship(q, null, u);
+        return { user: u, fullName: getDisplayQuadName(u), ...analysis };
       })
-      .filter(x => x.score >= 30)
+      .filter(x => x.score >= 35)
       .sort((a, b) => b.score - a.score)
       .slice(0, 8);
   }, [searchQ, churchUsers]);
@@ -1058,7 +1199,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     return map;
   }, [unifiedFamilies]);
 
-  const handleLinkPersonInDatabase = async (fam, targetUser, relationType) => {
+  const handleLinkPersonInDatabase = async (fam, targetUser, relationType, kinshipLabel = '') => {
     if (!fam || !targetUser) return;
     setLinkBusy(true);
     try {
@@ -1101,14 +1242,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             })
             .eq('id', targetUser.id)
         ]);
-
-        logActivity({
-          user: priest,
-          actionType: 'ربط_زوجين_بالداتابيز',
-          targetTable: 'church_users',
-          targetId: primaryUser.id,
-          description: `ربط الزوجين ومصاهرة الأسرتين: (${getDisplayQuadName(primaryUser)}) و(${getDisplayQuadName(targetUser)})`
-        });
       } else if (relationType === 'father') {
         await Promise.all([
           supabase
@@ -1167,45 +1300,65 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           .from('church_users')
           .update(patch)
           .eq('id', targetUser.id);
+      } else {
+        // ربط قريب ممتد (العم، الخال، الخالة، الأخت، زوج الأخت، الجد، الجدة، الحفيد) وحفظ صلة القرابة في الداتابيز
+        const existingRelatives = Array.isArray(primaryUser.permissions?.extended_relatives)
+          ? primaryUser.permissions.extended_relatives
+          : [];
+        const nextRelatives = [
+          ...existingRelatives.filter(r => r.user_id !== targetUser.id),
+          {
+            user_id: targetUser.id,
+            full_name: getDisplayQuadName(targetUser),
+            kinship_role: kinshipLabel || 'قريب عائلة',
+            phone: targetUser.phone || ''
+          }
+        ];
+        await supabase
+          .from('church_users')
+          .update({
+            permissions: {
+              ...(primaryUser.permissions || {}),
+              extended_relatives: nextRelatives
+            }
+          })
+          .eq('id', primaryUser.id);
       }
+
+      logActivity({
+        user: priest,
+        actionType: 'تأكيد_صلة_قرابة_أسرة',
+        targetTable: 'church_users',
+        targetId: primaryUser.id,
+        description: `تأكيد صلة (${kinshipLabel || relationType}) لـ (${getDisplayQuadName(targetUser)}) مع أسرة (${fam.family_title})`
+      });
 
       await loadData();
       setLinkModalFam(null);
       setLinkSearchQ('');
-      alert('تم تأكيد الانتماء للعيلة وتحديث الداتابيز بنجاح ✅');
+      alert(`تم تأكيد القرابة (${kinshipLabel || 'تبع العيلة'}) وتحديث الداتابيز بنجاح ✅`);
     } finally {
       setLinkBusy(false);
     }
   };
 
-  // تأكيد أن الشخص المقترح تبع العيلة وربطه تلقائياً في الداتابيز
-  const handleConfirmSuggestedMember = async (fam, candidateUser) => {
-    if (!fam || !candidateUser) return;
-    setConfirmingUserId(candidateUser.id);
+  // تأكيد القرابة المختارة للمرشح وربطه مباشرة في الداتابيز
+  const handleConfirmKinshipCandidate = async (fam, candidate) => {
+    if (!fam || !candidate) return;
+    setConfirmingUserId(candidate.user.id);
     try {
-      const primaryUserId = fam.husband?.user_id || fam.wife?.user_id || fam.children?.[0]?.user_id;
-      const primaryUser = churchUsers.find(u => u.id === primaryUserId);
-      if (!primaryUser) return;
+      const chosenRole =
+        selectedRoleByCandidate[`${fam.id}:${candidate.user.id}`] ||
+        candidate.inferredRole ||
+        'العم';
 
-      const candAge = candidateUser.dob
-        ? Math.floor((Date.now() - new Date(candidateUser.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
-        : null;
-      const primAge = primaryUser.dob
-        ? Math.floor((Date.now() - new Date(primaryUser.dob).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
-        : null;
+      let relationType = 'extended';
+      if (chosenRole === 'الأب' || chosenRole === 'الجد') relationType = 'father';
+      else if (chosenRole === 'الأم' || chosenRole === 'الجدة') relationType = 'mother';
+      else if (chosenRole === 'الابن' || chosenRole === 'الابنة' || chosenRole === 'الحفيد' || chosenRole === 'الحفيدة') relationType = 'child';
+      else if (chosenRole === 'الزوج' || chosenRole === 'الزوجة') relationType = 'spouse';
 
-      // تحديد الدور الأنسب تلقائياً (والد / والدة / ابن / زوجة)
-      let roleType = 'child';
-      if (candAge !== null && primAge !== null && candAge - primAge >= 18) {
-        roleType = candidateUser.gender === 'أنثى' ? 'mother' : 'father';
-      } else if (
-        ['متزوج', 'متزوجة', 'أرمل', 'أرملة'].includes(candidateUser.marital_status) &&
-        candidateUser.gender !== primaryUser.gender
-      ) {
-        roleType = 'spouse';
-      }
-
-      await handleLinkPersonInDatabase(fam, candidateUser, roleType);
+      await handleLinkPersonInDatabase(fam, candidate.user, relationType, chosenRole);
     } finally {
       setConfirmingUserId(null);
     }
@@ -1773,7 +1926,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             <Users size={18} /> سجل افتقاد أسر ومخدومي الأب الكاهن ({unifiedFamilies.length} أسرة متصلة)
           </h3>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            مطابقة رباعية تلقائية (1-2-3-4) مع سؤالك للتأكيد الفوري • كروت مدمجة • شيت افتقاد بالعرض
+            تحليل الاسم الرباعي (1-2-3-4) وتحديد القرابة (أب/أم/ابن/حفيد/جد/جدة/زوجة/عم/خال/خالة/أخت/زوج أخت) مع سؤال التأكيد
           </p>
         </div>
 
@@ -1875,36 +2028,51 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           </select>
         </div>
 
-        {/* لوحة سحب الأسماء الرباعية المشتركة من الداتابيز عند البحث */}
+        {/* لوحة تحليل الاسم الرباعي والقرابات عند البحث */}
         {quadSearchMatches.length > 0 && (
           <div className="bg-amber-50/80 border border-amber-300 rounded-2xl p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
               <strong className="text-[11px] font-black text-amber-950 flex items-center gap-1">
                 <Sparkles size={14} className="text-amber-700" />
-                أسماء رباعية مشتركة تم العثور عليها في الداتابيز لـ "{searchQ}":
+                تحليل الاسم الرباعي والقرابات من الداتابيز لـ "{searchQ}":
               </strong>
-              <span className="text-[10px] text-amber-800">اختر الأسرة لتأكيد هل الشخص تبعها أم لأ</span>
+              <span className="text-[10px] text-amber-800">اختر القرابة وأكد: هل ده تبع العيلة ولا لأ؟</span>
             </div>
             <div className="grid sm:grid-cols-2 gap-2">
               {quadSearchMatches.map(m => {
                 const targetFam = filteredRecords[0] || unifiedFamilies[0];
+                const roleKey = targetFam ? `${targetFam.id}:${m.user.id}` : `search:${m.user.id}`;
+                const chosenRole = selectedRoleByCandidate[roleKey] || m.inferredRole || 'العم';
+
                 return (
-                  <div key={m.user.id} className="bg-white border border-amber-200 rounded-xl p-2.5 flex flex-wrap justify-between items-center gap-2">
-                    <div>
-                      <strong className="text-gray-900 block">{m.fullName}</strong>
-                      <span className="text-[10px] text-amber-900 font-bold block">
-                        تطابق: {m.matchedParts.join(' + ') || 'مقاطع مشتركة'}
-                      </span>
-                      {m.user.phone && <span className="text-[10px] text-gray-500">📞 {m.user.phone}</span>}
+                  <div key={m.user.id} className="bg-white border border-amber-200 rounded-xl p-2.5 space-y-1.5">
+                    <div className="flex justify-between items-start gap-2">
+                      <div>
+                        <strong className="text-gray-900 block">{m.fullName}</strong>
+                        <span className="text-[10px] text-amber-900 font-bold block">
+                          قرابة محتملة: {m.inferredRole || 'قريب'} {m.user.phone ? `• 📞 ${m.user.phone}` : ''}
+                        </span>
+                        {m.reasons?.[0] && (
+                          <span className="text-[10px] text-gray-500 block">{m.reasons[0]}</span>
+                        )}
+                      </div>
                     </div>
+
                     {targetFam && (
-                      <div className="flex items-center gap-1">
+                      <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-gray-100">
+                        <select
+                          className="p-1 border rounded-lg bg-[#fbfaf7] text-[10px] font-black"
+                          value={chosenRole}
+                          onChange={e => setSelectedRoleByCandidate(prev => ({ ...prev, [roleKey]: e.target.value }))}
+                        >
+                          {KINSHIP_ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
                         <button
                           type="button"
-                          onClick={() => handleConfirmSuggestedMember(targetFam, m.user)}
+                          onClick={() => handleConfirmKinshipCandidate(targetFam, { ...m, inferredRole: chosenRole })}
                           className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-[10px] font-black inline-flex items-center gap-1 cursor-pointer"
                         >
-                          <Check size={12} /> تبع {targetFam.family_title}
+                          <Check size={11} /> أيوه تبع العيلة ({chosenRole})
                         </button>
                       </div>
                     )}
@@ -1930,7 +2098,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               const kids = Array.isArray(fam.children) ? fam.children : [];
               const visits = Array.isArray(fam.visitations_log) ? fam.visitations_log : [];
               const connected = Array.isArray(fam.connectedFamilies) ? fam.connectedFamilies : [];
-              const suggestions = findQuadCandidatesForFamily(fam);
+              const suggestions = findKinshipCandidatesForFamily(fam);
               const primaryPhone = fam.phone || fam.husband?.phone || fam.wife?.phone || '';
               const displayAddress = fam.address || fam.husband?.address || fam.wife?.address || 'غير مسجل';
 
@@ -1967,7 +2135,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                         )}
                         {suggestions.length > 0 && (
                           <span className="px-1.5 py-0.5 bg-sky-100 text-sky-950 rounded text-[9px] font-black">
-                            ✨ {suggestions.length} مرشح بالاسم الرباعي
+                            ✨ {suggestions.length} مرشح قرابة
                           </span>
                         )}
                       </div>
@@ -1995,7 +2163,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                     </div>
                   </div>
 
-                  {/* سحب المرشحين بالاسم الرباعي والسؤال: هل ده تبع العيلة ولا لأ؟ */}
+                  {/* بطاقات السؤال الفوري: هل ده تبع العيلة ولا لأ؟ مع تحديد نوع القرابة */}
                   {suggestions.length > 0 && (
                     <div
                       onClick={e => e.stopPropagation()}
@@ -2003,40 +2171,64 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                     >
                       <div className="text-[10px] font-black text-sky-950 flex items-center gap-1">
                         <Sparkles size={12} className="text-sky-700" />
-                        <span>تم سحب اسم مشترك في الاسم الرباعي من الداتابيز — هل ده تبع العيلة ولا لأ؟</span>
+                        <span>مطابقة الاسم الرباعي — هل ده تبع العيلة ولا لأ؟ (حدد القرابة وأكد)</span>
                       </div>
                       <div className="space-y-1.5">
-                        {suggestions.map(sug => (
-                          <div
-                            key={sug.user.id}
-                            className="bg-white border border-sky-200 rounded-lg p-2 flex flex-wrap justify-between items-center gap-2 text-[11px]"
-                          >
-                            <div>
-                              <strong className="text-gray-900">{sug.fullName}</strong>
-                              <span className="block text-[10px] text-sky-800">
-                                اشتراك في: {sug.matchedParts.join(' + ') || 'مقاطع الاسم الرباعي'}
-                                {sug.user.phone ? ` • 📞 ${sug.user.phone}` : ''}
-                              </span>
+                        {suggestions.map(sug => {
+                          const roleKey = `${fam.id}:${sug.user.id}`;
+                          const chosenRole = selectedRoleByCandidate[roleKey] || sug.inferredRole || 'العم';
+
+                          return (
+                            <div
+                              key={sug.user.id}
+                              className="bg-white border border-sky-200 rounded-lg p-2 space-y-1.5 text-[11px]"
+                            >
+                              <div className="flex justify-between items-start gap-2">
+                                <div>
+                                  <strong className="text-gray-900">{sug.fullName}</strong>
+                                  <span className="block text-[10px] text-sky-900 font-bold">
+                                    قرابة محتملة: {sug.inferredRole || 'قريب'}
+                                    {sug.user.phone ? ` • 📞 ${sug.user.phone}` : ''}
+                                  </span>
+                                  {sug.reasons?.[0] && (
+                                    <span className="block text-[10px] text-gray-500">{sug.reasons[0]}</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-1">
+                                <select
+                                  className="p-1 border rounded-lg bg-[#fbfaf7] text-[10px] font-black"
+                                  value={chosenRole}
+                                  onChange={e =>
+                                    setSelectedRoleByCandidate(prev => ({ ...prev, [roleKey]: e.target.value }))
+                                  }
+                                >
+                                  {KINSHIP_ROLE_OPTIONS.map(r => (
+                                    <option key={r} value={r}>{r}</option>
+                                  ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  disabled={confirmingUserId === sug.user.id}
+                                  onClick={() =>
+                                    handleConfirmKinshipCandidate(fam, { ...sug, inferredRole: chosenRole })
+                                  }
+                                  className="px-2 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-[10px] font-black inline-flex items-center gap-0.5 cursor-pointer"
+                                >
+                                  <Check size={11} /> أيوه تبع العيلة
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDismissSuggestion(fam.id, sug.user.id)}
+                                  className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg text-[10px] font-black inline-flex items-center gap-0.5 cursor-pointer"
+                                >
+                                  <Ban size={11} /> لأ مش تبعها
+                                </button>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                disabled={confirmingUserId === sug.user.id}
-                                onClick={() => handleConfirmSuggestedMember(fam, sug.user)}
-                                className="px-2 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-[10px] font-black inline-flex items-center gap-0.5 cursor-pointer"
-                              >
-                                <Check size={11} /> أيوه تبع العيلة
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDismissSuggestion(fam.id, sug.user.id)}
-                                className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-lg text-[10px] font-black inline-flex items-center gap-0.5 cursor-pointer"
-                              >
-                                <Ban size={11} /> لأ مش تبعها
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -2075,7 +2267,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                             onClick={() => { setLinkModalFam(fam); setLinkSearchQ(''); }}
                             className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-950 border border-indigo-200 rounded-xl font-black inline-flex items-center gap-1 cursor-pointer"
                           >
-                            <Link2 size={13} /> ربط أفراد
+                            <Link2 size={13} /> ربط أفراد وقرابات
                           </button>
                           <button
                             type="button"
@@ -2262,10 +2454,10 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             <div className="flex justify-between items-center border-b pb-2.5">
               <div>
                 <h3 className="text-sm sm:text-base font-black text-[#7a1c24]">
-                  🔗 ربط أفراد وتسلسل أسرة: {linkModalFam.family_title}
+                  🔗 ربط أفراد وقرابات أسرة: {linkModalFam.family_title}
                 </h3>
                 <p className="text-[11px] text-gray-500 font-normal mt-0.5">
-                  اختر أي شخص من حسابات الكنيسة لدمجه كزوج/زوجة أو كوالد/والدة أو كابن وتحديث الداتابيز فوراً.
+                  اربط الشخص وتأكد من صلة القرابة (أب، أم، ابن، حفيد، جد، جدة، زوجة، عم، خال، خالة، أخت، زوج أخت).
                 </p>
               </div>
               <button type="button" onClick={() => setLinkModalFam(null)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer">
@@ -2290,6 +2482,11 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               ) : (
                 linkModalCandidates.map(u => {
                   const existingFamTitle = userFamilyTitleLookup.get(u.id);
+                  const anchorName = linkModalFam.husband?.full_name || linkModalFam.wife?.full_name || '';
+                  const guessed = analyzeQuadKinship(anchorName, null, u).inferredRole || 'العم';
+                  const rk = `modal:${u.id}`;
+                  const chosenRole = selectedRoleByCandidate[rk] || guessed;
+
                   return (
                     <div key={u.id} className="p-3 bg-[#fbfaf7] border rounded-2xl flex flex-wrap justify-between items-center gap-2">
                       <div>
@@ -2303,38 +2500,28 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                           </span>
                         )}
                       </div>
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap items-center gap-1">
+                        <select
+                          className="p-1.5 border rounded-xl bg-white text-[11px] font-black"
+                          value={chosenRole}
+                          onChange={e => setSelectedRoleByCandidate(prev => ({ ...prev, [rk]: e.target.value }))}
+                        >
+                          {KINSHIP_ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
                         <button
                           type="button"
                           disabled={linkBusy}
-                          onClick={() => handleLinkPersonInDatabase(linkModalFam, u, 'spouse')}
-                          className="px-2.5 py-1.5 bg-rose-700 hover:bg-rose-800 text-white rounded-xl text-[11px] font-black cursor-pointer"
+                          onClick={() => {
+                            let relType = 'extended';
+                            if (chosenRole === 'الأب' || chosenRole === 'الجد') relType = 'father';
+                            else if (chosenRole === 'الأم' || chosenRole === 'الجدة') relType = 'mother';
+                            else if (chosenRole === 'الابن' || chosenRole === 'الابنة' || chosenRole === 'الحفيد' || chosenRole === 'الحفيدة') relType = 'child';
+                            else if (chosenRole === 'الزوج' || chosenRole === 'الزوجة') relType = 'spouse';
+                            handleLinkPersonInDatabase(linkModalFam, u, relType, chosenRole);
+                          }}
+                          className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-[11px] font-black cursor-pointer"
                         >
-                          💍 ربط كزوج/زوجة
-                        </button>
-                        <button
-                          type="button"
-                          disabled={linkBusy}
-                          onClick={() => handleLinkPersonInDatabase(linkModalFam, u, 'father')}
-                          className="px-2.5 py-1.5 bg-amber-100 text-amber-950 rounded-xl text-[11px] cursor-pointer"
-                        >
-                          👴 كوالد
-                        </button>
-                        <button
-                          type="button"
-                          disabled={linkBusy}
-                          onClick={() => handleLinkPersonInDatabase(linkModalFam, u, 'mother')}
-                          className="px-2.5 py-1.5 bg-purple-100 text-purple-950 rounded-xl text-[11px] cursor-pointer"
-                        >
-                          👵 كوالدة
-                        </button>
-                        <button
-                          type="button"
-                          disabled={linkBusy}
-                          onClick={() => handleLinkPersonInDatabase(linkModalFam, u, 'child')}
-                          className="px-2.5 py-1.5 bg-blue-100 text-blue-950 rounded-xl text-[11px] cursor-pointer"
-                        >
-                          👶 كابن/ابنة
+                          ✅ تأكيد ({chosenRole})
                         </button>
                       </div>
                     </div>
