@@ -189,6 +189,14 @@ async function safeUpdateChurchUser(userId, patch) {
   return { ok: false, error: retry.error.message || error.message };
 }
 
+const compareBuildingAndFloor = (a, b) => {
+  const bCmp = String(a.building_no || '').localeCompare(String(b.building_no || ''), 'ar', { numeric: true });
+  if (bCmp !== 0) return bCmp;
+  const fCmp = String(a.floor_no || '').localeCompare(String(b.floor_no || ''), 'ar', { numeric: true });
+  if (fCmp !== 0) return fCmp;
+  return String(a.apartment_no || '').localeCompare(String(b.apartment_no || ''), 'ar', { numeric: true });
+};
+
 export default function PriestFamilyVisitation({ priest, users: passedUsers = null, onOpenWhatsApp }) {
   const todayISO = new Date().toLocaleDateString('en-CA');
   const [savedRecords, setSavedRecords] = useState([]);
@@ -315,7 +323,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
       const primaryLinkedUser = linkedUserIds
         .map(id => usersById.get(String(id)))
-        .find(u => u?.street_id || u?.building_no || u?.floor_no || u?.apartment_no || u?.address);
+        .find(u => u?.street_id || u?.building_no || u?.floor_no || u?.apartment_no || u?.address || u?.sector);
 
       const effectiveStreetId = sr.street_id || primaryLinkedUser?.street_id || '';
       const linkedStreet = effectiveStreetId ? streetMap.get(String(effectiveStreetId)) || null : null;
@@ -324,12 +332,22 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       const effectiveApartment = sr.apartment_no || primaryLinkedUser?.apartment_no || '';
       const effectiveNotes = sr.address_notes || primaryLinkedUser?.address_notes || '';
 
+      const rawStreetName =
+        linkedStreet?.street_name ||
+        primaryLinkedUser?.permissions?.street_name ||
+        '';
+      const rawAreaName =
+        linkedStreet?.area_name ||
+        primaryLinkedUser?.sector ||
+        primaryLinkedUser?.permissions?.area_name ||
+        '';
+
       const builtLocationParts = [];
-      if (linkedStreet?.street_name) {
-        builtLocationParts.push(`شارع ${String(linkedStreet.street_name).replace(/^شارع\s*/i, '').trim()}`);
+      if (rawStreetName) {
+        builtLocationParts.push(`شارع ${String(rawStreetName).replace(/^شارع\s*/i, '').trim()}`);
       }
-      if (linkedStreet?.area_name) {
-        builtLocationParts.push(`منطقة ${String(linkedStreet.area_name).replace(/^منطقة\s*/i, '').trim()}`);
+      if (rawAreaName) {
+        builtLocationParts.push(`منطقة ${String(rawAreaName).replace(/^منطقة\s*/i, '').trim()}`);
       }
       if (effectiveBuilding) builtLocationParts.push(`عمارة ${String(effectiveBuilding).trim()}`);
       if (effectiveFloor) builtLocationParts.push(`دور ${String(effectiveFloor).trim()}`);
@@ -346,6 +364,20 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           : `${baseAddr} (${structStr})`;
       })();
 
+      const groupKeySource =
+        rawStreetName || rawAreaName
+          ? `${String(rawAreaName || '').trim()}||${String(rawStreetName || '').trim()}`
+          : (combinedAddress || 'غير محدد');
+
+      const streetPageTitle = (() => {
+        const sClean = String(rawStreetName || '').replace(/^شارع\s*/i, '').trim();
+        const aClean = String(rawAreaName || '').replace(/^منطقة\s*/i, '').trim();
+        if (aClean && sClean) return `منطقة ${aClean} — شارع ${sClean}`;
+        if (sClean) return `شارع ${sClean}`;
+        if (aClean) return `منطقة ${aClean}`;
+        return combinedAddress || 'شارع / منطقة غير محددة';
+      })();
+
       return {
         ...sr,
         savedId: sr.id,
@@ -353,8 +385,10 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         family_status: sr.family_status || 'مستقرة',
         housing_type: sr.housing_type || 'تمليك',
         street_id: effectiveStreetId,
-        street_name: linkedStreet?.street_name || '',
-        area_name: linkedStreet?.area_name || '',
+        street_name: rawStreetName,
+        area_name: rawAreaName,
+        street_group_key: normalizeArabic(groupKeySource) || 'default',
+        street_page_title: streetPageTitle,
         street_sort_order: linkedStreet ? Number(linkedStreet.sort_order ?? 999999) : 999999,
         building_no: effectiveBuilding,
         floor_no: effectiveFloor,
@@ -837,33 +871,72 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       return normalizeArabic(JSON.stringify(r)).includes(normalizeArabic(searchQ));
     });
 
-    if (streetFilter !== 'all') {
-      return [...base].sort((a, b) => {
-        const bA = String(a.building_no || '').localeCompare(String(b.building_no || ''), 'ar', { numeric: true });
-        if (bA !== 0) return bA;
-        return String(a.floor_no || '').localeCompare(String(b.floor_no || ''), 'ar', { numeric: true });
-      });
-    }
-
     return [...base].sort((a, b) => {
       if (a.street_sort_order !== b.street_sort_order) {
         return a.street_sort_order - b.street_sort_order;
       }
-      const bA = String(a.building_no || '').localeCompare(String(b.building_no || ''), 'ar', { numeric: true });
-      if (bA !== 0) return bA;
-      return String(a.floor_no || '').localeCompare(String(b.floor_no || ''), 'ar', { numeric: true });
+      const stCmp = String(a.street_page_title || '').localeCompare(String(b.street_page_title || ''), 'ar');
+      if (stCmp !== 0) return stCmp;
+      return compareBuildingAndFloor(a, b);
     });
   }, [familiesList, statusFilter, streetFilter, searchQ]);
+
+  const streetPrintPages = useMemo(() => {
+    const groupsMap = new Map();
+
+    for (const fam of filteredRecords) {
+      const key = fam.street_group_key || 'default';
+      if (!groupsMap.has(key)) {
+        groupsMap.set(key, {
+          key,
+          pageTitle: fam.street_page_title,
+          areaName: fam.area_name || '',
+          streetName: fam.street_name || '',
+          sortOrder: fam.street_sort_order,
+          families: []
+        });
+      }
+      groupsMap.get(key).families.push(fam);
+    }
+
+    return Array.from(groupsMap.values())
+      .sort((a, b) => {
+        if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+        return String(a.pageTitle || '').localeCompare(String(b.pageTitle || ''), 'ar');
+      })
+      .map(grp => {
+        const sortedFamilies = [...grp.families].sort(compareBuildingAndFloor);
+        const buildingCounts = new Map();
+        for (const f of sortedFamilies) {
+          const bKey = normalizeArabic(f.building_no || '');
+          if (bKey) {
+            buildingCounts.set(bKey, (buildingCounts.get(bKey) || 0) + 1);
+          }
+        }
+        return {
+          ...grp,
+          families: sortedFamilies.map(f => {
+            const bKey = normalizeArabic(f.building_no || '');
+            return {
+              ...f,
+              sameBuildingCount: bKey ? (buildingCounts.get(bKey) || 1) : 1
+            };
+          })
+        };
+      });
+  }, [filteredRecords]);
 
   const handleExportExcelSheet = () => {
     const headers = [
       'م',
+      'الشارع والمنطقة',
+      'العمارة / الدور / الشقة',
       'اسم الأسرة',
       'بيانات الزوج',
       'الزوجة',
       'الوالد / الوالدة',
       'الأبناء والصلات',
-      'العنوان والمنطقة',
+      'العنوان الكامل',
       'السكن',
       'الحالة الأسرية',
       'عدد الزيارات',
@@ -892,12 +965,20 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         : '';
       const kidsAndRelInfo = [kidsPart, relPart].filter(Boolean).join(' | ') || '—';
 
+      const unitDetails = [
+        fam.building_no ? `عمارة ${fam.building_no}` : '',
+        fam.floor_no ? `دور ${fam.floor_no}` : '',
+        fam.apartment_no ? `شقة ${fam.apartment_no}` : ''
+      ].filter(Boolean).join(' - ') || '—';
+
       const addr = fam.resolvedAddress || fam.address || fam.husband?.address || fam.wife?.address || 'غير مسجل';
       const visits = Array.isArray(fam.visitations_log) ? fam.visitations_log : [];
       const lastVisit = visits[0] ? `${visits[0].visit_date}: ${visits[0].summary}` : fam.notes || '—';
 
       return [
         index + 1,
+        fam.street_page_title,
+        unitDetails,
         fam.family_title,
         hInfo,
         wInfo,
@@ -1090,16 +1171,24 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           body {
             background: white !important;
           }
+          .street-print-page {
+            page-break-after: always;
+            break-after: page;
+          }
+          .street-print-page:last-child {
+            page-break-after: auto;
+            break-after: auto;
+          }
         }
       `}</style>
 
       <div className="bg-white p-4 rounded-3xl border border-gray-200 shadow-2xs flex flex-wrap justify-between items-center gap-3 print:hidden">
         <div>
           <h3 className="text-sm sm:text-base font-black text-[#7a1c24] flex items-center gap-1.5">
-            <Users size={18} /> سجل افتقاد الأسر ({filteredRecords.length} أسرة)
+            <Users size={18} /> سجل افتقاد الأسر ({filteredRecords.length} أسرة • {streetPrintPages.length} شارع/صفحة)
           </h3>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            أضف الأسرة واربط كل شخص وحدّد صلته (الأب، الابن، الزوج، الأخ...) بنفسك بحرية كاملة دون أي فرض تلقائي.
+            أضف الأسرة واربط كل شخص وحدّد صلته بنفسك، وعند الطباعة يخرج كل شارع في صفحة مستقلة بأسره وعماراته مرتبة.
           </p>
         </div>
 
@@ -1131,7 +1220,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             onClick={() => window.print()}
             className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
           >
-            <Printer size={14} /> طباعة شيت الافتقاد بالعرض
+            <Printer size={14} /> طباعة شيت الافتقاد (صفحة لكل شارع)
           </button>
           <button
             type="button"
@@ -1153,7 +1242,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         <div className="relative flex-1">
           <Search size={15} className="absolute right-3 top-2.5 text-gray-400" />
           <input
-            placeholder="بحث بالاسم، الصلة، الأبناء، أو العنوان..."
+            placeholder="بحث بالاسم، الصلة، الأبناء، الشارع، العمارة، أو العنوان..."
             className="w-full pr-9 pl-3 py-2 bg-[#fbfaf7] border rounded-xl outline-none focus:border-[#7a1c24]"
             value={searchQ}
             onChange={e => setSearchQ(e.target.value)}
@@ -1178,7 +1267,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             value={streetFilter}
             onChange={e => setStreetFilter(e.target.value)}
           >
-            <option value="all">كل الشوارع المرتبة</option>
+            <option value="all">كل الشوارع والمناطق</option>
             {streetsList.map(st => (
               <option key={st.id} value={st.id}>
                 {st.street_name} {st.area_name ? `(${st.area_name})` : ''}
@@ -1234,9 +1323,9 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                         <span className="px-1.5 py-0.5 bg-amber-100 text-amber-950 rounded text-[9px] font-black">
                           {fam.family_status}
                         </span>
-                        {fam.street_name && (
+                        {fam.street_page_title && (
                           <span className="px-1.5 py-0.5 bg-purple-100 text-purple-950 rounded text-[9px] font-black">
-                            {fam.street_name}
+                            {fam.street_page_title}
                           </span>
                         )}
                         <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-900 rounded text-[9px] font-bold">
@@ -1446,80 +1535,99 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         )}
       </div>
 
-      <div className="hidden print:block w-full text-black" dir="rtl">
-        <div className="text-center border-b-2 border-black pb-2 mb-3">
-          <h2 className="text-base font-black">كشف افتقاد الأسر — {priest?.full_name || 'الأب الكاهن'}</h2>
-          <p className="text-[11px]">
-            تاريخ الطباعة: {todayISO} • إجمالي الأسر بالكشف: {filteredRecords.length} أسرة
-          </p>
-        </div>
+      {/* صفحات الطباعة: صفحة مستقلة لكل شارع / منطقة بأسره مرتبة */}
+      <div className="hidden print:block w-full text-black space-y-6" dir="rtl">
+        {streetPrintPages.map((streetPage, pageIdx) => (
+          <div key={streetPage.key || pageIdx} className="street-print-page w-full">
+            <div className="text-center border-b-2 border-black pb-2 mb-3">
+              <h2 className="text-base font-black">
+                {streetPage.pageTitle} — كشف افتقاد الأسر ({priest?.full_name || 'الأب الكاهن'})
+              </h2>
+              <p className="text-[11px]">
+                تاريخ الطباعة: {todayISO} • صفحة شارع ({pageIdx + 1} من {streetPrintPages.length}) • عدد الأسر بالشارع: {streetPage.families.length} أسرة
+              </p>
+            </div>
 
-        <table className="w-full border-collapse border border-black text-[10px]">
-          <thead>
-            <tr className="bg-gray-200 font-black">
-              <th className="border border-black p-1.5 text-center w-8">م</th>
-              <th className="border border-black p-1.5 text-right">الأسرة / الزوج</th>
-              <th className="border border-black p-1.5 text-right">الزوجة</th>
-              <th className="border border-black p-1.5 text-right">الوالد / الوالدة</th>
-              <th className="border border-black p-1.5 text-right">الأبناء والصلات</th>
-              <th className="border border-black p-1.5 text-right">العنوان والمنطقة والسكن</th>
-              <th className="border border-black p-1.5 text-center">التليفون</th>
-              <th className="border border-black p-1.5 text-center">الحالة</th>
-              <th className="border border-black p-1.5 text-right">ملاحظات / آخر زيارة</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredRecords.map((fam, idx) => {
-              const kids = Array.isArray(fam.children) ? fam.children : [];
-              const rels = Array.isArray(fam.relatives) ? fam.relatives : [];
-              const visits = Array.isArray(fam.visitations_log) ? fam.visitations_log : [];
-              const addr = fam.resolvedAddress || fam.address || fam.husband?.address || fam.wife?.address || '—';
-              const primaryPhone = fam.phone || fam.husband?.phone || fam.wife?.phone || '—';
-
-              return (
-                <tr key={fam.id} className="break-inside-avoid">
-                  <td className="border border-black p-1.5 text-center font-bold">{idx + 1}</td>
-                  <td className="border border-black p-1.5 align-top">
-                    <div className="font-black">{fam.family_title}</div>
-                    {fam.husband?.full_name && <div>الزوج: {fam.husband.full_name}</div>}
-                    {fam.husband?.job_title && <div>العمل: {fam.husband.job_title}</div>}
-                  </td>
-                  <td className="border border-black p-1.5 align-top">
-                    {fam.wife?.full_name ? (
-                      <>
-                        <div className="font-bold">{fam.wife.full_name}</div>
-                        {fam.wife.phone && <div>ت: {fam.wife.phone}</div>}
-                      </>
-                    ) : '—'}
-                  </td>
-                  <td className="border border-black p-1.5 align-top">
-                    {fam.father?.full_name && <div>الوالد: {fam.father.full_name}</div>}
-                    {fam.mother?.full_name && <div>الوالدة: {fam.mother.full_name}</div>}
-                    {!fam.father?.full_name && !fam.mother?.full_name && '—'}
-                  </td>
-                  <td className="border border-black p-1.5 align-top">
-                    {kids.map((k, kIdx) => (
-                      <div key={`k-${kIdx}`}>• {k.kinship_role || 'الابن'}: {k.full_name}</div>
-                    ))}
-                    {rels.map((r, rIdx) => (
-                      <div key={`r-${rIdx}`}>• {r.kinship_role}: {r.full_name}</div>
-                    ))}
-                    {kids.length === 0 && rels.length === 0 && '—'}
-                  </td>
-                  <td className="border border-black p-1.5 align-top">
-                    <div className="font-bold">{addr}</div>
-                    <div>({fam.housing_type || 'تمليك'})</div>
-                  </td>
-                  <td className="border border-black p-1.5 text-center align-top font-bold">{primaryPhone}</td>
-                  <td className="border border-black p-1.5 text-center align-top">{fam.family_status || 'مستقرة'}</td>
-                  <td className="border border-black p-1.5 align-top">
-                    {visits[0] ? `${visits[0].visit_date}: ${visits[0].summary}` : fam.notes || ''}
-                  </td>
+            <table className="w-full border-collapse border border-black text-[10px]">
+              <thead>
+                <tr className="bg-gray-200 font-black">
+                  <th className="border border-black p-1.5 text-center w-8">م</th>
+                  <th className="border border-black p-1.5 text-right">العمارة / الدور / الشقة</th>
+                  <th className="border border-black p-1.5 text-right">الأسرة / الزوج</th>
+                  <th className="border border-black p-1.5 text-right">الزوجة</th>
+                  <th className="border border-black p-1.5 text-right">الوالد / الوالدة</th>
+                  <th className="border border-black p-1.5 text-right">الأبناء والصلات</th>
+                  <th className="border border-black p-1.5 text-right">العنوان والسكن</th>
+                  <th className="border border-black p-1.5 text-center">التليفون</th>
+                  <th className="border border-black p-1.5 text-center">الحالة</th>
+                  <th className="border border-black p-1.5 text-right">ملاحظات / آخر زيارة</th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              </thead>
+              <tbody>
+                {streetPage.families.map((fam, idx) => {
+                  const kids = Array.isArray(fam.children) ? fam.children : [];
+                  const rels = Array.isArray(fam.relatives) ? fam.relatives : [];
+                  const visits = Array.isArray(fam.visitations_log) ? fam.visitations_log : [];
+                  const addr = fam.resolvedAddress || fam.address || fam.husband?.address || fam.wife?.address || '—';
+                  const primaryPhone = fam.phone || fam.husband?.phone || fam.wife?.phone || '—';
+                  const unitLine = [
+                    fam.building_no ? `عمارة ${fam.building_no}` : '',
+                    fam.floor_no ? `دور ${fam.floor_no}` : '',
+                    fam.apartment_no ? `شقة ${fam.apartment_no}` : ''
+                  ].filter(Boolean).join(' / ') || '—';
+
+                  return (
+                    <tr key={fam.id} className="break-inside-avoid">
+                      <td className="border border-black p-1.5 text-center font-bold">{idx + 1}</td>
+                      <td className="border border-black p-1.5 align-top font-bold">
+                        <div>{unitLine}</div>
+                        {fam.sameBuildingCount > 1 && (
+                          <div className="text-[9px]">(نفس العمارة — {fam.sameBuildingCount} أسر)</div>
+                        )}
+                      </td>
+                      <td className="border border-black p-1.5 align-top">
+                        <div className="font-black">{fam.family_title}</div>
+                        {fam.husband?.full_name && <div>الزوج: {fam.husband.full_name}</div>}
+                        {fam.husband?.job_title && <div>العمل: {fam.husband.job_title}</div>}
+                      </td>
+                      <td className="border border-black p-1.5 align-top">
+                        {fam.wife?.full_name ? (
+                          <>
+                            <div className="font-bold">{fam.wife.full_name}</div>
+                            {fam.wife.phone && <div>ت: {fam.wife.phone}</div>}
+                          </>
+                        ) : '—'}
+                      </td>
+                      <td className="border border-black p-1.5 align-top">
+                        {fam.father?.full_name && <div>الوالد: {fam.father.full_name}</div>}
+                        {fam.mother?.full_name && <div>الوالدة: {fam.mother.full_name}</div>}
+                        {!fam.father?.full_name && !fam.mother?.full_name && '—'}
+                      </td>
+                      <td className="border border-black p-1.5 align-top">
+                        {kids.map((k, kIdx) => (
+                          <div key={`k-${kIdx}`}>• {k.kinship_role || 'الابن'}: {k.full_name}</div>
+                        ))}
+                        {rels.map((r, rIdx) => (
+                          <div key={`r-${rIdx}`}>• {r.kinship_role}: {r.full_name}</div>
+                        ))}
+                        {kids.length === 0 && rels.length === 0 && '—'}
+                      </td>
+                      <td className="border border-black p-1.5 align-top">
+                        <div className="font-bold">{addr}</div>
+                        <div>({fam.housing_type || 'تمليك'})</div>
+                      </td>
+                      <td className="border border-black p-1.5 text-center align-top font-bold">{primaryPhone}</td>
+                      <td className="border border-black p-1.5 text-center align-top">{fam.family_status || 'مستقرة'}</td>
+                      <td className="border border-black p-1.5 align-top">
+                        {visits[0] ? `${visits[0].visit_date}: ${visits[0].summary}` : fam.notes || ''}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ))}
       </div>
 
       {linkModalFam && (
