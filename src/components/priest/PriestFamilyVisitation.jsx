@@ -4,7 +4,7 @@ import { logActivity } from '../../lib/activityLogger';
 import {
   Users, Plus, Search, Edit3, Trash2, Printer, MessageCircle,
   Calendar, MapPin, Phone, Briefcase, GraduationCap, Heart, X,
-  UserPlus, Link2, RefreshCw, GitBranch
+  UserPlus, Link2, RefreshCw, GitBranch, Network
 } from 'lucide-react';
 
 const MARITAL_STATUS_OPTIONS = ['متزوج', 'متزوجة', 'أعزب', 'آنسة', 'أرمل', 'أرملة', 'مطلق/ة'];
@@ -33,16 +33,6 @@ const normalizePhone = (phone = '') => {
   if (digits.startsWith('20') && digits.length === 12) return '0' + digits.slice(2);
   if (digits.length === 10 && digits.startsWith('1')) return '0' + digits;
   return digits;
-};
-
-const getNameTokens = (u) => {
-  if (!u) return [];
-  const splitCombined = [u.first_name, u.second_name, u.third_name, u.fourth_name]
-    .map(s => (s || '').trim())
-    .filter(Boolean)
-    .join(' ');
-  const src = (u.full_name || '').trim() || splitCombined;
-  return normalizeArabic(src).split(' ').filter(Boolean);
 };
 
 const getDisplayQuadName = (u) => {
@@ -136,10 +126,10 @@ const isUserMarriedOrParent = (u, allPeople, userChildren) => {
 };
 
 /**
- * تجميع ذكي للأسر مع الحفاظ على التسلسل العائلي (الجد -> الأب/الزوج والزوجة -> الأبناء):
- * - يدمج الزوجين تلقائياً عبر linked_spouse_id أو spouse_name/phone أو الاشتراك في نفس الأبناء
- * - يجمع الإخوة غير المتزوجين تحت أسرة الأب (مثل: أسرة فرنسيس جاد عبد الملاك)
- * - يربط أسرة الابن المتزوج بتسلسل أسرة والده (الوالد والوالدة)
+ * تجميع ذكي للأسر مع الحفاظ على التسلسل العائلي وروابط المصاهرة بين الأسر:
+ * 1. يدمج الزوجين تلقائياً في أسرة واحدة (عبر linked_spouse_id أو spouse_name/phone أو الاشتراك في نفس الأبناء)
+ * 2. يربط كل مخدوم بولي أمره (الأب والأم) في أسرة والديه حتى لو كان متزوجاً وله أسرة مستقلة
+ * 3. يبني شبكة روابط متبادلة بين الأسر (تسلسل أسرة الوالد، تسلسل أسرة أهل الزوجة، وأسر الأبناء المتزوجين بالمصاهرة)
  */
 function buildAutoFamiliesFromDatabase({
   churchUsers = [],
@@ -173,11 +163,13 @@ function buildAutoFamiliesFromDatabase({
       const qToks = qName.split(' ').filter(Boolean);
       if (qToks.length >= 2) {
         const prefix = qToks.slice(0, 2).join(' ');
-        return people.find(u => {
-          if (expectedGender && u.gender && u.gender !== expectedGender) return false;
-          const uName = normalizeArabic(getDisplayQuadName(u));
-          return uName.startsWith(prefix) || prefix.startsWith(uName);
-        }) || null;
+        return (
+          people.find(u => {
+            if (expectedGender && u.gender && u.gender !== expectedGender) return false;
+            const uName = normalizeArabic(getDisplayQuadName(u));
+            return uName.startsWith(prefix) || prefix.startsWith(uName);
+          }) || null
+        );
       }
     }
     return null;
@@ -290,7 +282,7 @@ function buildAutoFamiliesFromDatabase({
     if (spouseMatch) userToHeadBucketKey.set(spouseMatch.id, key);
   });
 
-  // 2) دمج الزوجين إذا اشتركا في نفس الابن عبر (father_id + mother_id أو father_full_name + mother_full_name)
+  // 2) دمج الزوجين إذا اشتركا في نفس الابن عبر الأب والأم
   people.forEach(child => {
     const fUser =
       (child.father_id && byId.get(child.father_id)) ||
@@ -311,7 +303,61 @@ function buildAutoFamiliesFromDatabase({
     }
   });
 
-  // 3) توزيع كل فرد كابن داخل أسرة والده (حتى لو الفرد ده متزوج وله أسرته المستقلة، يظهر أيضاً في تسلسل أسرة والده!)
+  // 3) ربط كل مخدوم بأسرة ولي أمره (الأب والأم)
+  const resolveParentBucketKeyForUser = (u) => {
+    if (!u) return null;
+    const fatherNameStr = extractFatherLineageFromQuad(u);
+    const motherNameStr = (u.mother_full_name || '').trim();
+    const fPhone = normalizePhone(u.father_phone);
+    const mPhone = normalizePhone(u.mother_phone);
+
+    const directIds = [u.father_id, u.mother_id, u.parent_id].filter(id => id && id !== u.id);
+    for (const pid of directIds) {
+      if (userToHeadBucketKey.has(pid)) return userToHeadBucketKey.get(pid);
+    }
+
+    if (fatherNameStr || fPhone) {
+      const matchedFather = findUserByNameOrPhone(fatherNameStr, fPhone, 'ذكر');
+      if (matchedFather && matchedFather.id !== u.id && userToHeadBucketKey.has(matchedFather.id)) {
+        return userToHeadBucketKey.get(matchedFather.id);
+      }
+    }
+
+    if (motherNameStr || mPhone) {
+      const matchedMother = findUserByNameOrPhone(motherNameStr, mPhone, 'أنثى');
+      if (matchedMother && matchedMother.id !== u.id && userToHeadBucketKey.has(matchedMother.id)) {
+        return userToHeadBucketKey.get(matchedMother.id);
+      }
+    }
+
+    const normFather = normalizeArabic(fatherNameStr);
+    const normMother = normalizeArabic(motherNameStr);
+    for (const [bKey, bObj] of buckets.entries()) {
+      if (bObj.husbandUser?.id === u.id || bObj.wifeUser?.id === u.id) continue;
+
+      const bFatherNorm = normalizeArabic(bObj.husbandUser ? getDisplayQuadName(bObj.husbandUser) : bObj.fatherNameHint);
+      const bMotherNorm = normalizeArabic(bObj.wifeUser ? getDisplayQuadName(bObj.wifeUser) : bObj.motherNameHint);
+      const bFatherPhone = normalizePhone(bObj.husbandUser?.phone || bObj.fatherPhoneHint);
+      const bMotherPhone = normalizePhone(bObj.wifeUser?.phone || bObj.motherPhoneHint);
+
+      const sameFPhone = fPhone.length >= 8 && bFatherPhone && fPhone === bFatherPhone;
+      const sameMPhone = mPhone.length >= 8 && bMotherPhone && mPhone === bMotherPhone;
+      const sameFatherName =
+        normFather.length >= 5 &&
+        bFatherNorm &&
+        (normFather === bFatherNorm || bFatherNorm.startsWith(normFather) || normFather.startsWith(bFatherNorm));
+      const sameMotherName =
+        normMother.length >= 5 &&
+        bMotherNorm &&
+        (normMother === bMotherNorm || bMotherNorm.startsWith(normMother) || normMother.startsWith(bMotherNorm));
+
+      if (sameFPhone || sameMPhone || sameFatherName || sameMotherName) {
+        return bKey;
+      }
+    }
+    return null;
+  };
+
   people.forEach(u => {
     const fatherNameStr = extractFatherLineageFromQuad(u);
     const motherNameStr = (u.mother_full_name || '').trim();
@@ -319,57 +365,14 @@ function buildAutoFamiliesFromDatabase({
     const mPhone = normalizePhone(u.mother_phone);
 
     const isHeadItself = userToHeadBucketKey.has(u.id);
-    const hasParentLink = Boolean(u.father_id || u.mother_id || u.parent_id || fatherNameStr || fPhone || motherNameStr || mPhone);
+    const hasParentLink = Boolean(
+      u.father_id || u.mother_id || u.parent_id || fatherNameStr || fPhone || motherNameStr || mPhone
+    );
 
-    // لو هو أصلاً رأس أسرة (زوج/زوجة) ولا يوجد أي رابط لوالديه، لا نكرره
     if (isHeadItself && !hasParentLink) return;
 
-    let targetParentBucketKey = null;
+    let targetParentBucketKey = resolveParentBucketKeyForUser(u);
 
-    const directParentId = u.father_id || u.mother_id || u.parent_id;
-    if (directParentId && directParentId !== u.id && userToHeadBucketKey.has(directParentId)) {
-      targetParentBucketKey = userToHeadBucketKey.get(directParentId);
-    }
-
-    if (!targetParentBucketKey && (fatherNameStr || fPhone)) {
-      const matchedFather = findUserByNameOrPhone(fatherNameStr, fPhone, 'ذكر');
-      if (matchedFather && matchedFather.id !== u.id && userToHeadBucketKey.has(matchedFather.id)) {
-        targetParentBucketKey = userToHeadBucketKey.get(matchedFather.id);
-      }
-    }
-
-    if (!targetParentBucketKey && (motherNameStr || mPhone)) {
-      const matchedMother = findUserByNameOrPhone(motherNameStr, mPhone, 'أنثى');
-      if (matchedMother && matchedMother.id !== u.id && userToHeadBucketKey.has(matchedMother.id)) {
-        targetParentBucketKey = userToHeadBucketKey.get(matchedMother.id);
-      }
-    }
-
-    if (!targetParentBucketKey) {
-      const normFather = normalizeArabic(fatherNameStr);
-      const normMother = normalizeArabic(motherNameStr);
-      for (const [bKey, bObj] of buckets.entries()) {
-        // لا تضع الشخص كابن داخل أسرة نفسه!
-        if (bObj.husbandUser?.id === u.id || bObj.wifeUser?.id === u.id) continue;
-
-        const bFatherNorm = normalizeArabic(bObj.husbandUser ? getDisplayQuadName(bObj.husbandUser) : bObj.fatherNameHint);
-        const bMotherNorm = normalizeArabic(bObj.wifeUser ? getDisplayQuadName(bObj.wifeUser) : bObj.motherNameHint);
-        const bFatherPhone = normalizePhone(bObj.husbandUser?.phone || bObj.fatherPhoneHint);
-        const bMotherPhone = normalizePhone(bObj.wifeUser?.phone || bObj.motherPhoneHint);
-
-        const sameFPhone = fPhone.length >= 8 && bFatherPhone && fPhone === bFatherPhone;
-        const sameMPhone = mPhone.length >= 8 && bMotherPhone && mPhone === bMotherPhone;
-        const sameFatherName = normFather.length >= 5 && bFatherNorm && (normFather === bFatherNorm || bFatherNorm.startsWith(normFather) || normFather.startsWith(bFatherNorm));
-        const sameMotherName = normMother.length >= 5 && bMotherNorm && (normMother === bMotherNorm || bMotherNorm.startsWith(normMother) || normMother.startsWith(bMotherNorm));
-
-        if (sameFPhone || sameMPhone || sameFatherName || sameMotherName) {
-          targetParentBucketKey = bKey;
-          break;
-        }
-      }
-    }
-
-    // لو غير متزوج أو له نسب أب، ننشئ أسرة الأب (مثل: أسرة فرنسيس جاد عبد الملاك) ليوضع فيها كابن مع إخوته
     if (!targetParentBucketKey) {
       const normFather = normalizeArabic(fatherNameStr);
       if (fPhone.length >= 8) targetParentBucketKey = `fam_fphone_${fPhone}`;
@@ -398,7 +401,9 @@ function buildAutoFamiliesFromDatabase({
     if (!bKey || !buckets.has(bKey)) return;
     const bucket = buckets.get(bKey);
     const ucNorm = normalizeArabic(uc.child_name);
-    const existsAsUser = Array.from(bucket.childUsers.values()).some(cu => normalizeArabic(getDisplayQuadName(cu)).startsWith(ucNorm));
+    const existsAsUser = Array.from(bucket.childUsers.values()).some(cu =>
+      normalizeArabic(getDisplayQuadName(cu)).startsWith(ucNorm)
+    );
     const existsExtra = bucket.extraChildren.some(ec => normalizeArabic(ec.full_name) === ucNorm);
     if (!existsAsUser && !existsExtra && uc.child_name) {
       bucket.extraChildren.push({
@@ -417,7 +422,9 @@ function buildAutoFamiliesFromDatabase({
     for (const bucket of buckets.values()) {
       if (!bucket.childUsers.has(sib.member_id)) continue;
       const sibNorm = normalizeArabic(sib.sibling_full_name);
-      const existsAsUser = Array.from(bucket.childUsers.values()).some(cu => normalizeArabic(getDisplayQuadName(cu)) === sibNorm);
+      const existsAsUser = Array.from(bucket.childUsers.values()).some(
+        cu => normalizeArabic(getDisplayQuadName(cu)) === sibNorm
+      );
       const existsExtra = bucket.extraChildren.some(ec => normalizeArabic(ec.full_name) === sibNorm);
       if (!existsAsUser && !existsExtra && sib.sibling_full_name) {
         bucket.extraChildren.push({
@@ -433,7 +440,100 @@ function buildAutoFamiliesFromDatabase({
     }
   });
 
-  // 5) تحويل كل باكت إلى ملف أسرة متكامل مع روابط التسلسل بين الأجيال
+  // 5) حساب عنوان كل باكت أولاً لبناء خريطة الروابط المتبادلة بين الأسر (نسب / مصاهرة / أبناء متزوجين)
+  const bucketTitleMap = new Map();
+  for (const [bKey, bucket] of buckets.entries()) {
+    const hName = bucket.husbandUser ? getDisplayQuadName(bucket.husbandUser) : bucket.fatherNameHint;
+    const wName = bucket.wifeUser ? getDisplayQuadName(bucket.wifeUser) : bucket.motherNameHint;
+    const firstChild = Array.from(bucket.childUsers.values())[0];
+    const cName = firstChild ? getDisplayQuadName(firstChild) : bucket.extraChildren[0]?.full_name;
+    const title =
+      (hName && `أسرة ${hName}`) ||
+      (wName && `أسرة ${wName}`) ||
+      (cName && `أسرة ${cName}`) ||
+      'أسرة بدون عنوان';
+    bucketTitleMap.set(bKey, title);
+  }
+
+  // خريطة الروابط المتبادلة: key -> Map<targetKey, { key, title, relationLabel, searchTerm }>
+  const relationsGraph = new Map();
+  const addFamilyRelation = (fromKey, toKey, relationLabel, searchTerm) => {
+    if (!fromKey || !toKey || fromKey === toKey || !bucketTitleMap.has(toKey)) return;
+    if (!relationsGraph.has(fromKey)) relationsGraph.set(fromKey, new Map());
+    const mapForFrom = relationsGraph.get(fromKey);
+    if (!mapForFrom.has(toKey)) {
+      mapForFrom.set(toKey, {
+        key: toKey,
+        title: bucketTitleMap.get(toKey),
+        relationLabel,
+        searchTerm: searchTerm || bucketTitleMap.get(toKey).replace(/^أسرة\s+/, '')
+      });
+    }
+  };
+
+  for (const [bKey, bucket] of buckets.entries()) {
+    const hUser = bucket.husbandUser;
+    const wUser = bucket.wifeUser;
+
+    // أ) ربط الأسرة بأسرة والد الزوج (أصل العائلة) والعكس (ابن متزوج له أسرة)
+    if (hUser) {
+      const hParentKey = resolveParentBucketKeyForUser(hUser);
+      if (hParentKey && hParentKey !== bKey) {
+        addFamilyRelation(
+          bKey,
+          hParentKey,
+          `أصل العائلة (والد الزوج)`,
+          bucketTitleMap.get(hParentKey).replace(/^أسرة\s+/, '')
+        );
+        addFamilyRelation(
+          hParentKey,
+          bKey,
+          `أسرة الابن المتزوج (${getDisplayQuadName(hUser)})`,
+          getDisplayQuadName(hUser)
+        );
+      }
+    }
+
+    // ب) ربط الأسرة بأسرة والد الزوجة (مصاهرة / نسب) والعكس (ابنة متزوجة من أسرة أخرى)
+    if (wUser) {
+      const wParentKey = resolveParentBucketKeyForUser(wUser);
+      if (wParentKey && wParentKey !== bKey) {
+        addFamilyRelation(
+          bKey,
+          wParentKey,
+          `مصاهرة (أسرة والد الزوجة)`,
+          bucketTitleMap.get(wParentKey).replace(/^أسرة\s+/, '')
+        );
+        addFamilyRelation(
+          wParentKey,
+          bKey,
+          `مصاهرة: زواج الابنة (${getDisplayQuadName(wUser)})`,
+          getDisplayQuadName(wUser)
+        );
+      }
+    }
+
+    // ج) ربط أي ابن داخل الباكت إذا كان له أسرة مستقلة
+    bucket.childUsers.forEach(cu => {
+      const childOwnKey = userToHeadBucketKey.get(cu.id);
+      if (childOwnKey && childOwnKey !== bKey) {
+        addFamilyRelation(
+          bKey,
+          childOwnKey,
+          `أسرة مستقلة للابن/الابنة (${getDisplayQuadName(cu)})`,
+          getDisplayQuadName(cu)
+        );
+        addFamilyRelation(
+          childOwnKey,
+          bKey,
+          `أسرة الوالدين (${bucketTitleMap.get(bKey).replace(/^أسرة\s+/, '')})`,
+          bucketTitleMap.get(bKey).replace(/^أسرة\s+/, '')
+        );
+      }
+    });
+  }
+
+  // 6) تحويل كل باكت إلى ملف أسرة متكامل
   const familiesList = [];
   for (const bucket of buckets.values()) {
     const hUser = bucket.husbandUser;
@@ -514,14 +614,9 @@ function buildAutoFamiliesFromDatabase({
 
     const allChildren = [...childUserObjs, ...bucket.extraChildren, ...extraFromNamesText];
 
-    // لا نعرض أسرة فارغة تماماً
     if (!husband.full_name && !wife.full_name && allChildren.length === 0) continue;
 
-    const titleCandidate =
-      (husband.full_name && `أسرة ${husband.full_name}`) ||
-      (wife.full_name && `أسرة ${wife.full_name}`) ||
-      (allChildren[0]?.full_name && `أسرة ${allChildren[0].full_name}`) ||
-      'أسرة بدون عنوان';
+    const titleCandidate = bucketTitleMap.get(bucket.key) || 'أسرة بدون عنوان';
 
     const linkedIds = [
       husband.user_id,
@@ -531,6 +626,10 @@ function buildAutoFamiliesFromDatabase({
       ...allChildren.map(c => c.user_id)
     ].filter(Boolean);
 
+    const connectedFamilies = relationsGraph.has(bucket.key)
+      ? Array.from(relationsGraph.get(bucket.key).values())
+      : [];
+
     familiesList.push({
       id: `auto:${bucket.key}`,
       autoKey: bucket.key,
@@ -538,6 +637,7 @@ function buildAutoFamiliesFromDatabase({
       belongsToPriest: bucket.belongsToPriest,
       linkedUserIds: linkedIds,
       lineageParentName: fatherObj.full_name || '',
+      connectedFamilies,
       family_title: titleCandidate,
       address: bucket.addressHint || hUser?.address || wUser?.address || '',
       housing_type: bucket.housingHint || 'تمليك',
@@ -579,7 +679,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   const [visitDraft, setVisitDraft] = useState(emptyVisitDraft(todayISO));
   const [userLookupQ, setUserLookupQ] = useState('');
 
-  // مودال الربط السريع بين الأزواج والآباء والأبناء
+  // مودال الربط السريع بين الأزواج والآباء والأبناء والمصاهرة
   const [linkModalFam, setLinkModalFam] = useState(null);
   const [linkSearchQ, setLinkSearchQ] = useState('');
   const [linkBusy, setLinkBusy] = useState(false);
@@ -678,7 +778,12 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         wife: autoFam.wife?.full_name ? autoFam.wife : { ...autoFam.wife, ...(savedMatch.wife || {}) },
         father: autoFam.father?.full_name ? autoFam.father : { ...autoFam.father, ...(savedMatch.father || {}) },
         mother: autoFam.mother?.full_name ? autoFam.mother : { ...autoFam.mother, ...(savedMatch.mother || {}) },
-        children: autoFam.children?.length > 0 ? autoFam.children : (Array.isArray(savedMatch.children) ? savedMatch.children : []),
+        children:
+          autoFam.children?.length > 0
+            ? autoFam.children
+            : Array.isArray(savedMatch.children)
+            ? savedMatch.children
+            : [],
         visitations_log: Array.isArray(savedMatch.visitations_log) ? savedMatch.visitations_log : []
       };
     });
@@ -690,7 +795,8 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         savedId: sr.id,
         isAutoConnected: false,
         hasSavedRecord: true,
-        belongsToPriest: true
+        belongsToPriest: true,
+        connectedFamilies: []
       });
     });
 
@@ -702,6 +808,16 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       return (a.family_title || '').localeCompare(b.family_title || '', 'ar');
     });
   }, [churchUsers, userChildren, memberSiblings, savedRecords, priest?.id, priest?.full_name]);
+
+  // خريطة لمعرفة هل الشخص له أسرة مستقلة في النظام أم لا لعرضها داخل مودال الربط
+  const userFamilyTitleLookup = useMemo(() => {
+    const map = new Map();
+    unifiedFamilies.forEach(f => {
+      if (f.husband?.user_id) map.set(f.husband.user_id, f.family_title);
+      if (f.wife?.user_id) map.set(f.wife.user_id, f.family_title);
+    });
+    return map;
+  }, [unifiedFamilies]);
 
   // دالة الربط الدائم في قاعدة بيانات الأفراد بين زوجين أو والدين أو أبناء
   const handleLinkPersonInDatabase = async (fam, targetUser, relationType) => {
@@ -753,7 +869,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           actionType: 'ربط_زوجين_بالداتابيز',
           targetTable: 'church_users',
           targetId: primaryUser.id,
-          description: `ربط الزوجين في أسرة واحدة: (${getDisplayQuadName(primaryUser)}) و(${getDisplayQuadName(targetUser)})`
+          description: `ربط الزوجين ومصاهرة الأسرتين: (${getDisplayQuadName(primaryUser)}) و(${getDisplayQuadName(targetUser)})`
         });
       } else if (relationType === 'father') {
         await supabase
@@ -775,21 +891,39 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           .eq('id', primaryUser.id);
       } else if (relationType === 'child') {
         const isPrimaryFemale = primaryUser.gender === 'أنثى';
+        // إذا كان للأسرة زوج وزوجة، نربط الابن بالاثنين معاً كأب وأم
+        const patch = {
+          parent_id: primaryUser.id
+        };
+        if (fam.husband?.user_id) {
+          patch.father_id = fam.husband.user_id;
+          patch.father_full_name = fam.husband.full_name || '';
+          patch.father_phone = fam.husband.phone || '';
+        } else if (!isPrimaryFemale) {
+          patch.father_id = primaryUser.id;
+          patch.father_full_name = getDisplayQuadName(primaryUser);
+          patch.father_phone = primaryUser.phone || '';
+        }
+        if (fam.wife?.user_id) {
+          patch.mother_id = fam.wife.user_id;
+          patch.mother_full_name = fam.wife.full_name || '';
+          patch.mother_phone = fam.wife.phone || '';
+        } else if (isPrimaryFemale) {
+          patch.mother_id = primaryUser.id;
+          patch.mother_full_name = getDisplayQuadName(primaryUser);
+          patch.mother_phone = primaryUser.phone || '';
+        }
+
         await supabase
           .from('church_users')
-          .update({
-            parent_id: primaryUser.id,
-            ...(isPrimaryFemale
-              ? { mother_id: primaryUser.id, mother_full_name: getDisplayQuadName(primaryUser), mother_phone: primaryUser.phone || '' }
-              : { father_id: primaryUser.id, father_full_name: getDisplayQuadName(primaryUser), father_phone: primaryUser.phone || '' })
-          })
+          .update(patch)
           .eq('id', targetUser.id);
       }
 
       await loadData();
       setLinkModalFam(null);
       setLinkSearchQ('');
-      alert('تم ربط الأسرة وتسلسلها في قاعدة البيانات بنجاح ✅');
+      alert('تم ربط الأسرة وتسلسلها وعلاقات المصاهرة في قاعدة البيانات بنجاح ✅');
     } finally {
       setLinkBusy(false);
     }
@@ -1039,7 +1173,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         if (!q) return true;
         return normalizeArabic((getDisplayQuadName(u) || '') + ' ' + (u.phone || '')).includes(q);
       })
-      .slice(0, 12);
+      .slice(0, 15);
   }, [linkModalFam, linkSearchQ, churchUsers]);
 
   const renderPersonSection = (title, roleKey, allowAliveToggle = false) => {
@@ -1146,7 +1280,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             <Users size={18} /> سجل افتقاد أسر ومخدومي الأب الكاهن ({unifiedFamilies.length} أسرة متصلة)
           </h3>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            ربط تلقائي ذكي من قاعدة بيانات الأفراد بالتسلسل العائلي (الجد ← الزوج والزوجة ← الأبناء) + ربط مباشر بين الزوجين
+            ربط تلقائي ذكي من قاعدة بيانات الأفراد بالتسلسل العائلي (الأب والأم ← الأبناء ← روابط المصاهرة والنسب بين الأسر)
           </p>
         </div>
 
@@ -1220,6 +1354,15 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               onChange={e => setSearchQ(e.target.value)}
             />
           </div>
+          {searchQ && (
+            <button
+              type="button"
+              onClick={() => setSearchQ('')}
+              className="px-3 py-2 bg-rose-50 text-rose-800 border border-rose-200 rounded-xl font-black cursor-pointer"
+            >
+              مسح الفلتر ✕
+            </button>
+          )}
           <select
             className="p-2 border rounded-xl bg-[#fbfaf7] font-bold"
             value={statusFilter}
@@ -1244,6 +1387,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           {filteredRecords.map(fam => {
             const kids = Array.isArray(fam.children) ? fam.children : [];
             const visits = Array.isArray(fam.visitations_log) ? fam.visitations_log : [];
+            const connected = Array.isArray(fam.connectedFamilies) ? fam.connectedFamilies : [];
             const primaryPhone = fam.phone || fam.husband?.phone || fam.wife?.phone || '';
 
             return (
@@ -1272,6 +1416,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                       </span>
                     </div>
                     <strong className="text-sm sm:text-base text-[#7a1c24] block">{fam.family_title}</strong>
+
                     {fam.lineageParentName && (
                       <button
                         type="button"
@@ -1282,6 +1427,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                         <GitBranch size={11} /> تسلسل العائلة: أسرة الوالد ({fam.lineageParentName}) ↗
                       </button>
                     )}
+
                     <div className="flex flex-wrap gap-x-3 gap-y-1 text-gray-600 mt-1">
                       {fam.address && <span className="inline-flex items-center gap-1"><MapPin size={12} /> {fam.address}</span>}
                       {primaryPhone && <span className="inline-flex items-center gap-1"><Phone size={12} /> {primaryPhone}</span>}
@@ -1334,6 +1480,28 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                   </div>
                 </div>
 
+                {/* شبكة الأسر المترابطة بالمصاهرة والنسب والتسلسل */}
+                {connected.length > 0 && (
+                  <div className="bg-purple-50/60 p-2.5 rounded-2xl border border-purple-200 space-y-1.5">
+                    <strong className="text-[10px] text-purple-950 flex items-center gap-1">
+                      <Network size={12} /> أسر متصلة بالنسب والمصاهرة ({connected.length}):
+                    </strong>
+                    <div className="flex flex-wrap gap-1.5">
+                      {connected.map(rel => (
+                        <button
+                          key={rel.key}
+                          type="button"
+                          onClick={() => setSearchQ(rel.searchTerm)}
+                          className="px-2.5 py-1 bg-white hover:bg-purple-100 text-purple-950 border border-purple-200 rounded-xl text-[10px] font-black inline-flex items-center gap-1 cursor-pointer text-right"
+                        >
+                          <span>🔗 {rel.title}</span>
+                          <span className="text-purple-700 font-bold">({rel.relationLabel}) ↗</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid gap-2">
                   {renderPersonCard('الزوج', fam.husband, '👨')}
                   {renderPersonCard('الزوجة', fam.wife, '👩')}
@@ -1380,7 +1548,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         </div>
       )}
 
-      {/* مودال الربط المباشر بين الزوجين أو الوالدين والأبناء في الداتابيز */}
+      {/* مودال الربط المباشر بين الزوجين أو الوالدين والأبناء والمصاهرة في الداتابيز */}
       {linkModalFam && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-55">
           <div className="bg-white rounded-3xl w-full max-w-xl p-5 sm:p-6 space-y-3 font-bold max-h-[90vh] overflow-y-auto">
@@ -1390,7 +1558,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                   🔗 ربط أفراد وتسلسل أسرة: {linkModalFam.family_title}
                 </h3>
                 <p className="text-[11px] text-gray-500 font-normal mt-0.5">
-                  اختر أي شخص من حسابات الكنيسة لدمجه كزوج/زوجة أو كوالد/والدة أو كابن في تسلسل هذه الأسرة.
+                  اختر أي شخص من حسابات الكنيسة لدمجه كزوج/زوجة (ربط ومصاهرة الأسرتين) أو كوالد/والدة أو كابن في تسلسل هذه الأسرة.
                 </p>
               </div>
               <button type="button" onClick={() => setLinkModalFam(null)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer">
@@ -1402,7 +1570,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               <Search size={15} className="absolute right-3 top-2.5 text-gray-400" />
               <input
                 autoFocus
-                placeholder="ابحث بالاسم أو رقم الموبايل (مثلاً: ايريني / فرنسيس)..."
+                placeholder="ابحث بالاسم أو رقم الموبايل (مثلاً: ايريني / ابانوب / فرنسيس)..."
                 className="w-full pr-9 pl-3 py-2 border rounded-xl bg-[#fbfaf7]"
                 value={linkSearchQ}
                 onChange={e => setLinkSearchQ(e.target.value)}
@@ -1413,50 +1581,58 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               {linkModalCandidates.length === 0 ? (
                 <p className="text-center text-gray-400 py-4">لا توجد حسابات مطابقة.</p>
               ) : (
-                linkModalCandidates.map(u => (
-                  <div key={u.id} className="p-3 bg-[#fbfaf7] border rounded-2xl flex flex-wrap justify-between items-center gap-2">
-                    <div>
-                      <strong className="text-gray-900 block">{getDisplayQuadName(u)}</strong>
-                      <span className="text-[11px] text-gray-500">
-                        {u.gender === 'أنثى' ? '♀️ أنثى' : '♂️ ذكر'} • 📞 {u.phone || '—'} {u.dob ? `• 🎂 ${u.dob}` : ''}
-                      </span>
+                linkModalCandidates.map(u => {
+                  const existingFamTitle = userFamilyTitleLookup.get(u.id);
+                  return (
+                    <div key={u.id} className="p-3 bg-[#fbfaf7] border rounded-2xl flex flex-wrap justify-between items-center gap-2">
+                      <div>
+                        <strong className="text-gray-900 block">{getDisplayQuadName(u)}</strong>
+                        <span className="text-[11px] text-gray-500 block">
+                          {u.gender === 'أنثى' ? '♀️ أنثى' : '♂️ ذكر'} • 📞 {u.phone || '—'} {u.dob ? `• 🎂 ${u.dob}` : ''}
+                        </span>
+                        {existingFamTitle && (
+                          <span className="mt-1 inline-block px-2 py-0.5 bg-purple-100 text-purple-950 rounded text-[10px] font-black">
+                            🏠 كارت أسرته الحالي: {existingFamTitle}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          type="button"
+                          disabled={linkBusy}
+                          onClick={() => handleLinkPersonInDatabase(linkModalFam, u, 'spouse')}
+                          className="px-2.5 py-1.5 bg-rose-700 hover:bg-rose-800 text-white rounded-xl text-[11px] font-black cursor-pointer"
+                        >
+                          💍 ربط كزوج/زوجة (دمج الأسرتين)
+                        </button>
+                        <button
+                          type="button"
+                          disabled={linkBusy}
+                          onClick={() => handleLinkPersonInDatabase(linkModalFam, u, 'father')}
+                          className="px-2.5 py-1.5 bg-amber-100 text-amber-950 rounded-xl text-[11px] cursor-pointer"
+                        >
+                          👴 كوالد
+                        </button>
+                        <button
+                          type="button"
+                          disabled={linkBusy}
+                          onClick={() => handleLinkPersonInDatabase(linkModalFam, u, 'mother')}
+                          className="px-2.5 py-1.5 bg-purple-100 text-purple-950 rounded-xl text-[11px] cursor-pointer"
+                        >
+                          👵 كوالدة
+                        </button>
+                        <button
+                          type="button"
+                          disabled={linkBusy}
+                          onClick={() => handleLinkPersonInDatabase(linkModalFam, u, 'child')}
+                          className="px-2.5 py-1.5 bg-blue-100 text-blue-950 rounded-xl text-[11px] cursor-pointer"
+                        >
+                          👶 كابن/ابنة
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex flex-wrap gap-1">
-                      <button
-                        type="button"
-                        disabled={linkBusy}
-                        onClick={() => handleLinkPersonInDatabase(linkModalFam, u, 'spouse')}
-                        className="px-2.5 py-1.5 bg-rose-700 hover:bg-rose-800 text-white rounded-xl text-[11px] font-black cursor-pointer"
-                      >
-                        💍 ربط كزوج/زوجة (دمج الأسرتين)
-                      </button>
-                      <button
-                        type="button"
-                        disabled={linkBusy}
-                        onClick={() => handleLinkPersonInDatabase(linkModalFam, u, 'father')}
-                        className="px-2.5 py-1.5 bg-amber-100 text-amber-950 rounded-xl text-[11px] cursor-pointer"
-                      >
-                        👴 كوالد
-                      </button>
-                      <button
-                        type="button"
-                        disabled={linkBusy}
-                        onClick={() => handleLinkPersonInDatabase(linkModalFam, u, 'mother')}
-                        className="px-2.5 py-1.5 bg-purple-100 text-purple-950 rounded-xl text-[11px] cursor-pointer"
-                      >
-                        👵 كوالدة
-                      </button>
-                      <button
-                        type="button"
-                        disabled={linkBusy}
-                        onClick={() => handleLinkPersonInDatabase(linkModalFam, u, 'child')}
-                        className="px-2.5 py-1.5 bg-blue-100 text-blue-950 rounded-xl text-[11px] cursor-pointer"
-                      >
-                        👶 كابن/ابنة
-                      </button>
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -1661,6 +1837,22 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                 <X size={18} />
               </button>
             </div>
+
+            {Array.isArray(selectedFamily.connectedFamilies) && selectedFamily.connectedFamilies.length > 0 && (
+              <div className="bg-purple-50/60 p-3 rounded-2xl border border-purple-200 space-y-1.5">
+                <strong className="text-xs text-purple-950 block">🔗 الأسر المتصلة بالنسب والمصاهرة:</strong>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedFamily.connectedFamilies.map(rel => (
+                    <span
+                      key={rel.key}
+                      className="px-2.5 py-1 bg-white text-purple-950 border border-purple-200 rounded-xl text-[11px] font-black"
+                    >
+                      {rel.title} ({rel.relationLabel})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="grid sm:grid-cols-2 gap-2">
               {renderPersonCard('الزوج', selectedFamily.husband, '👨')}
