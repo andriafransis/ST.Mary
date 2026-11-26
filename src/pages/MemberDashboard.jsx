@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLogger';
 import PriestInvitationModal from '../components/priest/PriestInvitationModal';
+import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
 import {
   Phone, AlertCircle, CheckCircle2, Calendar, BookOpen,
   Clock, UserCheck, MessageCircle, Bus, MapPin, Layers, XCircle, MailPlus
