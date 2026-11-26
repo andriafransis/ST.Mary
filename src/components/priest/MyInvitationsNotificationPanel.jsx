@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../../lib/supabase';
 import InvitationQrCard from './InvitationQrCard';
 import { Bell, Crown, Users, QrCode, CheckCircle2, Calendar, MapPin } from 'lucide-react';
 

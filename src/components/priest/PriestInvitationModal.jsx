@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { supabase } from '../lib/supabase';
-import { logActivity } from '../lib/activityLogger';
+import { supabase } from '../../lib/supabase';
+import { logActivity } from '../../lib/activityLogger';
 import {
   MailPlus, Calendar, MapPin, Clock, Trash2,
   CheckCircle2, XCircle, Hourglass, X
