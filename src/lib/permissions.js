@@ -8,6 +8,7 @@ export const SCREEN_ORDER = [
   'parent_panel',
   'edu_center',
   'joseph_arimathea',
+  'hidden_families',
   'approvals',
   'permissions',
   'trips_office',
@@ -29,6 +30,7 @@ export const SCREEN_LABELS = {
   parent_panel: '👨‍👩‍👦 متابعة ولي الأمر',
   edu_center: '🎓 المركز التعليمي',
   joseph_arimathea: '🕊️ خدمة يوسف الرامي',
+  hidden_families: '🕊️ خدمة الأسر المستترة',
   approvals: '✅ طلبات الانضمام',
   permissions: '🔐 إدارة الصلاحيات',
   trips_office: '🚌 مكتب الرحلات',
@@ -52,104 +54,165 @@ export const ROLES = [
   { key: 'worker', label: '🛠️ عامل / فراش الكنيسة' }
 ];
 
+// الفئات الرئيسية الموحدة لتسهيل الاختيار دفعة واحدة (Select All للفئة)
+export const CATEGORY_PRESETS = {
+  member: {
+    key: 'member',
+    label: '👤 المخدوم / الشعب (عرض فقط)',
+    baseRole: 'member',
+    defaultScreen: 'member_panel',
+    screens: ['public_page', 'member_panel', 'edu_center', 'trips_office', 'deacons'],
+    actions: { view: true, create: false, edit: false, delete: false }
+  },
+  parent: {
+    key: 'parent',
+    label: '👨‍👩‍👦 ولي الأمر (عرض ومتابعة أوسع)',
+    baseRole: 'parent',
+    defaultScreen: 'parent_panel',
+    screens: ['public_page', 'parent_panel', 'member_panel', 'edu_center', 'trips_office', 'deacons'],
+    actions: { view: true, create: false, edit: false, delete: false }
+  },
+  servant: {
+    key: 'servant',
+    label: '📖 الخدام (يشوف ويكتب/يعدّل — بدون حذف)',
+    baseRole: 'servant',
+    defaultScreen: 'servant_panel',
+    screens: [
+      'servant_panel',
+      'member_panel',
+      'parent_panel',
+      'edu_center',
+      'trips_office',
+      'deacons',
+      'certs',
+      'social_status',
+      'public_page'
+    ],
+    actions: { view: true, create: true, edit: true, delete: false }
+  },
+  head_servant: {
+    key: 'head_servant',
+    label: '⭐ أمين الخدمة (كل شيء ما عدا صلاحيات الأدمن)',
+    baseRole: 'head_servant',
+    defaultScreen: 'servant_panel',
+    screens: [
+      'servant_panel',
+      'member_panel',
+      'parent_panel',
+      'edu_center',
+      'joseph_arimathea',
+      'hidden_families',
+      'approvals',
+      'trips_office',
+      'deacons',
+      'certs',
+      'social_status',
+      'public_editor',
+      'public_page'
+    ],
+    actions: { view: true, create: true, edit: true, delete: true }
+  },
+  priest: {
+    key: 'priest',
+    label: '✝ الأب الكاهن (يشوف ويعمل ويعمل إيديت)',
+    baseRole: 'priest',
+    defaultScreen: 'priest_panel',
+    screens: [
+      'priest_panel',
+      'servant_panel',
+      'member_panel',
+      'parent_panel',
+      'edu_center',
+      'joseph_arimathea',
+      'hidden_families',
+      'approvals',
+      'trips_office',
+      'deacons',
+      'certs',
+      'social_status',
+      'public_editor',
+      'public_page'
+    ],
+    actions: { view: true, create: true, edit: true, delete: false }
+  },
+  admin: {
+    key: 'admin',
+    label: '🛡️ السوبر أدمن (يشوف ويعمل كل حاجة)',
+    baseRole: 'admin',
+    defaultScreen: 'admin_panel',
+    screens: SCREEN_ORDER,
+    actions: { view: true, create: true, edit: true, delete: true }
+  }
+};
+
 const EMPTY_PERM = { view: false, create: false, edit: false, delete: false };
+
+function buildPresetScreens(screens = [], { view = true, create = false, edit = false, delete: del = false }, excludePublicEdit = false) {
+  const map = {};
+  SCREEN_ORDER.forEach((scr) => {
+    const isAllowed = screens.includes(scr);
+    if (!isAllowed) {
+      map[scr] = { ...EMPTY_PERM };
+      return;
+    }
+    if (scr === 'public_page') {
+      map[scr] = { view: true, create: false, edit: false, delete: false };
+      return;
+    }
+    if (excludePublicEdit && (scr === 'admin_panel' || scr === 'permissions')) {
+      map[scr] = { ...EMPTY_PERM };
+      return;
+    }
+    map[scr] = {
+      view: Boolean(view),
+      create: Boolean(view && create),
+      edit: Boolean(view && edit),
+      delete: Boolean(view && del)
+    };
+  });
+  return map;
+}
 
 export const ROLE_DEFAULT_PERMISSIONS = {
   admin: {
-    defaultScreen: 'admin_panel',
-    screens: SCREEN_ORDER.reduce((acc, s) => {
-      acc[s] = s === 'public_page'
-        ? { view: true, create: false, edit: false, delete: false }
-        : { view: true, create: true, edit: true, delete: true };
-      return acc;
-    }, {})
+    defaultScreen: CATEGORY_PRESETS.admin.defaultScreen,
+    screens: buildPresetScreens(CATEGORY_PRESETS.admin.screens, CATEGORY_PRESETS.admin.actions)
   },
   priest: {
-    defaultScreen: 'priest_panel',
-    screens: {
-      priest_panel: { view: true, create: true, edit: true, delete: true },
-      servant_panel: { view: true, create: true, edit: true, delete: false },
-      member_panel: { view: true, create: false, edit: false, delete: false },
-      edu_center: { view: true, create: true, edit: true, delete: false },
-      joseph_arimathea: { view: true, create: true, edit: true, delete: false },
-      approvals: { view: true, create: false, edit: true, delete: false },
-      trips_office: { view: true, create: true, edit: true, delete: false },
-      deacons: { view: true, create: true, edit: true, delete: false },
-      certs: { view: true, create: true, edit: true, delete: false },
-      social_status: { view: true, create: false, edit: true, delete: false },
-      public_editor: { view: true, create: true, edit: true, delete: false },
-      public_page: { view: true, create: false, edit: false, delete: false }
-    }
+    defaultScreen: CATEGORY_PRESETS.priest.defaultScreen,
+    screens: buildPresetScreens(CATEGORY_PRESETS.priest.screens, CATEGORY_PRESETS.priest.actions, true)
   },
   head_servant: {
-    defaultScreen: 'servant_panel',
-    screens: {
-      servant_panel: { view: true, create: true, edit: true, delete: false },
-      member_panel: { view: true, create: false, edit: false, delete: false },
-      edu_center: { view: true, create: true, edit: true, delete: false },
-      approvals: { view: true, create: false, edit: true, delete: false },
-      trips_office: { view: true, create: true, edit: false, delete: false },
-      deacons: { view: true, create: false, edit: false, delete: false },
-      public_page: { view: true, create: false, edit: false, delete: false }
-    }
+    defaultScreen: CATEGORY_PRESETS.head_servant.defaultScreen,
+    screens: buildPresetScreens(CATEGORY_PRESETS.head_servant.screens, CATEGORY_PRESETS.head_servant.actions, true)
   },
   vice_head_servant: {
     defaultScreen: 'servant_panel',
-    screens: {
-      servant_panel: { view: true, create: true, edit: true, delete: false },
-      member_panel: { view: true, create: false, edit: false, delete: false },
-      edu_center: { view: true, create: true, edit: false, delete: false },
-      trips_office: { view: true, create: true, edit: false, delete: false },
-      deacons: { view: true, create: false, edit: false, delete: false },
-      public_page: { view: true, create: false, edit: false, delete: false }
-    }
+    screens: buildPresetScreens(CATEGORY_PRESETS.servant.screens, { view: true, create: true, edit: true, delete: false })
   },
   servant: {
-    defaultScreen: 'servant_panel',
-    screens: {
-      servant_panel: { view: true, create: true, edit: true, delete: false },
-      member_panel: { view: true, create: false, edit: false, delete: false },
-      edu_center: { view: true, create: false, edit: false, delete: false },
-      trips_office: { view: true, create: false, edit: false, delete: false },
-      public_page: { view: true, create: false, edit: false, delete: false }
-    }
+    defaultScreen: CATEGORY_PRESETS.servant.defaultScreen,
+    screens: buildPresetScreens(CATEGORY_PRESETS.servant.screens, CATEGORY_PRESETS.servant.actions)
   },
   meeting_servant: {
     defaultScreen: 'servant_panel',
-    screens: {
-      servant_panel: { view: true, create: true, edit: true, delete: false },
-      public_page: { view: true, create: false, edit: false, delete: false }
-    }
+    screens: buildPresetScreens(['servant_panel', 'member_panel', 'edu_center', 'public_page'], { view: true, create: true, edit: true, delete: false })
   },
   mercy_servant: {
     defaultScreen: 'servant_panel',
-    screens: {
-      servant_panel: { view: true, create: true, edit: true, delete: false },
-      public_page: { view: true, create: false, edit: false, delete: false }
-    }
+    screens: buildPresetScreens(['servant_panel', 'member_panel', 'hidden_families', 'joseph_arimathea', 'public_page'], { view: true, create: true, edit: true, delete: false })
   },
   member: {
-    defaultScreen: 'member_panel',
-    screens: {
-      member_panel: { view: true, create: false, edit: false, delete: false },
-      edu_center: { view: true, create: false, edit: false, delete: false },
-      trips_office: { view: true, create: false, edit: false, delete: false },
-      public_page: { view: true, create: false, edit: false, delete: false }
-    }
+    defaultScreen: CATEGORY_PRESETS.member.defaultScreen,
+    screens: buildPresetScreens(CATEGORY_PRESETS.member.screens, CATEGORY_PRESETS.member.actions)
   },
   parent: {
-    defaultScreen: 'parent_panel',
-    screens: {
-      parent_panel: { view: true, create: false, edit: false, delete: false },
-      public_page: { view: true, create: false, edit: false, delete: false }
-    }
+    defaultScreen: CATEGORY_PRESETS.parent.defaultScreen,
+    screens: buildPresetScreens(CATEGORY_PRESETS.parent.screens, CATEGORY_PRESETS.parent.actions)
   },
   worker: {
     defaultScreen: 'public_page',
-    screens: {
-      public_page: { view: true, create: false, edit: false, delete: false },
-      deacons: { view: true, create: false, edit: false, delete: false }
-    }
+    screens: buildPresetScreens(['public_page', 'deacons', 'trips_office'], { view: true, create: false, edit: false, delete: false })
   }
 };
 
