@@ -6,13 +6,13 @@ import {
   buildScreenPermissionsMap,
   extractAllowedScreensFromMap
 } from './PermissionsPage';
-import { CheckCircle2, XCircle, Clock, UserCheck, MessageCircle, X } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, UserCheck, MessageCircle, X, ShieldCheck, Baby } from 'lucide-react';
 
 const STAGE_OPTIONS = [
   'حضانة', 'أولى ابتدائي', 'ثانية ابتدائي', 'ثالثة ابتدائي', 'رابعة ابتدائي', 'خامسة ابتدائي', 'سادسة ابتدائي',
   'أولى إعدادي', 'ثانية إعدادي', 'ثالثة إعدادي',
   'أولى ثانوي', 'ثانية ثانوي', 'ثالثة ثانوي',
-  'جامعة وخريجين', 'اجتماع الشباب', 'اجتماع الأسرة', 'شعب عام', 'عام'
+  'جامعة وخريجين', 'اجتماع الشباب', 'اجتماع الأسرة', 'اجتماع الصالة', 'شعب عام', 'عام'
 ];
 
 export default function ApprovalsPage({ users = [], services = [], onRefresh }) {
@@ -21,6 +21,9 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
   const [templateOverrides, setTemplateOverrides] = useState({});
   const [stageOverrides, setStageOverrides] = useState({});
   const [classOverrides, setClassOverrides] = useState({});
+  const [serviceStatusOverrides, setServiceStatusOverrides] = useState({});
+  const [serviceConfirmedOverrides, setServiceConfirmedOverrides] = useState({});
+  const [childLinkOverrides, setChildLinkOverrides] = useState({});
   const [templates, setTemplates] = useState(() =>
     DEFAULT_ROLE_TEMPLATES.map(t => ({
       ...t,
@@ -73,15 +76,45 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
   const pendingUsers = users.filter(u => u.status === 'pending');
   const recentUsers = users.filter(u => u.status === 'rejected').slice(0, 10);
 
+  const candidateChildren = users.filter(
+    u => u.id && u.status !== 'pending' && u.status !== 'rejected'
+  );
+
   const resolveParentType = (u) => {
     if (parentTypeOverrides[u.id] !== undefined) return parentTypeOverrides[u.id];
     if (u.parent_type === 'father' || u.parent_type === 'mother') return u.parent_type;
     if (u.permissions?.parent_type === 'father' || u.permissions?.parent_type === 'mother') {
       return u.permissions.parent_type;
     }
-    if (u.family_role === 'أب' || u.family_role === 'والد') return 'father';
-    if (u.family_role === 'أم' || u.family_role === 'والدة') return 'mother';
+    if (u.family_role === 'أب' || u.family_role === 'والد' || u.guardian_type === 'father') return 'father';
+    if (u.family_role === 'أم' || u.family_role === 'والدة' || u.guardian_type === 'mother') return 'mother';
     return '';
+  };
+
+  const resolveServiceStatus = (u) => {
+    if (serviceStatusOverrides[u.id] !== undefined) return serviceStatusOverrides[u.id];
+    if (u.service_membership_status === 'not_in_service' || u.is_site_observer || u.permissions?.engagement_mode === 'not_in_service') {
+      return 'not_in_service';
+    }
+    if (u.permissions?.engagement_mode === 'hall_meeting' || (u.detailed_stage || '').includes('اجتماع الصالة')) {
+      return 'hall_meeting';
+    }
+    if (u.permissions?.engagement_mode === 'parish_only' || u.role === 'parish' || u.is_parish) {
+      return 'parish_only';
+    }
+    return 'in_service';
+  };
+
+  const isServiceConfirmedForUser = (u) => {
+    if (serviceConfirmedOverrides[u.id] !== undefined) return Boolean(serviceConfirmedOverrides[u.id]);
+    return Boolean(u.permissions?.service_confirmed);
+  };
+
+  const getChildStageBadge = (child) => {
+    const stg = child.detailed_stage || child.service_stage || '';
+    const cls = child.assigned_class || '';
+    if (stg && cls) return `${stg} — ${cls}`;
+    return stg || cls || 'غير محدد المرحلة';
   };
 
   const sendApprovalWelcomeNotification = async (user) => {
@@ -93,7 +126,6 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
       `• كلمة المرور: ${user.password || '123'}\n` +
       `يمكنك تسجيل الدخول الآن والتمتع بخدمات الكنيسة 🙏`;
 
-    // 1) حفظ إشعار القبول الصريح باليوزر والباسورد في church_notifications
     try {
       await supabase.from('church_notifications').insert([{
         user_id: user.id,
@@ -113,7 +145,6 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
       // ignore if notifications table differs
     }
 
-    // 2) بث فوري (Realtime Broadcast) ليصل للمستخدم لو فاتح التطبيق أو شاشة الدخول
     try {
       const ch = supabase.channel('church-approval-alerts');
       await ch.subscribe();
@@ -133,7 +164,6 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
       // ignore broadcast errors
     }
 
-    // 3) عرض كارت تأكيد للأدمن/الكاهن مع زر إرسال واتساب جاهز
     setApprovedWelcomeBanner({
       user,
       text: welcomeText
@@ -144,10 +174,28 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
     setBusyId(user.id);
     try {
       const assignedRole = roleOverrides[user.id] || user.requested_role || user.role || 'member';
-      const assignedStage = stageOverrides[user.id] ?? (user.detailed_stage || user.service_stage || '');
-      const assignedClass = classOverrides[user.id] ?? (user.assigned_class || '');
+      const serviceStatus = resolveServiceStatus(user);
+      const isOutOfService = serviceStatus === 'not_in_service';
+      const serviceConfirmed = decision === 'approved'
+        ? (serviceConfirmedOverrides[user.id] !== undefined ? Boolean(serviceConfirmedOverrides[user.id]) : true)
+        : false;
+
+      const assignedStage = isOutOfService
+        ? 'خارج الخدمة / زائر موقع'
+        : (serviceStatus === 'hall_meeting'
+            ? (stageOverrides[user.id] ?? (user.detailed_stage || 'اجتماع الصالة'))
+            : (serviceStatus === 'parish_only'
+                ? (stageOverrides[user.id] ?? (user.detailed_stage || 'خدمة شعب'))
+                : (stageOverrides[user.id] ?? (user.detailed_stage || user.service_stage || ''))));
+
+      const assignedClass = isOutOfService ? '' : (classOverrides[user.id] ?? (user.assigned_class || ''));
       const resolvedParentType = resolveParentType(user);
-      const isParent = assignedRole === 'parent' || Boolean(user.permissions?.also_parent) || Boolean(resolvedParentType);
+      const selectedChildId = childLinkOverrides[user.id] || '';
+      const isParent =
+        assignedRole === 'parent' ||
+        Boolean(user.permissions?.also_parent) ||
+        Boolean(resolvedParentType) ||
+        Boolean(selectedChildId);
 
       const chosenTplKey =
         templateOverrides[user.id] ??
@@ -157,8 +205,14 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
       const matchedTpl = templates.find(t => t.key === chosenTplKey);
       const basePerms = { ...(user.permissions || {}) };
 
+      basePerms.engagement_mode = serviceStatus;
+      basePerms.service_membership_status = isOutOfService ? 'not_in_service' : 'in_service';
+      basePerms.service_confirmed = serviceConfirmed;
+      basePerms.is_site_observer = isOutOfService;
+
       if (resolvedParentType) {
         basePerms.parent_type = resolvedParentType;
+        basePerms.guardian_type = resolvedParentType;
       }
       if (isParent) {
         basePerms.also_parent = Boolean(user.permissions?.also_parent) || assignedRole !== 'parent';
@@ -189,11 +243,15 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
         detailed_stage: assignedStage,
         service_stage: assignedStage,
         assigned_class: assignedClass,
+        service_membership_status: isOutOfService ? 'not_in_service' : 'in_service',
+        is_site_observer: isOutOfService,
+        is_parent_guardian: isParent,
         permissions: basePerms
       };
 
       if (resolvedParentType) {
         updatePayload.parent_type = resolvedParentType;
+        updatePayload.guardian_type = resolvedParentType;
         updatePayload.family_role = resolvedParentType === 'mother' ? 'أم' : 'أب';
       }
 
@@ -205,6 +263,25 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
       if (error) {
         alert('خطأ: ' + error.message);
       } else {
+        // ربط الطفل / الابن المختار بولي الأمر من الداخل عند القبول
+        if (decision === 'approved' && selectedChildId) {
+          const childObj = candidateChildren.find(c => String(c.id) === String(selectedChildId));
+          if (childObj) {
+            const childUpdate = {
+              parent_id: user.id
+            };
+            if (resolvedParentType === 'mother') {
+              childUpdate.mother_id = user.id;
+            } else {
+              childUpdate.father_id = user.id;
+            }
+            await supabase
+              .from('church_users')
+              .update(childUpdate)
+              .eq('id', childObj.id);
+          }
+        }
+
         if (decision === 'approved') {
           await sendApprovalWelcomeNotification(user);
         }
@@ -223,12 +300,11 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
             <UserCheck size={20} /> طلبات الانضمام وتحديد الرتب وولي الأمر (أب/أم) وGroup Policy ({pendingUsers.length})
           </h2>
           <p className="text-xs text-gray-500">
-            حدد الرتبة، وهل ولي الأمر «أب» أم «أم»، وقالب الصلاحيات (Group Policy) ثم اضغط قبول لإرسال إشعار الترحيب ببيانات الدخول
+            أكد هل الشخص معانا في الخدمة وفي خدمة إيه، واربط ولي الأمر بالطفل/الابن (مع مرحلته)، وحدد الرتبة وGroup Policy ثم اضغط قبول
           </p>
         </div>
       </div>
 
-      {/* إشعار تأكيد القبول وإرسال بيانات الدخول للعضو */}
       {approvedWelcomeBanner && (
         <div className="bg-emerald-50 border-2 border-emerald-400 p-4 rounded-3xl shadow-sm space-y-2.5">
           <div className="flex justify-between items-start gap-2">
@@ -272,6 +348,9 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
         <div className="grid gap-3">
           {pendingUsers.map(u => {
             const selectedRole = roleOverrides[u.id] || u.requested_role || u.role || 'member';
+            const serviceStatus = resolveServiceStatus(u);
+            const isOutOfService = serviceStatus === 'not_in_service';
+            const confirmedInService = isServiceConfirmedForUser(u);
             const selectedStage = stageOverrides[u.id] ?? (u.detailed_stage || u.service_stage || '');
             const selectedClass = classOverrides[u.id] ?? (u.assigned_class || '');
             const selectedParentType = resolveParentType(u);
@@ -280,19 +359,46 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
               u.permissions?.template_key ??
               (selectedRole === 'parent' ? 'parent' : '');
             const isAlsoParent = Boolean(u.permissions?.also_parent);
-            const showParentSelector = selectedRole === 'parent' || isAlsoParent || Boolean(u.children_names);
-            const alreadyLinkedChildren = users.filter(ch => ch.parent_id === u.id || ch.father_id === u.id);
+            const showParentSelector =
+              selectedRole === 'parent' ||
+              isAlsoParent ||
+              Boolean(selectedParentType) ||
+              Boolean(u.children_names);
+
+            const alreadyLinkedChildren = users.filter(
+              ch => ch.parent_id === u.id || ch.father_id === u.id || ch.mother_id === u.id
+            );
+            const selectedChildId = childLinkOverrides[u.id] || '';
+            const chosenChildObj = candidateChildren.find(c => String(c.id) === String(selectedChildId));
 
             return (
               <div key={u.id} className="bg-white p-4 rounded-3xl border-2 border-amber-200 shadow-sm space-y-3">
                 <div className="flex flex-wrap justify-between items-start gap-2">
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="px-2 py-0.5 bg-amber-100 text-amber-950 rounded text-[11px] font-bold flex items-center gap-1">
                         <Clock size={12} /> قيد الانتظار
                       </span>
                       <strong className="text-base text-gray-900">{u.full_name}</strong>
                       <span className="text-xs text-gray-500">(@{u.username})</span>
+
+                      {/* حالة التواجد في الخدمة */}
+                      <span className={`px-2 py-0.5 rounded text-[11px] font-black ${
+                        isOutOfService
+                          ? 'bg-slate-200 text-slate-900'
+                          : 'bg-emerald-100 text-emerald-900'
+                      }`}>
+                        {isOutOfService
+                          ? '🚪 غير تابع للخدمة / زائر موقع'
+                          : `✅ معانا في الخدمة${selectedStage ? `: ${selectedStage}` : ''}`}
+                      </span>
+
+                      {confirmedInService && !isOutOfService && (
+                        <span className="px-2 py-0.5 rounded text-[11px] font-black bg-teal-100 text-teal-900 inline-flex items-center gap-1">
+                          <ShieldCheck size={12} /> مؤكد في الخدمة (Confirmed)
+                        </span>
+                      )}
+
                       {selectedParentType && (
                         <span className={`px-2 py-0.5 rounded text-[11px] font-black ${
                           selectedParentType === 'mother' ? 'bg-pink-100 text-pink-900' : 'bg-sky-100 text-sky-900'
@@ -306,22 +412,114 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
                         </span>
                       )}
                     </div>
+
                     <p className="text-xs text-gray-600">
                       📞 {u.phone || '—'} • 🎂 {u.dob || '—'} • 📍 {u.address || '—'}
                       {u.is_deacon ? ` • 🕯️ شماس (${u.deacon_rank || 'شماس'})` : ''}
+                      {selectedClass && !isOutOfService ? ` • 🏫 فصل: ${selectedClass}` : ''}
                     </p>
-                    {(u.children_names || alreadyLinkedChildren.length > 0) && (
+
+                    {(u.children_names || alreadyLinkedChildren.length > 0 || chosenChildObj) && (
                       <p className="text-xs text-amber-950 bg-amber-50 px-2.5 py-1.5 rounded-xl border border-amber-200 inline-block">
-                        👶 <strong>الأبناء:</strong>{' '}
-                        {alreadyLinkedChildren.length > 0
-                          ? alreadyLinkedChildren.map(c => c.full_name).join('، ')
-                          : u.children_names}
+                        👶 <strong>الأبناء والمرحلة:</strong>{' '}
+                        {[
+                          ...alreadyLinkedChildren.map(c => `${c.full_name} (${getChildStageBadge(c)})`),
+                          ...(chosenChildObj ? [`${chosenChildObj.full_name} (${getChildStageBadge(chosenChildObj)})`] : []),
+                          ...(u.children_names ? [u.children_names] : [])
+                        ].filter((v, i, arr) => arr.indexOf(v) === i).join(' ، ')}
                       </p>
                     )}
                   </div>
                 </div>
 
-                <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-2 pt-2 border-t items-center">
+                {/* سطر تأكيد الخدمة ونوع الارتباط */}
+                <div className="bg-cyan-50/60 border border-cyan-200 rounded-2xl p-3 grid sm:grid-cols-3 gap-2 items-center">
+                  <div>
+                    <label className="block text-[11px] font-black text-cyan-950 mb-1">
+                      هل معانا في الخدمة ولا لأ؟
+                    </label>
+                    <select
+                      className="w-full p-2 border border-cyan-300 rounded-xl bg-white text-xs font-bold"
+                      value={serviceStatus}
+                      onChange={e => setServiceStatusOverrides({ ...serviceStatusOverrides, [u.id]: e.target.value })}
+                    >
+                      <option value="in_service">✅ معانا في خدمة محددة</option>
+                      <option value="parish_only">⛪ معانا في خدمة شعب فقط</option>
+                      <option value="hall_meeting">🏛️ معانا في اجتماع الصالة</option>
+                      <option value="not_in_service">🚪 مش معانا في الخدمة / زائر موقع (Click Out)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-black text-cyan-950 mb-1">
+                      خدمة إيه؟ (المرحلة / الخدمة)
+                    </label>
+                    <select
+                      disabled={isOutOfService}
+                      className="w-full p-2 border rounded-xl bg-white text-xs font-bold disabled:bg-gray-100"
+                      value={isOutOfService ? '' : selectedStage}
+                      onChange={e => setStageOverrides({ ...stageOverrides, [u.id]: e.target.value })}
+                    >
+                      <option value="">{isOutOfService ? 'خارج الخدمة' : '-- اختر الخدمة / المرحلة --'}</option>
+                      {STAGE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col justify-end">
+                    <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border border-cyan-200 text-xs font-black text-teal-950">
+                      <input
+                        type="checkbox"
+                        disabled={isOutOfService}
+                        checked={isOutOfService ? false : confirmedInService}
+                        onChange={e => setServiceConfirmedOverrides({
+                          ...serviceConfirmedOverrides,
+                          [u.id]: e.target.checked
+                        })}
+                      />
+                      <span>تأكيد (Confirm) إنه في الخدمة</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* ربط ولي الأمر بالطفل / الابن من الداخل */}
+                {showParentSelector && (
+                  <div className="bg-blue-50/60 border border-blue-200 rounded-2xl p-3 grid sm:grid-cols-2 gap-2 items-center">
+                    <div>
+                      <label className="block text-[11px] font-black text-blue-950 mb-1 flex items-center gap-1">
+                        <Baby size={14} /> ربط ولي الأمر بالطفل / الابن (تظهر مرحلته مثل ابتدائي/إعدادي):
+                      </label>
+                      <select
+                        className="w-full p-2 border border-blue-300 rounded-xl bg-white text-xs font-bold"
+                        value={selectedChildId}
+                        onChange={e => setChildLinkOverrides({ ...childLinkOverrides, [u.id]: e.target.value })}
+                      >
+                        <option value="">-- اختر الطفل أو الابن لربطه به --</option>
+                        {candidateChildren.map(ch => (
+                          <option key={ch.id} value={ch.id}>
+                            {ch.full_name} — ({getChildStageBadge(ch)})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="text-xs font-bold text-blue-950 bg-white/80 p-2.5 rounded-xl border border-blue-100">
+                      {chosenChildObj ? (
+                        <div>
+                          الطفل المختار: <strong>{chosenChildObj.full_name}</strong>
+                          <span className="block text-[11px] text-gray-600 mt-0.5">
+                            المرحلة / الفصل: {getChildStageBadge(chosenChildObj)}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-500 text-[11px]">
+                          اختر الطفل أو الابن من القائمة لربطه بولي الأمر عند القبول.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-2 border-t items-center">
                   <select
                     className="p-2 border rounded-xl bg-gray-50 text-xs font-bold"
                     value={selectedRole}
@@ -365,20 +563,12 @@ export default function ApprovalsPage({ users = [], services = [], onRefresh }) 
                   </div>
 
                   <select
-                    className="p-2 border rounded-xl bg-gray-50 text-xs font-bold"
-                    value={selectedStage}
-                    onChange={e => setStageOverrides({ ...stageOverrides, [u.id]: e.target.value })}
-                  >
-                    <option value="">-- المرحلة / الخدمة --</option>
-                    {STAGE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-
-                  <select
-                    className="p-2 border rounded-xl bg-gray-50 text-xs font-bold"
-                    value={selectedClass}
+                    disabled={isOutOfService}
+                    className="p-2 border rounded-xl bg-gray-50 text-xs font-bold disabled:bg-gray-100"
+                    value={isOutOfService ? '' : selectedClass}
                     onChange={e => setClassOverrides({ ...classOverrides, [u.id]: e.target.value })}
                   >
-                    <option value="">-- اختر الفصل --</option>
+                    <option value="">{isOutOfService ? 'بدون فصل' : '-- اختر الفصل --'}</option>
                     {services.map(srv => (
                       <option key={srv.id} value={srv.class_name}>{srv.class_name} ({srv.stage_name})</option>
                     ))}
