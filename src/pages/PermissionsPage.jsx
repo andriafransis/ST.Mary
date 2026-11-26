@@ -4,6 +4,7 @@ import {
   ALL_SCREENS,
   SCREEN_LABELS,
   ROLES,
+  CATEGORY_PRESETS,
   DEFAULT_ROLE_SCREENS,
   resolveScreens,
   mergeUserPolicies
@@ -23,7 +24,8 @@ import {
   Eye,
   Plus,
   CheckSquare,
-  Square
+  Square,
+  Sparkles
 } from 'lucide-react';
 
 const LOCAL_ALL_SCREENS = Array.from(new Set([...ALL_SCREENS, 'hidden_families']));
@@ -47,10 +49,123 @@ const ROLE_LABELS = {
 
 const EMPTY_PERM_ROW = { view: false, create: false, edit: false, delete: false };
 
+function makePresetScreenMap(presetKey) {
+  const preset = CATEGORY_PRESETS[presetKey] || CATEGORY_PRESETS.member;
+  const map = {};
+  LOCAL_ALL_SCREENS.forEach((scrKey) => {
+    const active = preset.screens.includes(scrKey);
+    if (!active) {
+      map[scrKey] = { ...EMPTY_PERM_ROW };
+      return;
+    }
+    if (scrKey === 'public_page') {
+      map[scrKey] = { view: true, create: false, edit: false, delete: false };
+      return;
+    }
+    map[scrKey] = {
+      view: Boolean(preset.actions.view),
+      create: Boolean(preset.actions.view && preset.actions.create),
+      edit: Boolean(preset.actions.view && preset.actions.edit),
+      delete: Boolean(preset.actions.view && preset.actions.delete)
+    };
+  });
+  return map;
+}
+
 export const DEFAULT_ROLE_TEMPLATES = [
   {
+    key: 'tpl_member',
+    label: '👤 المخدوم / الشعب (يشوف فقط)',
+    base_role: 'member',
+    screens: CATEGORY_PRESETS.member.screens,
+    actions: {
+      can_view: true,
+      can_create: false,
+      can_edit: false,
+      can_delete: false,
+      manage_edu_center: false,
+      manage_trips: false,
+      manage_joseph: false,
+      can_edit_public: false
+    },
+    screen_permissions: makePresetScreenMap('member')
+  },
+  {
+    key: 'tpl_parent',
+    label: '👨‍👩‍👦 ولي الأمر (يشوف فقط بمتابعات أوسع)',
+    base_role: 'parent',
+    screens: CATEGORY_PRESETS.parent.screens,
+    actions: {
+      can_view: true,
+      can_create: false,
+      can_edit: false,
+      can_delete: false,
+      view_parent_panel: true,
+      manage_edu_center: false,
+      manage_trips: false,
+      manage_joseph: false,
+      can_edit_public: false
+    },
+    screen_permissions: makePresetScreenMap('parent')
+  },
+  {
+    key: 'tpl_servant',
+    label: '📖 الخادم (يشوف ويكتب — بدون حذف)',
+    base_role: 'servant',
+    screens: CATEGORY_PRESETS.servant.screens,
+    actions: {
+      can_view: true,
+      can_create: true,
+      can_edit: true,
+      can_delete: false,
+      manage_edu_center: false,
+      manage_trips: false,
+      manage_joseph: false,
+      can_edit_public: false
+    },
+    screen_permissions: makePresetScreenMap('servant')
+  },
+  {
+    key: 'tpl_head_servant',
+    label: '⭐ أمين الخدمة (كل شيء ما عدا صلاحيات الأدمن)',
+    base_role: 'head_servant',
+    screens: CATEGORY_PRESETS.head_servant.screens,
+    actions: {
+      can_view: true,
+      can_create: true,
+      can_edit: true,
+      can_delete: true,
+      manage_edu_center: true,
+      manage_trips: true,
+      manage_joseph: true,
+      can_edit_public: true
+    },
+    screen_permissions: makePresetScreenMap('head_servant')
+  },
+  {
+    key: 'tpl_priest',
+    label: '✝ الأب الكاهن (يشوف ويعمل ويعمل إيديت)',
+    base_role: 'priest',
+    screens: CATEGORY_PRESETS.priest.screens,
+    actions: {
+      can_view: true,
+      can_create: true,
+      can_edit: true,
+      can_delete: false,
+      manage_edu_center: true,
+      manage_trips: true,
+      manage_joseph: true,
+      joseph_role: 'committee',
+      joseph_can_edit: true,
+      view_cases: true,
+      view_deacons: true,
+      can_edit_public: true
+    },
+    screen_permissions: makePresetScreenMap('priest')
+  },
+  {
     key: 'tpl_hidden_families',
-    label: 'خادم الأسر المستترة (إضافة فقط — التعديل والحذف للكاهن والأدمن)',
+    label: '🕊️ خادم الأسر المستترة (إضافة فقط — التعديل والحذف للكاهن والأدمن)',
     base_role: 'mercy_servant',
     screens: ['hidden_families', 'public_page'],
     actions: {
@@ -67,186 +182,6 @@ export const DEFAULT_ROLE_TEMPLATES = [
     screen_permissions: {
       hidden_families: { view: true, create: true, edit: false, delete: false },
       public_page: { view: true, create: false, edit: false, delete: false }
-    }
-  },
-  {
-    key: 'tpl_parent',
-    label: 'ولي الأمر (أب / أم — متابعة الأبناء)',
-    base_role: 'parent',
-    screens: ['parent_panel', 'public_page'],
-    actions: {
-      can_view: true,
-      can_create: false,
-      can_edit: false,
-      can_delete: false,
-      view_parent_panel: true,
-      manage_edu_center: false,
-      manage_trips: false,
-      manage_joseph: false,
-      can_edit_public: false
-    },
-    screen_permissions: {
-      parent_panel: { view: true, create: true, edit: false, delete: false },
-      public_page: { view: true, create: false, edit: false, delete: false }
-    }
-  },
-  {
-    key: 'tpl_parish',
-    label: 'الشعب (رعية / أولياء أمور)',
-    base_role: 'parent',
-    screens: ['public_page', 'member_panel', 'parent_panel', 'edu_center', 'trips_office'],
-    actions: {
-      can_view: true,
-      can_create: false,
-      can_edit: false,
-      can_delete: false,
-      view_parent_panel: true,
-      manage_edu_center: false,
-      manage_trips: false,
-      manage_joseph: false,
-      can_edit_public: false
-    },
-    screen_permissions: {
-      public_page: { view: true, create: false, edit: false, delete: false },
-      member_panel: { view: true, create: false, edit: false, delete: false },
-      parent_panel: { view: true, create: true, edit: false, delete: false },
-      edu_center: { view: true, create: false, edit: false, delete: false },
-      trips_office: { view: true, create: false, edit: false, delete: false }
-    }
-  },
-  {
-    key: 'tpl_member',
-    label: 'المخدوم (اجتماع / مرحلة)',
-    base_role: 'member',
-    screens: ['public_page', 'member_panel', 'edu_center', 'trips_office'],
-    actions: {
-      can_view: true,
-      can_create: false,
-      can_edit: false,
-      can_delete: false,
-      manage_edu_center: false,
-      manage_trips: false,
-      manage_joseph: false,
-      can_edit_public: false
-    },
-    screen_permissions: {
-      public_page: { view: true, create: false, edit: false, delete: false },
-      member_panel: { view: true, create: false, edit: false, delete: false },
-      edu_center: { view: true, create: false, edit: false, delete: false },
-      trips_office: { view: true, create: false, edit: false, delete: false }
-    }
-  },
-  {
-    key: 'tpl_priest',
-    label: 'الأب الكاهن',
-    base_role: 'priest',
-    screens: [
-      'priest_panel',
-      'hidden_families',
-      'servant_panel',
-      'member_panel',
-      'public_page',
-      'public_editor',
-      'edu_center',
-      'joseph_arimathea',
-      'trips_office',
-      'deacons',
-      'certs',
-      'approvals'
-    ],
-    actions: {
-      can_view: true,
-      can_create: true,
-      can_edit: true,
-      can_delete: true,
-      manage_edu_center: true,
-      manage_trips: true,
-      manage_joseph: true,
-      joseph_role: 'committee',
-      joseph_can_edit: true,
-      view_cases: true,
-      view_deacons: true,
-      can_edit_public: true
-    },
-    screen_permissions: {
-      priest_panel: { view: true, create: true, edit: true, delete: true },
-      hidden_families: { view: true, create: true, edit: true, delete: true },
-      servant_panel: { view: true, create: true, edit: true, delete: false },
-      member_panel: { view: true, create: false, edit: false, delete: false },
-      public_page: { view: true, create: false, edit: false, delete: false },
-      public_editor: { view: true, create: true, edit: true, delete: false },
-      edu_center: { view: true, create: true, edit: true, delete: false },
-      joseph_arimathea: { view: true, create: true, edit: true, delete: false },
-      trips_office: { view: true, create: true, edit: true, delete: false },
-      deacons: { view: true, create: true, edit: true, delete: false },
-      certs: { view: true, create: true, edit: true, delete: false },
-      approvals: { view: true, create: false, edit: true, delete: false }
-    }
-  },
-  {
-    key: 'tpl_servant',
-    label: 'الخادم (مرحلة / اجتماع)',
-    base_role: 'servant',
-    screens: ['servant_panel', 'member_panel', 'public_page', 'edu_center', 'deacons'],
-    actions: {
-      can_view: true,
-      can_create: true,
-      can_edit: true,
-      can_delete: false,
-      manage_edu_center: false,
-      manage_trips: false,
-      manage_joseph: false,
-      can_edit_public: false
-    },
-    screen_permissions: {
-      servant_panel: { view: true, create: true, edit: true, delete: false },
-      member_panel: { view: true, create: false, edit: false, delete: false },
-      public_page: { view: true, create: false, edit: false, delete: false },
-      edu_center: { view: true, create: false, edit: false, delete: false },
-      deacons: { view: true, create: false, edit: false, delete: false }
-    }
-  },
-  {
-    key: 'tpl_edu_observer',
-    label: 'مراقب المركز التعليمي (عرض فقط)',
-    base_role: 'member',
-    screens: ['member_panel', 'public_page', 'edu_center'],
-    actions: {
-      can_view: true,
-      can_create: false,
-      can_edit: false,
-      can_delete: false,
-      manage_edu_center: false,
-      manage_trips: false,
-      manage_joseph: false,
-      can_edit_public: false
-    },
-    screen_permissions: {
-      member_panel: { view: true, create: false, edit: false, delete: false },
-      public_page: { view: true, create: false, edit: false, delete: false },
-      edu_center: { view: true, create: false, edit: false, delete: false }
-    }
-  },
-  {
-    key: 'tpl_joseph',
-    label: 'مسؤول لجنة يوسف الرامي',
-    base_role: 'member',
-    screens: ['member_panel', 'public_page', 'joseph_arimathea'],
-    actions: {
-      can_view: true,
-      can_create: true,
-      can_edit: true,
-      can_delete: false,
-      manage_joseph: true,
-      joseph_role: 'committee',
-      joseph_can_edit: true,
-      manage_edu_center: false,
-      manage_trips: false
-    },
-    screen_permissions: {
-      member_panel: { view: true, create: false, edit: false, delete: false },
-      public_page: { view: true, create: false, edit: false, delete: false },
-      joseph_arimathea: { view: true, create: true, edit: true, delete: false }
     }
   }
 ];
@@ -287,8 +222,8 @@ const EMPTY_TPL_FORM = {
   key: '',
   label: '',
   base_role: 'member',
-  screens: ['public_page', 'member_panel'],
-  screen_permissions: buildScreenPermissionsMap(['public_page', 'member_panel'], { can_view: true }),
+  screens: CATEGORY_PRESETS.member.screens,
+  screen_permissions: makePresetScreenMap('member'),
   actions: {
     can_view: true,
     can_create: false,
@@ -318,23 +253,7 @@ function buildMergedUserFromPolicies(user, selectedPolicyKeys, allPolicies, pres
 
   const nextScreenPerms = {};
   LOCAL_ALL_SCREENS.forEach((scrKey) => {
-    const fromPolicies = mergedScreens[scrKey] || (() => {
-      const hasAnySelectedWithScreen = matchedPolicies.some(
-        p => (p.screens || []).includes(scrKey) || p.screen_permissions?.[scrKey]?.view
-      );
-      if (!hasAnySelectedWithScreen) return { ...EMPTY_PERM_ROW };
-      return matchedPolicies.reduce((acc, p) => {
-        const sp = p.screen_permissions?.[scrKey];
-        if (!sp) return acc;
-        return {
-          view: acc.view || Boolean(sp.view),
-          create: acc.create || Boolean(sp.create),
-          edit: acc.edit || Boolean(sp.edit),
-          delete: acc.delete || Boolean(sp.delete)
-        };
-      }, { ...EMPTY_PERM_ROW });
-    })();
-
+    const fromPolicies = mergedScreens[scrKey] || { ...EMPTY_PERM_ROW };
     const manualOverride = preserveCustom ? prevPerms?.manual_overrides?.[scrKey] : null;
     if (manualOverride && typeof manualOverride === 'object') {
       nextScreenPerms[scrKey] = normalizeScreenPermRow(manualOverride);
@@ -397,8 +316,8 @@ export default function PermissionsPage({
   const [newTplForm, setNewTplForm] = useState(EMPTY_TPL_FORM);
   const [syncUsersOnTplSave, setSyncUsersOnTplSave] = useState(true);
 
-  const [bulkPolicyKeys, setBulkPolicyKeys] = useState(['tpl_parent']);
-  const [bulkMode, setBulkMode] = useState('merge');
+  const [bulkPolicyKeys, setBulkPolicyKeys] = useState(['tpl_member']);
+  const [bulkMode, setBulkMode] = useState('replace');
   const [bulkSearch, setBulkSearch] = useState('');
   const [bulkRoleFilter, setBulkRoleFilter] = useState('all');
   const [bulkSelectedIds, setBulkSelectedIds] = useState([]);
@@ -514,6 +433,68 @@ export default function PermissionsPage({
       }
     }
   }, [initialUserId, users.length, roleTemplates.length]);
+
+  const applyPresetToSelectedUser = (presetKey) => {
+    if (!isAdmin || !selectedUser) return;
+    const preset = CATEGORY_PRESETS[presetKey];
+    if (!preset) return;
+
+    const nextMap = makePresetScreenMap(presetKey);
+    const tplKeyByPreset = {
+      member: 'tpl_member',
+      parent: 'tpl_parent',
+      servant: 'tpl_servant',
+      head_servant: 'tpl_head_servant',
+      priest: 'tpl_priest'
+    };
+    const mappedTplKey = tplKeyByPreset[presetKey];
+    const nextPolicyKeys = mappedTplKey && roleTemplates.some((t) => t.key === mappedTplKey)
+      ? [mappedTplKey]
+      : (selectedUser.permissions?.policy_keys || []);
+
+    setSelectedUser({
+      ...selectedUser,
+      role: selectedUser.role === 'admin' ? 'admin' : preset.baseRole,
+      permissions: {
+        ...selectedUser.permissions,
+        policy_keys: nextPolicyKeys,
+        template_key: nextPolicyKeys[0] || '',
+        custom_role_label: ROLE_LABELS[preset.baseRole] || preset.label,
+        default_screen: preset.defaultScreen,
+        manual_overrides: {},
+        can_view: true,
+        can_create: preset.actions.create,
+        can_edit: preset.actions.edit,
+        can_delete: preset.actions.delete,
+        screen_permissions: nextMap,
+        allowed_screens: extractAllowedScreensFromMap(nextMap)
+      }
+    });
+  };
+
+  const applyPresetToTemplateForm = (presetKey) => {
+    if (!isAdmin) return;
+    const preset = CATEGORY_PRESETS[presetKey];
+    if (!preset) return;
+    const nextMap = makePresetScreenMap(presetKey);
+    setNewTplForm((prev) => ({
+      ...prev,
+      base_role: preset.baseRole,
+      screens: preset.screens,
+      screen_permissions: nextMap,
+      actions: {
+        ...prev.actions,
+        can_view: true,
+        can_create: preset.actions.create,
+        can_edit: preset.actions.edit,
+        can_delete: preset.actions.delete,
+        manage_edu_center: presetKey === 'head_servant' || presetKey === 'priest',
+        manage_trips: presetKey === 'head_servant' || presetKey === 'priest',
+        manage_joseph: presetKey === 'head_servant' || presetKey === 'priest',
+        can_edit_public: presetKey === 'head_servant' || presetKey === 'priest'
+      }
+    }));
+  };
 
   const toggleRoleScreen = (scr) => {
     if (!requireAdminGuard()) return;
@@ -857,7 +838,7 @@ export default function PermissionsPage({
             <Shield size={20} /> المركز الموحد للصلاحيات والأدوار وتعدد الجروبات (Multi-Group Policy)
           </h2>
           <p className="text-xs text-gray-500">
-            إمكانية ربط الشخص بأكثر من جروب بوليسي في نفس الوقت (بما فيها خادم الأسر المستترة) مع دمج الصلاحيات تلقائياً.
+            إمكانية ربط الشخص بأكثر من جروب بوليسي في نفس الوقت وتطبيق فئات كاملة (مخدوم، ولي أمر، خادم، أمين خدمة، كاهن) دفعة واحدة.
           </p>
         </div>
 
@@ -947,6 +928,27 @@ export default function PermissionsPage({
                     <button type="button" disabled={saving} onClick={handleSaveUserPermissions} className="px-5 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer">
                       <Save size={15} /> {saving ? 'جاري الحفظ...' : 'حفظ صلاحيات الشخص ✅'}
                     </button>
+                  </div>
+                </div>
+
+                {/* تطبيق فئة كاملة دفعة واحدة */}
+                <div className="bg-slate-50 p-3.5 rounded-2xl border space-y-2">
+                  <strong className="text-slate-900 text-xs flex items-center gap-1.5">
+                    <Sparkles size={14} className="text-[#7a1c24]" /> تطبيق فئة كاملة دفعة واحدة (Select All للفئة):
+                  </strong>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.entries(CATEGORY_PRESETS)
+                      .filter(([k]) => k !== 'admin')
+                      .map(([k, preset]) => (
+                        <button
+                          key={k}
+                          type="button"
+                          onClick={() => applyPresetToSelectedUser(k)}
+                          className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#f9ecee] hover:border-[#7a1c24] text-xs font-bold cursor-pointer transition"
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
                   </div>
                 </div>
 
@@ -1065,10 +1067,28 @@ export default function PermissionsPage({
               )}
             </div>
 
+            <div className="bg-slate-50 p-3 rounded-2xl border space-y-2">
+              <span className="text-xs text-slate-800 block">اختصار ملء القالب حسب الفئة:</span>
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(CATEGORY_PRESETS)
+                  .filter(([k]) => k !== 'admin')
+                  .map(([k, preset]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => applyPresetToTemplateForm(k)}
+                      className="px-3 py-1.5 rounded-xl border bg-white hover:bg-[#f9ecee] hover:border-[#7a1c24] text-xs font-bold cursor-pointer"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+              </div>
+            </div>
+
             <div className="grid sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-gray-600 mb-1">اسم الصلاحية / الجروب</label>
-                <input required placeholder="مثال: خادم الأسر المستترة، أب كاهن، ولي أمر..." className="w-full p-2.5 border rounded-xl" value={newTplForm.label} onChange={(e) => setNewTplForm({ ...newTplForm, label: e.target.value })} />
+                <input required placeholder="مثال: المخدوم / الشعب، الخدام، أمين الخدمة، أب كاهن..." className="w-full p-2.5 border rounded-xl" value={newTplForm.label} onChange={(e) => setNewTplForm({ ...newTplForm, label: e.target.value })} />
               </div>
               <div>
                 <label className="block text-xs text-gray-600 mb-1">الدور الأساسي المرتبط به</label>
@@ -1244,7 +1264,7 @@ export default function PermissionsPage({
           <h3 className="text-base font-black text-[#7a1c24]">⚡ تطبيق جروبات Group Policy على مجموعة أشخاص دفعة واحدة</h3>
 
           <div className="bg-amber-50/60 p-3.5 rounded-2xl border border-amber-200 space-y-2">
-            <span className="block text-xs text-amber-950">1) اختر الجروبات المراد تطبيقها:</span>
+            <span className="block text-xs text-amber-950">1) اختر الفئة / الجروب المراد تطبيقه:</span>
             <div className="flex flex-wrap gap-1.5">
               {roleTemplates.map((t) => {
                 const active = bulkPolicyKeys.includes(t.key);
@@ -1267,8 +1287,8 @@ export default function PermissionsPage({
             <div>
               <label className="block text-xs text-gray-600 mb-1">2) طريقة التطبيق</label>
               <select className="w-full p-2.5 border rounded-xl bg-white" value={bulkMode} onChange={(e) => setBulkMode(e.target.value)}>
+                <option value="replace">تطبيق الفئة بالكامل (استبدال الصلاحيات السابقة)</option>
                 <option value="merge">إضافة ودمج مع جروبات الشخص الحالية</option>
-                <option value="replace">استبدال جروبات الشخص بالجروبات المختارة</option>
               </select>
             </div>
             <div>
