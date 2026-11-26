@@ -44,6 +44,47 @@ const getDisplayQuadName = (u) => {
     .join(' ');
 };
 
+const extractUserAddress = (u) => {
+  if (!u) return '';
+  const parts = [
+    u.address,
+    u.street,
+    u.area,
+    u.region,
+    u.district,
+    u.governorate
+  ]
+    .map(v => (typeof v === 'string' ? v.trim() : ''))
+    .filter(Boolean);
+
+  // إزالة التكرار لو العنوان أصلاً يحتوي على المنطقة
+  const uniqueParts = [];
+  for (const p of parts) {
+    const pNorm = normalizeArabic(p);
+    if (!uniqueParts.some(existing => normalizeArabic(existing).includes(pNorm) || pNorm.includes(normalizeArabic(existing)))) {
+      uniqueParts.push(p);
+    }
+  }
+  return uniqueParts.join(' - ');
+};
+
+const resolveMaritalStatusForRole = (rawStatus, roleType, hasChildrenOrSpouse = false) => {
+  const cleaned = String(rawStatus || '').trim();
+  const isParentOrSpouseRole = ['husband', 'wife', 'father', 'mother'].includes(roleType);
+  const isFemaleRole = ['wife', 'mother'].includes(roleType);
+
+  if (isParentOrSpouseRole) {
+    if (!cleaned || ['أعزب', 'عزباء', 'آنسة', 'عازب'].includes(cleaned) || hasChildrenOrSpouse) {
+      if (['أرمل', 'أرملة', 'مطلق/ة', 'مطلق', 'مطلقة'].includes(cleaned)) {
+        return cleaned;
+      }
+      return isFemaleRole ? 'متزوجة' : 'متزوج';
+    }
+  }
+
+  return cleaned || (isFemaleRole ? 'متزوجة' : 'متزوج');
+};
+
 const extractFatherLineageFromQuad = (u) => {
   if (!u) return '';
   if ((u.father_full_name || '').trim()) return u.father_full_name.trim();
@@ -59,6 +100,7 @@ const emptyPerson = (defaultMarital = 'متزوج') => ({
   study_status: '',
   job_title: '',
   phone: '',
+  address: '',
   is_alive: true
 });
 
@@ -102,16 +144,17 @@ const calcAge = (dob) => {
   return Number.isFinite(yrs) && yrs >= 0 ? `${yrs} سنة` : '—';
 };
 
-const toPersonObjectFromUser = (u, fallbackMarital = 'متزوج') => ({
+const toPersonObjectFromUser = (u, roleType = 'husband', hasChildrenOrSpouse = false) => ({
   user_id: u.id,
   full_name: getDisplayQuadName(u),
   dob: u.dob || '',
-  marital_status: u.marital_status || fallbackMarital,
+  marital_status: resolveMaritalStatusForRole(u.marital_status, roleType, hasChildrenOrSpouse),
   study_status: u.is_studying
     ? (u.detailed_stage || u.service_stage || 'يدرس')
     : (u.detailed_stage || u.service_stage || ''),
   job_title: u.job_title || '',
   phone: u.phone || '',
+  address: extractUserAddress(u),
   is_alive: true
 });
 
@@ -125,12 +168,6 @@ const isUserMarriedOrParent = (u, allPeople, userChildren) => {
   return false;
 };
 
-/**
- * تجميع ذكي للأسر مع الحفاظ على التسلسل العائلي وروابط المصاهرة بين الأسر:
- * 1. يدمج الزوجين تلقائياً في أسرة واحدة (عبر linked_spouse_id أو spouse_name/phone أو الاشتراك في نفس الأبناء)
- * 2. يربط كل مخدوم بولي أمره (الأب والأم) في أسرة والديه حتى لو كان متزوجاً وله أسرة مستقلة
- * 3. يبني شبكة روابط متبادلة بين الأسر (تسلسل أسرة الوالد، تسلسل أسرة أهل الزوجة، وأسر الأبناء المتزوجين بالمصاهرة)
- */
 function buildAutoFamiliesFromDatabase({
   churchUsers = [],
   userChildren = [],
@@ -232,7 +269,6 @@ function buildAutoFamiliesFromDatabase({
     return targetKey;
   };
 
-  // 1) إنشاء أسر للمتزوجين ومن لديهم أبناء فقط
   const headsPool = people.filter(u => isUserMarriedOrParent(u, people, userChildren));
 
   headsPool.forEach(u => {
@@ -273,7 +309,9 @@ function buildAutoFamiliesFromDatabase({
       if (!bucket.motherPhoneHint && u.spouse_phone) bucket.motherPhoneHint = u.spouse_phone;
     }
 
-    if (!bucket.addressHint && u.address) bucket.addressHint = u.address;
+    const uAddr = extractUserAddress(u);
+    const spAddr = extractUserAddress(spouseMatch);
+    if (!bucket.addressHint && (uAddr || spAddr)) bucket.addressHint = uAddr || spAddr;
     if (u.housing_type) bucket.housingHint = u.housing_type;
     markPriestLink(bucket, u);
     if (spouseMatch) markPriestLink(bucket, spouseMatch);
@@ -282,7 +320,6 @@ function buildAutoFamiliesFromDatabase({
     if (spouseMatch) userToHeadBucketKey.set(spouseMatch.id, key);
   });
 
-  // 2) دمج الزوجين إذا اشتركا في نفس الابن عبر الأب والأم
   people.forEach(child => {
     const fUser =
       (child.father_id && byId.get(child.father_id)) ||
@@ -303,7 +340,6 @@ function buildAutoFamiliesFromDatabase({
     }
   });
 
-  // 3) ربط كل مخدوم بأسرة ولي أمره (الأب والأم)
   const resolveParentBucketKeyForUser = (u) => {
     if (!u) return null;
     const fatherNameStr = extractFatherLineageFromQuad(u);
@@ -389,13 +425,13 @@ function buildAutoFamiliesFromDatabase({
     if (!parentBucket.fatherPhoneHint && u.father_phone) parentBucket.fatherPhoneHint = u.father_phone;
     if (!parentBucket.motherNameHint && motherNameStr) parentBucket.motherNameHint = motherNameStr;
     if (!parentBucket.motherPhoneHint && u.mother_phone) parentBucket.motherPhoneHint = u.mother_phone;
-    if (!parentBucket.addressHint && u.address) parentBucket.addressHint = u.address;
+    const uAddr = extractUserAddress(u);
+    if (!parentBucket.addressHint && uAddr) parentBucket.addressHint = uAddr;
 
     parentBucket.childUsers.set(u.id, u);
     markPriestLink(parentBucket, u);
   });
 
-  // 4) دمج user_children و member_siblings
   userChildren.forEach(uc => {
     const bKey = userToHeadBucketKey.get(uc.parent_user_id);
     if (!bKey || !buckets.has(bKey)) return;
@@ -440,7 +476,6 @@ function buildAutoFamiliesFromDatabase({
     }
   });
 
-  // 5) حساب عنوان كل باكت أولاً لبناء خريطة الروابط المتبادلة بين الأسر (نسب / مصاهرة / أبناء متزوجين)
   const bucketTitleMap = new Map();
   for (const [bKey, bucket] of buckets.entries()) {
     const hName = bucket.husbandUser ? getDisplayQuadName(bucket.husbandUser) : bucket.fatherNameHint;
@@ -455,7 +490,6 @@ function buildAutoFamiliesFromDatabase({
     bucketTitleMap.set(bKey, title);
   }
 
-  // خريطة الروابط المتبادلة: key -> Map<targetKey, { key, title, relationLabel, searchTerm }>
   const relationsGraph = new Map();
   const addFamilyRelation = (fromKey, toKey, relationLabel, searchTerm) => {
     if (!fromKey || !toKey || fromKey === toKey || !bucketTitleMap.has(toKey)) return;
@@ -475,14 +509,13 @@ function buildAutoFamiliesFromDatabase({
     const hUser = bucket.husbandUser;
     const wUser = bucket.wifeUser;
 
-    // أ) ربط الأسرة بأسرة والد الزوج (أصل العائلة) والعكس (ابن متزوج له أسرة)
     if (hUser) {
       const hParentKey = resolveParentBucketKeyForUser(hUser);
       if (hParentKey && hParentKey !== bKey) {
         addFamilyRelation(
           bKey,
           hParentKey,
-          `أصل العائلة (والد الزوج)`,
+          'أصل العائلة (والد الزوج)',
           bucketTitleMap.get(hParentKey).replace(/^أسرة\s+/, '')
         );
         addFamilyRelation(
@@ -494,14 +527,13 @@ function buildAutoFamiliesFromDatabase({
       }
     }
 
-    // ب) ربط الأسرة بأسرة والد الزوجة (مصاهرة / نسب) والعكس (ابنة متزوجة من أسرة أخرى)
     if (wUser) {
       const wParentKey = resolveParentBucketKeyForUser(wUser);
       if (wParentKey && wParentKey !== bKey) {
         addFamilyRelation(
           bKey,
           wParentKey,
-          `مصاهرة (أسرة والد الزوجة)`,
+          'مصاهرة (أسرة والد الزوجة)',
           bucketTitleMap.get(wParentKey).replace(/^أسرة\s+/, '')
         );
         addFamilyRelation(
@@ -513,7 +545,6 @@ function buildAutoFamiliesFromDatabase({
       }
     }
 
-    // ج) ربط أي ابن داخل الباكت إذا كان له أسرة مستقلة
     bucket.childUsers.forEach(cu => {
       const childOwnKey = userToHeadBucketKey.get(cu.id);
       if (childOwnKey && childOwnKey !== bKey) {
@@ -533,26 +564,33 @@ function buildAutoFamiliesFromDatabase({
     });
   }
 
-  // 6) تحويل كل باكت إلى ملف أسرة متكامل
   const familiesList = [];
   for (const bucket of buckets.values()) {
     const hUser = bucket.husbandUser;
     const wUser = bucket.wifeUser;
+    const hasKidsOrSpouse =
+      Boolean(hUser && wUser) ||
+      bucket.childUsers.size > 0 ||
+      bucket.extraChildren.length > 0 ||
+      Boolean(hUser?.children_names) ||
+      Boolean(wUser?.children_names);
 
     const husband = hUser
-      ? toPersonObjectFromUser(hUser, 'متزوج')
+      ? toPersonObjectFromUser(hUser, 'husband', hasKidsOrSpouse)
       : {
           ...emptyPerson('متزوج'),
           full_name: bucket.fatherNameHint || '',
-          phone: bucket.fatherPhoneHint || ''
+          phone: bucket.fatherPhoneHint || '',
+          marital_status: resolveMaritalStatusForRole('', 'husband', true)
         };
 
     const wife = wUser
-      ? toPersonObjectFromUser(wUser, 'متزوجة')
+      ? toPersonObjectFromUser(wUser, 'wife', hasKidsOrSpouse)
       : {
           ...emptyPerson('متزوجة'),
           full_name: bucket.motherNameHint || '',
-          phone: bucket.motherPhoneHint || ''
+          phone: bucket.motherPhoneHint || '',
+          marital_status: resolveMaritalStatusForRole('', 'wife', true)
         };
 
     const rootRef = hUser || wUser;
@@ -568,20 +606,30 @@ function buildAutoFamiliesFromDatabase({
         findUserByNameOrPhone(rootRef.mother_full_name, rootRef.mother_phone, 'أنثى');
 
       if (grandFatherUser && grandFatherUser.id !== rootRef.id) {
-        fatherObj = toPersonObjectFromUser(grandFatherUser, 'متزوج');
+        fatherObj = toPersonObjectFromUser(grandFatherUser, 'father', true);
       } else if (grandFatherName) {
-        fatherObj = { ...emptyPerson('متزوج'), full_name: grandFatherName, phone: rootRef.father_phone || '' };
+        fatherObj = {
+          ...emptyPerson('متزوج'),
+          full_name: grandFatherName,
+          phone: rootRef.father_phone || '',
+          marital_status: 'متزوج'
+        };
       }
 
       if (grandMotherUser && grandMotherUser.id !== rootRef.id) {
-        motherObj = toPersonObjectFromUser(grandMotherUser, 'متزوجة');
+        motherObj = toPersonObjectFromUser(grandMotherUser, 'mother', true);
       } else if (rootRef.mother_full_name) {
-        motherObj = { ...emptyPerson('متزوجة'), full_name: rootRef.mother_full_name, phone: rootRef.mother_phone || '' };
+        motherObj = {
+          ...emptyPerson('متزوجة'),
+          full_name: rootRef.mother_full_name,
+          phone: rootRef.mother_phone || '',
+          marital_status: 'متزوجة'
+        };
       }
     }
 
     const childUserObjs = Array.from(bucket.childUsers.values()).map(cu => ({
-      ...toPersonObjectFromUser(cu, cu.gender === 'أنثى' ? 'آنسة' : 'أعزب'),
+      ...toPersonObjectFromUser(cu, cu.gender === 'أنثى' ? 'daughter' : 'son', false),
       hasOwnFamily: userToHeadBucketKey.has(cu.id),
       ownFamilyKey: userToHeadBucketKey.get(cu.id) || null
     }));
@@ -630,6 +678,14 @@ function buildAutoFamiliesFromDatabase({
       ? Array.from(relationsGraph.get(bucket.key).values())
       : [];
 
+    const resolvedAddress =
+      bucket.addressHint ||
+      extractUserAddress(hUser) ||
+      extractUserAddress(wUser) ||
+      fatherObj.address ||
+      motherObj.address ||
+      '';
+
     familiesList.push({
       id: `auto:${bucket.key}`,
       autoKey: bucket.key,
@@ -639,7 +695,7 @@ function buildAutoFamiliesFromDatabase({
       lineageParentName: fatherObj.full_name || '',
       connectedFamilies,
       family_title: titleCandidate,
-      address: bucket.addressHint || hUser?.address || wUser?.address || '',
+      address: resolvedAddress,
       housing_type: bucket.housingHint || 'تمليك',
       family_status: 'مستقرة',
       phone: husband.phone || wife.phone || allChildren[0]?.phone || '',
@@ -665,7 +721,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   const [memberSiblings, setMemberSiblings] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const [scopeTab, setScopeTab] = useState('all'); // 'all' | 'priest_only' | 'saved_only'
+  const [scopeTab, setScopeTab] = useState('all');
   const [searchQ, setSearchQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
@@ -679,7 +735,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   const [visitDraft, setVisitDraft] = useState(emptyVisitDraft(todayISO));
   const [userLookupQ, setUserLookupQ] = useState('');
 
-  // مودال الربط السريع بين الأزواج والآباء والأبناء والمصاهرة
   const [linkModalFam, setLinkModalFam] = useState(null);
   const [linkSearchQ, setLinkSearchQ] = useState('');
   const [linkBusy, setLinkBusy] = useState(false);
@@ -761,6 +816,22 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       if (!savedMatch) return autoFam;
 
       consumedSavedIds.add(savedMatch.id);
+      const mergedHusband = autoFam.husband?.full_name
+        ? { ...autoFam.husband, marital_status: resolveMaritalStatusForRole(autoFam.husband.marital_status, 'husband', true) }
+        : { ...autoFam.husband, ...(savedMatch.husband || {}), marital_status: resolveMaritalStatusForRole(savedMatch.husband?.marital_status, 'husband', true) };
+
+      const mergedWife = autoFam.wife?.full_name
+        ? { ...autoFam.wife, marital_status: resolveMaritalStatusForRole(autoFam.wife.marital_status, 'wife', true) }
+        : { ...autoFam.wife, ...(savedMatch.wife || {}), marital_status: resolveMaritalStatusForRole(savedMatch.wife?.marital_status, 'wife', true) };
+
+      const mergedFather = autoFam.father?.full_name
+        ? { ...autoFam.father, marital_status: resolveMaritalStatusForRole(autoFam.father.marital_status, 'father', true) }
+        : { ...autoFam.father, ...(savedMatch.father || {}), marital_status: resolveMaritalStatusForRole(savedMatch.father?.marital_status, 'father', true) };
+
+      const mergedMother = autoFam.mother?.full_name
+        ? { ...autoFam.mother, marital_status: resolveMaritalStatusForRole(autoFam.mother.marital_status, 'mother', true) }
+        : { ...autoFam.mother, ...(savedMatch.mother || {}), marital_status: resolveMaritalStatusForRole(savedMatch.mother?.marital_status, 'mother', true) };
+
       return {
         ...autoFam,
         id: savedMatch.id,
@@ -774,10 +845,10 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         phone: savedMatch.phone || autoFam.phone,
         next_visit_date: savedMatch.next_visit_date || '',
         notes: savedMatch.notes || '',
-        husband: autoFam.husband?.full_name ? autoFam.husband : { ...autoFam.husband, ...(savedMatch.husband || {}) },
-        wife: autoFam.wife?.full_name ? autoFam.wife : { ...autoFam.wife, ...(savedMatch.wife || {}) },
-        father: autoFam.father?.full_name ? autoFam.father : { ...autoFam.father, ...(savedMatch.father || {}) },
-        mother: autoFam.mother?.full_name ? autoFam.mother : { ...autoFam.mother, ...(savedMatch.mother || {}) },
+        husband: mergedHusband,
+        wife: mergedWife,
+        father: mergedFather,
+        mother: mergedMother,
         children:
           autoFam.children?.length > 0
             ? autoFam.children
@@ -796,7 +867,11 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         isAutoConnected: false,
         hasSavedRecord: true,
         belongsToPriest: true,
-        connectedFamilies: []
+        connectedFamilies: [],
+        husband: sr.husband?.full_name ? { ...sr.husband, marital_status: resolveMaritalStatusForRole(sr.husband.marital_status, 'husband', true) } : sr.husband,
+        wife: sr.wife?.full_name ? { ...sr.wife, marital_status: resolveMaritalStatusForRole(sr.wife.marital_status, 'wife', true) } : sr.wife,
+        father: sr.father?.full_name ? { ...sr.father, marital_status: resolveMaritalStatusForRole(sr.father.marital_status, 'father', true) } : sr.father,
+        mother: sr.mother?.full_name ? { ...sr.mother, marital_status: resolveMaritalStatusForRole(sr.mother.marital_status, 'mother', true) } : sr.mother
       });
     });
 
@@ -809,7 +884,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     });
   }, [churchUsers, userChildren, memberSiblings, savedRecords, priest?.id, priest?.full_name]);
 
-  // خريطة لمعرفة هل الشخص له أسرة مستقلة في النظام أم لا لعرضها داخل مودال الربط
   const userFamilyTitleLookup = useMemo(() => {
     const map = new Map();
     unifiedFamilies.forEach(f => {
@@ -819,7 +893,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     return map;
   }, [unifiedFamilies]);
 
-  // دالة الربط الدائم في قاعدة بيانات الأفراد بين زوجين أو والدين أو أبناء
   const handleLinkPersonInDatabase = async (fam, targetUser, relationType) => {
     if (!fam || !targetUser) return;
     setLinkBusy(true);
@@ -891,7 +964,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           .eq('id', primaryUser.id);
       } else if (relationType === 'child') {
         const isPrimaryFemale = primaryUser.gender === 'أنثى';
-        // إذا كان للأسرة زوج وزوجة، نربط الابن بالاثنين معاً كأب وأم
         const patch = {
           parent_id: primaryUser.id
         };
@@ -1113,20 +1185,22 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   };
 
   const importFromChurchUser = (u, roleKey) => {
+    const uAddr = extractUserAddress(u);
     const patch = {
       user_id: u.id,
       full_name: getDisplayQuadName(u),
       dob: u.dob || '',
-      marital_status: u.marital_status || (roleKey === 'wife' || roleKey === 'mother' ? 'متزوجة' : 'متزوج'),
+      marital_status: resolveMaritalStatusForRole(u.marital_status, roleKey, true),
       study_status: u.detailed_stage || u.service_stage || '',
       job_title: u.job_title || '',
       phone: u.phone || '',
+      address: uAddr,
       is_alive: true
     };
     setForm(prev => ({
       ...prev,
       family_title: prev.family_title || `أسرة ${getDisplayQuadName(u)}`,
-      address: prev.address || u.address || '',
+      address: prev.address || uAddr || '',
       housing_type: prev.housing_type || u.housing_type || 'تمليك',
       phone: prev.phone || u.phone || '',
       [roleKey]: { ...prev[roleKey], ...patch }
@@ -1246,8 +1320,10 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     );
   };
 
-  const renderPersonCard = (label, person, emoji) => {
+  const renderPersonCard = (label, person, emoji, roleType = 'husband', hasKidsOrSpouse = true) => {
     if (!person || !person.full_name) return null;
+    const displayMarital = resolveMaritalStatusForRole(person.marital_status, roleType, hasKidsOrSpouse);
+
     return (
       <div className="p-3 bg-[#fbfaf7] border border-gray-200 rounded-2xl space-y-1 text-xs">
         <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1263,10 +1339,11 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         </div>
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-gray-700">
           {person.dob && <span>🎂 {person.dob} ({calcAge(person.dob)})</span>}
-          {person.marital_status && <span>💍 {person.marital_status}</span>}
+          {displayMarital && <span>💍 {displayMarital}</span>}
           {person.study_status && <span className="inline-flex items-center gap-1"><GraduationCap size={12} /> {person.study_status}</span>}
           {person.job_title && <span className="inline-flex items-center gap-1"><Briefcase size={12} /> {person.job_title}</span>}
           {person.phone && <span className="inline-flex items-center gap-1"><Phone size={12} /> {person.phone}</span>}
+          {person.address && <span className="inline-flex items-center gap-1"><MapPin size={12} /> {person.address}</span>}
         </div>
       </div>
     );
@@ -1389,6 +1466,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             const visits = Array.isArray(fam.visitations_log) ? fam.visitations_log : [];
             const connected = Array.isArray(fam.connectedFamilies) ? fam.connectedFamilies : [];
             const primaryPhone = fam.phone || fam.husband?.phone || fam.wife?.phone || '';
+            const displayAddress = fam.address || fam.husband?.address || fam.wife?.address || 'غير مسجل';
 
             return (
               <div key={fam.id} className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-2xs space-y-3">
@@ -1428,9 +1506,15 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                       </button>
                     )}
 
-                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-gray-600 mt-1">
-                      {fam.address && <span className="inline-flex items-center gap-1"><MapPin size={12} /> {fam.address}</span>}
-                      {primaryPhone && <span className="inline-flex items-center gap-1"><Phone size={12} /> {primaryPhone}</span>}
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-gray-700 mt-1.5 font-bold">
+                      <span className="inline-flex items-center gap-1 text-slate-800 bg-slate-100 px-2 py-0.5 rounded-lg">
+                        <MapPin size={12} className="text-[#7a1c24]" /> العنوان والمنطقة: {displayAddress}
+                      </span>
+                      {primaryPhone && (
+                        <span className="inline-flex items-center gap-1">
+                          <Phone size={12} /> {primaryPhone}
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -1480,7 +1564,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                   </div>
                 </div>
 
-                {/* شبكة الأسر المترابطة بالمصاهرة والنسب والتسلسل */}
                 {connected.length > 0 && (
                   <div className="bg-purple-50/60 p-2.5 rounded-2xl border border-purple-200 space-y-1.5">
                     <strong className="text-[10px] text-purple-950 flex items-center gap-1">
@@ -1503,10 +1586,10 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                 )}
 
                 <div className="grid gap-2">
-                  {renderPersonCard('الزوج', fam.husband, '👨')}
-                  {renderPersonCard('الزوجة', fam.wife, '👩')}
-                  {renderPersonCard('الوالد', fam.father, '👴')}
-                  {renderPersonCard('الوالدة', fam.mother, '👵')}
+                  {renderPersonCard('الزوج', fam.husband, '👨', 'husband', true)}
+                  {renderPersonCard('الزوجة', fam.wife, '👩', 'wife', true)}
+                  {renderPersonCard('الوالد', fam.father, '👴', 'father', true)}
+                  {renderPersonCard('الوالدة', fam.mother, '👵', 'mother', true)}
                 </div>
 
                 {kids.length > 0 && (
@@ -1548,7 +1631,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         </div>
       )}
 
-      {/* مودال الربط المباشر بين الزوجين أو الوالدين والأبناء والمصاهرة في الداتابيز */}
       {linkModalFam && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-55">
           <div className="bg-white rounded-3xl w-full max-w-xl p-5 sm:p-6 space-y-3 font-bold max-h-[90vh] overflow-y-auto">
@@ -1710,7 +1792,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <input
-                    placeholder="العنوان السكني بالتفصيل"
+                    placeholder="العنوان السكني والمنطقة بالتفصيل"
                     className="sm:col-span-2 p-2 border rounded-xl bg-white"
                     value={form.address}
                     onChange={e => setForm({ ...form, address: e.target.value })}
@@ -1831,7 +1913,9 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             <div className="flex justify-between items-center border-b pb-3">
               <div>
                 <h3 className="text-base font-black text-[#7a1c24]">{selectedFamily.family_title}</h3>
-                <p className="text-[11px] text-gray-500">📍 {selectedFamily.address || '—'} • 🏷️ {selectedFamily.family_status}</p>
+                <p className="text-[11px] text-gray-500">
+                  📍 العنوان والمنطقة: {selectedFamily.address || selectedFamily.husband?.address || selectedFamily.wife?.address || 'غير مسجل'} • 🏷️ {selectedFamily.family_status}
+                </p>
               </div>
               <button type="button" onClick={() => setSelectedFamily(null)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer">
                 <X size={18} />
@@ -1855,10 +1939,10 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             )}
 
             <div className="grid sm:grid-cols-2 gap-2">
-              {renderPersonCard('الزوج', selectedFamily.husband, '👨')}
-              {renderPersonCard('الزوجة', selectedFamily.wife, '👩')}
-              {renderPersonCard('الوالد', selectedFamily.father, '👴')}
-              {renderPersonCard('الوالدة', selectedFamily.mother, '👵')}
+              {renderPersonCard('الزوج', selectedFamily.husband, '👨', 'husband', true)}
+              {renderPersonCard('الزوجة', selectedFamily.wife, '👩', 'wife', true)}
+              {renderPersonCard('الوالد', selectedFamily.father, '👴', 'father', true)}
+              {renderPersonCard('الوالدة', selectedFamily.mother, '👵', 'mother', true)}
             </div>
 
             {(selectedFamily.children || []).length > 0 && (
