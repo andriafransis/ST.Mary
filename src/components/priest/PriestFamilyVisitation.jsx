@@ -1090,6 +1090,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       const payload = {
         priest_id: priest.id,
         family_title: derivedTitle,
+        family_name: derivedTitle,
         address: (form.address || '').trim(),
         housing_type: form.housing_type || 'تمليك',
         family_status: form.family_status || 'مستقرة',
