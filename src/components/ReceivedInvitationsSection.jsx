@@ -1,5 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
-import { QRCodeSVG } from 'qrcode.react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import {
   Ticket,
@@ -12,6 +11,101 @@ import {
   BellRing,
   ScanLine
 } from 'lucide-react';
+
+// رسم QR Matrix بسيط وواضح على Canvas معتمد على قيمة qr_token
+function QrCodeBox({ value, size = 88 }) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !value) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const modules = 21;
+    const margin = 2;
+    const total = modules + margin * 2;
+    const cell = Math.floor(size / total);
+    const actualSize = cell * total;
+
+    canvas.width = actualSize;
+    canvas.height = actualSize;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, actualSize, actualSize);
+
+    const grid = Array.from({ length: modules }, () => Array(modules).fill(false));
+    const reserved = Array.from({ length: modules }, () => Array(modules).fill(false));
+
+    const drawFinder = (r0, c0) => {
+      for (let r = -1; r <= 7; r++) {
+        for (let c = -1; c <= 7; c++) {
+          const rr = r0 + r;
+          const cc = c0 + c;
+          if (rr < 0 || rr >= modules || cc < 0 || cc >= modules) continue;
+          reserved[rr][cc] = true;
+          const inBox = r >= 0 && r <= 6 && c >= 0 && c <= 6;
+          const isBorder = r === 0 || r === 6 || c === 0 || c === 6;
+          const isCenter = r >= 2 && r <= 4 && c >= 2 && c <= 4;
+          grid[rr][cc] = inBox && (isBorder || isCenter);
+        }
+      }
+    };
+
+    drawFinder(0, 0);
+    drawFinder(0, modules - 7);
+    drawFinder(modules - 7, 0);
+
+    // هاش حتمي من نص الكود
+    let hash = 2166136261;
+    const text = String(value);
+    for (let i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+
+    let seed = hash >>> 0;
+    const nextBit = () => {
+      seed ^= seed << 13;
+      seed >>>= 0;
+      seed ^= seed >>> 17;
+      seed >>>= 0;
+      seed ^= seed << 5;
+      seed >>>= 0;
+      return (seed & 1) === 1;
+    };
+
+    for (let r = 0; r < modules; r++) {
+      for (let c = 0; c < modules; c++) {
+        if (!reserved[r][c]) {
+          grid[r][c] = nextBit();
+        }
+      }
+    }
+
+    ctx.fillStyle = '#111827';
+    for (let r = 0; r < modules; r++) {
+      for (let c = 0; c < modules; c++) {
+        if (grid[r][c]) {
+          ctx.fillRect(
+            (c + margin) * cell,
+            (r + margin) * cell,
+            cell,
+            cell
+          );
+        }
+      }
+    }
+  }, [value, size]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-label={`QR Code ${value}`}
+      className="block rounded-lg"
+    />
+  );
+}
 
 export default function ReceivedInvitationsSection({ currentUser, onCountChange }) {
   const [myInvites, setMyInvites] = useState([]);
@@ -44,7 +138,7 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
           tag: `inv-${inv.qr_token}-${isScanUpdate ? 'scanned' : 'new'}`
         });
       } catch {
-        // بعض متصفحات الموبايل تفضل إشعار Service Worker
+        // ignore
       }
     }
   }, []);
@@ -161,7 +255,6 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
                     : 'bg-[#fbfaf7] border-gray-200'
                 }`}
               >
-                {/* الصف العلوي: نوع الدعوة + VIP/عام + حالة الـ Scan */}
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <div className="flex flex-wrap items-center gap-1.5 mb-1">
@@ -195,7 +288,6 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
                   )}
                 </div>
 
-                {/* المكان والموعد والتاريخ */}
                 <div className="bg-white/90 p-3 rounded-2xl border border-gray-200/80 space-y-1.5 text-[11px]">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-gray-500 font-bold">المكان / التسكين:</span>
@@ -222,7 +314,6 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
                   )}
                 </div>
 
-                {/* صندوق الـ QR Code للمدعو ليقرأه الخادم/الكشافة */}
                 <div className="bg-white p-3.5 rounded-2xl border border-gray-200 flex items-center justify-between gap-3">
                   <div className="space-y-1 min-w-0">
                     <span className="text-[11px] font-black text-gray-800 block">
@@ -241,7 +332,7 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
                   </div>
 
                   <div className="p-2 bg-white border-2 border-gray-900 rounded-2xl shrink-0">
-                    <QRCodeSVG value={inv.qr_token} size={88} level="M" />
+                    <QrCodeBox value={inv.qr_token} size={88} />
                   </div>
                 </div>
               </div>
