@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import EventInvitationSender from '../components/EventInvitationSender';
-import InvitationScannerModal from '../components/InvitationScannerModal';
+import EventInvitationSender from './EventInvitationSender';
+import InvitationScannerModal from './InvitationScannerModal';
 import {
   MailPlus,
   ScanLine,
@@ -28,6 +28,9 @@ export default function PriestInvitationsTab({
   users = [],
   services = []
 }) {
+  const isPriestOrAdmin = ['admin', 'priest'].includes(currentUser?.role);
+  const canScanQr = ['admin', 'priest', 'servant', 'head_servant', 'vice_head_servant', 'meeting_servant', 'mercy_servant', 'worker'].includes(currentUser?.role);
+
   const [invitations, setInvitations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -97,7 +100,7 @@ export default function PriestInvitationsTab({
 
   return (
     <div className="space-y-4 text-xs" dir="rtl">
-      {/* شريط إحصائيات الدعوات والحضور */}
+      {/* إحصائيات الدعوات ومتابعة الحضور */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
         <div className="bg-white p-3.5 rounded-2xl border shadow-2xs">
           <span className="text-gray-500 block font-bold">إجمالي الدعوات</span>
@@ -123,16 +126,32 @@ export default function PriestInvitationsTab({
         </div>
       </div>
 
-      {/* مكوّن إرسال الدعوات */}
-      <EventInvitationSender
-        currentUser={currentUser}
-        users={users}
-        services={services}
-        onOpenScanner={() => setScannerOpen(true)}
-        onCreated={() => loadInvitations()}
-      />
+      {/* إرسال الدعوات للأب الكاهن فقط */}
+      {isPriestOrAdmin ? (
+        <EventInvitationSender
+          currentUser={currentUser}
+          users={users}
+          services={services}
+          onCreated={() => loadInvitations()}
+        />
+      ) : (
+        <div className="bg-amber-50 border border-amber-300 text-amber-950 p-4 rounded-3xl font-bold flex flex-wrap items-center justify-between gap-3">
+          <span>
+            إرسال الدعوات خاص بالأب الكاهن، ودور الكشافة والخدام هو مسح الـ QR Code وتنظيم دخول المدعوين.
+          </span>
+          {canScanQr && (
+            <button
+              type="button"
+              onClick={() => setScannerOpen(true)}
+              className="px-4 py-2 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
+            >
+              <ScanLine size={15} /> سكان QR للدعوات
+            </button>
+          )}
+        </div>
+      )}
 
-      {/* سجل متابعة الدعوات وحالة السكان */}
+      {/* سجل متابعة الدعوات وحالة الدخول */}
       <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-[#7a1c24]">
@@ -141,13 +160,15 @@ export default function PriestInvitationsTab({
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setScannerOpen(true)}
-              className="px-3 py-1.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center gap-1 cursor-pointer"
-            >
-              <ScanLine size={14} /> فتح السكان
-            </button>
+            {canScanQr && !isPriestOrAdmin && (
+              <button
+                type="button"
+                onClick={() => setScannerOpen(true)}
+                className="px-3 py-1.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center gap-1 cursor-pointer"
+              >
+                <ScanLine size={14} /> سكان QR
+              </button>
+            )}
             <button
               type="button"
               onClick={loadInvitations}
@@ -158,7 +179,6 @@ export default function PriestInvitationsTab({
           </div>
         </div>
 
-        {/* فلاتر البحث والفئة والحالة */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
           <div className="relative">
             <Search size={14} className="absolute right-3 top-2.5 text-gray-400" />
@@ -191,7 +211,6 @@ export default function PriestInvitationsTab({
           </select>
         </div>
 
-        {/* جدول السجل */}
         {filteredInvitations.length === 0 ? (
           <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
             لا توجد دعوات مطابقة للفلتر الحالي.
@@ -265,8 +284,8 @@ export default function PriestInvitationsTab({
         )}
       </div>
 
-      {/* نافذة سكان الـ QR */}
-      {scannerOpen && (
+      {/* نافذة السكان للكشافة والخدام */}
+      {scannerOpen && canScanQr && (
         <InvitationScannerModal
           currentUser={currentUser}
           onClose={() => {
