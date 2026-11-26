@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import PriestInvitationModal from '../components/priest/PriestInvitationModal';
+import PriestInvitationTab from '../components/priest/PriestInvitationTab';
 import {
   CalendarCheck, MessageSquareHeart, ShieldCheck, Info, Calendar,
   MapPin, School, Search, UserCheck, Sparkles, X, Check, Unlink, RotateCcw, Bell,
