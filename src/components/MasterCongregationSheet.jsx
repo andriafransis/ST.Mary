@@ -71,6 +71,18 @@ const detectUserService = (u) => {
   return (u.detailed_stage || u.service_stage || 'الاجتماع العام').trim();
 };
 
+const buildRowAddressSummary = (row) => {
+  const parts = [];
+  if (row.building_no) parts.push(`عمارة ${String(row.building_no).trim()}`);
+  if (row.floor_no) parts.push(`دور ${String(row.floor_no).trim()}`);
+  if (row.apartment_no) parts.push(`شقة ${String(row.apartment_no).trim()}`);
+  const detail = parts.join(' - ');
+  if (row.address && detail && !String(row.address).includes(detail)) {
+    return `${row.address} (${detail})`;
+  }
+  return row.address || detail || row.address_notes || '';
+};
+
 export function canExtractMasterSheet(user) {
   if (!user) return false;
   if (user.permissions?.screens?.master_sheet?.view === false) return false;
@@ -90,7 +102,6 @@ export default function MasterCongregationSheet({
   const canAccess = canExtractMasterSheet(currentUser);
   const canEditStatus = ['admin', 'priest', 'head_servant'].includes(currentUser?.role) ||
     Boolean(currentUser?.permissions?.can_edit_members);
-  // تغيير الخدمة مسموح للأدمن فقط
   const canReassignService = currentUser?.role === 'admin';
 
   const [serviceTab, setServiceTab] = useState('all');
@@ -116,7 +127,8 @@ export default function MasterCongregationSheet({
       ...u,
       serialNo: idx + 1,
       detectedService: detectUserService(u),
-      statusKey: STATUS_META[u.member_status] ? u.member_status : 'active'
+      statusKey: STATUS_META[u.member_status] ? u.member_status : 'active',
+      fullAddressSummary: buildRowAddressSummary(u)
     }));
   }, [users]);
 
@@ -210,7 +222,11 @@ export default function MasterCongregationSheet({
           row.serialNo,
           row.full_name || '',
           row.phone || '',
-          row.address || '',
+          row.fullAddressSummary || row.address || '',
+          row.building_no || '',
+          row.floor_no || '',
+          row.apartment_no || '',
+          row.address_notes || '',
           row.sector || '',
           row.detectedService || '',
           row.detailed_stage || row.service_stage || '',
@@ -301,7 +317,7 @@ export default function MasterCongregationSheet({
       ...(isCurrentServiceNoClass ? [] : [`${r.detailed_stage || r.service_stage || ''}${r.assigned_class ? ` - ${r.assigned_class}` : ''}`]),
       r.sector || '',
       r.phone || '',
-      r.address || '',
+      r.fullAddressSummary || r.address || '',
       STATUS_META[r.statusKey]?.label || r.statusKey,
       r.created_at ? new Date(r.created_at).toLocaleDateString('ar-EG') : ''
     ]);
