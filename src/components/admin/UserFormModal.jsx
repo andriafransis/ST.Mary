@@ -57,6 +57,9 @@ export default function UserFormModal({
     !isObserverVisitor &&
     (effectiveRole === 'parent' || (isMarried && Boolean(formData.is_parent_guardian)));
 
+  const safeParentsList = isVisitorMode ? [] : parentsWorkersList;
+  const safePriestsList = isVisitorMode ? [] : priestsList;
+
   const selectedServantStages = splitList(formData.detailed_stage);
   const selectedServantClasses = splitList(formData.assigned_class);
 
@@ -227,10 +230,10 @@ export default function UserFormModal({
       detailed_stage: resolvedStage,
       service_stage: resolvedStage,
       assigned_class: resolvedClass,
-      confession_father_id: formData.confession_father_id || null,
-      parent_id: formData.parent_id || formData.father_id || null,
-      father_id: formData.father_id || formData.parent_id || null,
-      mother_id: formData.mother_id || null,
+      confession_father_id: forVisitor ? null : (formData.confession_father_id || null),
+      parent_id: forVisitor ? null : (formData.parent_id || formData.father_id || null),
+      father_id: forVisitor ? null : (formData.father_id || formData.parent_id || null),
+      mother_id: forVisitor ? null : (formData.mother_id || null),
       phone: (formData.phone || '').trim(),
       job_title: formData.job_title || '',
       sector: resolvedSector,
@@ -294,7 +297,7 @@ export default function UserFormModal({
 
       setVisitorStatus({
         type: 'success',
-        msg: 'تم إرسال طلب التسجيل بنجاح ✅ وسيقوم الأدمن بمراجعته وتفعيله بنفس البيانات الموحدة.'
+        msg: 'تم إرسال طلب التسجيل بنجاح ✅ وسيقوم المسؤول بمراجعته وربط الأسرة والخدمة من الداخل.'
       });
       onVisitorSuccess?.(data);
     } finally {
@@ -717,13 +720,16 @@ export default function UserFormModal({
                   </select>
                 </div>
               </div>
-              <div>
-                <label className="block mb-1">أب الاعتراف</label>
-                <select className="w-full p-2.5 border rounded-xl bg-white" value={formData.confession_father_id || ''} onChange={e => setFormData({ ...formData, confession_father_id: e.target.value })}>
-                  <option value="">-- اختر --</option>
-                  {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-                </select>
-              </div>
+
+              {!isVisitorMode && (
+                <div>
+                  <label className="block mb-1">أب الاعتراف</label>
+                  <select className="w-full p-2.5 border rounded-xl bg-white" value={formData.confession_father_id || ''} onChange={e => setFormData({ ...formData, confession_father_id: e.target.value })}>
+                    <option value="">-- اختر --</option>
+                    {safePriestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+                  </select>
+                </div>
+              )}
             </>
           )}
 
@@ -827,25 +833,27 @@ export default function UserFormModal({
                 </div>
               )}
 
-              <div>
-                <label className="block mb-1">أب الاعتراف</label>
-                <select className="w-full p-2.5 border rounded-xl bg-white" value={formData.confession_father_id || ''} onChange={e => setFormData({ ...formData, confession_father_id: e.target.value })}>
-                  <option value="">-- اختر --</option>
-                  {priestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-                </select>
-              </div>
+              {!isVisitorMode && (
+                <div>
+                  <label className="block mb-1">أب الاعتراف</label>
+                  <select className="w-full p-2.5 border rounded-xl bg-white" value={formData.confession_father_id || ''} onChange={e => setFormData({ ...formData, confession_father_id: e.target.value })}>
+                    <option value="">-- اختر --</option>
+                    {safePriestsList.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+                  </select>
+                </div>
+              )}
             </div>
           )}
 
-          {/* ربط بحساب ولي الأمر للأولاد / المخدومين */}
-          {!isObserverVisitor && (formData.role === 'member' || isParentWithChildren) && (
+          {/* ربط ولي الأمر للأولاد / المخدومين — يظهر فقط للأدمن/الكاهن/أمين الخدمة من الداخل وليس للزائر من بره */}
+          {!isVisitorMode && !isObserverVisitor && (formData.role === 'member' || isParentWithChildren) && (
             <div className="bg-blue-50/40 p-3 rounded-2xl border border-blue-200 space-y-2.5">
               <span className="block text-[#7a1c24] font-extrabold">
-                👨‍👩‍👦 ربط بحساب ولي الأمر (تحديد الأب والأم بشكل منفصل):
+                👨‍👩‍👦 ربط بحساب ولي الأمر (تحديد الأب والأم من الداخل عند القبول أو التعديل):
               </span>
               <div className="grid sm:grid-cols-2 gap-2">
                 <div>
-                  <label className="block mb-1 text-[11px] text-sky-950">👨 ولي الأمر (الأب):</label>
+                  <label className="block mb-1 text-[11px] text-sky-950">👨 ولي الأمر (الأب / خادم / شعب):</label>
                   <select
                     className="w-full p-2.5 border rounded-xl bg-white"
                     value={formData.parent_id || ''}
@@ -856,18 +864,18 @@ export default function UserFormModal({
                     })}
                   >
                     <option value="">-- اختر الأب (اختياري) --</option>
-                    {parentsWorkersList
-                      .filter(p => (p.role === 'parent' || p.is_parent_guardian) && detectGuardianType(p) !== 'mother')
+                    {safeParentsList
+                      .filter(p => detectGuardianType(p) !== 'mother')
                       .map(p => (
                         <option key={p.id} value={p.id}>
-                          {p.full_name} {p.phone ? `(${p.phone})` : ''}
+                          {p.full_name}
                         </option>
                       ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block mb-1 text-[11px] text-pink-950">👩 ولي الأمر (الأم):</label>
+                  <label className="block mb-1 text-[11px] text-pink-950">👩 ولي الأمر (الأم / خادمة / شعب):</label>
                   <select
                     className="w-full p-2.5 border rounded-xl bg-white"
                     value={formData.mother_id || ''}
@@ -877,11 +885,11 @@ export default function UserFormModal({
                     })}
                   >
                     <option value="">-- اختر الأم (اختياري) --</option>
-                    {parentsWorkersList
-                      .filter(p => (p.role === 'parent' || p.is_parent_guardian) && (detectGuardianType(p) === 'mother' || p.guardian_type === 'mother' || ['الأم', 'أم', 'والدة'].includes(String(p.family_role || '').trim())))
+                    {safeParentsList
+                      .filter(p => detectGuardianType(p) === 'mother' || p.guardian_type === 'mother' || ['الأم', 'أم', 'والدة'].includes(String(p.family_role || '').trim()))
                       .map(p => (
                         <option key={p.id} value={p.id}>
-                          {p.full_name} {p.phone ? `(${p.phone})` : ''}
+                          {p.full_name}
                         </option>
                       ))}
                   </select>
