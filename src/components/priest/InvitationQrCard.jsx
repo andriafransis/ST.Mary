@@ -7,7 +7,6 @@ export default function InvitationQrCard({ invitation, onClose }) {
   const isVip = invitation.invite_tier === 'vip';
   const isCheckedIn = invitation.status === 'checked_in';
 
-  // نضع رمز الدعوة الفريد داخل الـ QR ليقرأه الكشاف/الخادم فوراً
   const qrPayload = JSON.stringify({
     type: 'church_invite',
     token: invitation.qr_token
@@ -16,7 +15,6 @@ export default function InvitationQrCard({ invitation, onClose }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/65 flex items-center justify-center p-4" dir="rtl">
       <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden border border-gray-200">
-        {/* رأس البطاقة */}
         <div
           className={`p-4 text-white flex items-center justify-between ${
             isVip
@@ -25,7 +23,11 @@ export default function InvitationQrCard({ invitation, onClose }) {
           }`}
         >
           <div className="flex items-center gap-2">
-            {isVip ? <Crown size={20} className="text-amber-300" /> : <Ticket size={20} className="text-amber-200" />}
+            {isVip ? (
+              <Crown size={20} className="text-amber-300" />
+            ) : (
+              <Ticket size={20} className="text-amber-200" />
+            )}
             <div>
               <span className="text-[11px] font-bold opacity-90 block">
                 {invitation.event_type || 'دعوة رسمية'}
@@ -43,7 +45,6 @@ export default function InvitationQrCard({ invitation, onClose }) {
           </span>
         </div>
 
-        {/* تفاصيل المدعو والمكان */}
         <div className="p-5 space-y-4 text-xs">
           <div className="bg-[#fbfaf7] border border-gray-200 rounded-2xl p-3.5 space-y-1.5">
             <div className="flex justify-between items-center">
@@ -88,7 +89,6 @@ export default function InvitationQrCard({ invitation, onClose }) {
             )}
           </div>
 
-          {/* مربع الـ QR Code */}
           <div className="flex flex-col items-center justify-center bg-white border-2 border-dashed border-[#7a1c24]/40 rounded-3xl p-4 space-y-2">
             <QRCodeCanvas
               value={qrPayload}
@@ -110,7 +110,6 @@ export default function InvitationQrCard({ invitation, onClose }) {
             </div>
           )}
 
-          {/* حالة الدخول */}
           {isCheckedIn ? (
             <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 p-3 rounded-2xl flex items-center justify-center gap-2 font-black">
               <CheckCircle2 size={17} className="text-emerald-700" />
