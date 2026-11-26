@@ -212,7 +212,6 @@ const isUserMarriedOrParent = (u, allPeople, userChildren) => {
   return false;
 };
 
-// تحديث آمن لصف في church_users مع معالجة أي اختلاف في الأعمدة
 async function safeUpdateChurchUser(userId, patch) {
   if (!userId || !patch || Object.keys(patch).length === 0) return { ok: true };
   const { error } = await supabase.from('church_users').update(patch).eq('id', userId);
@@ -647,7 +646,6 @@ function buildAutoFamiliesFromDatabase({
     markPriestLink(parentBucket, u);
   });
 
-  // تجميع الأقارب المؤكدين في الداتابيز (عم، خال، خالة، أخت، زوج أخت، جد، جدة، حفيد)
   people.forEach(u => {
     const extList = Array.isArray(u.permissions?.extended_relatives) ? u.permissions.extended_relatives : [];
     if (extList.length === 0) return;
@@ -656,7 +654,9 @@ function buildAutoFamiliesFromDatabase({
     const bucket = buckets.get(bKey);
     extList.forEach(rel => {
       const relUser = rel.user_id ? byId.get(rel.user_id) : null;
+      if (bucket.confirmedExtended.some(item => item.user_id && item.user_id === rel.user_id)) return;
       bucket.confirmedExtended.push({
+        anchor_user_id: u.id,
         user_id: rel.user_id || null,
         full_name: rel.full_name || getDisplayQuadName(relUser) || '',
         kinship_role: rel.kinship_role || 'قريب عائلة',
@@ -991,6 +991,8 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   const [selectedRoleByCandidate, setSelectedRoleByCandidate] = useState({});
   const [dismissedSuggestions, setDismissedSuggestions] = useState({});
   const [confirmingUserId, setConfirmingUserId] = useState(null);
+  const [editingRelationKey, setEditingRelationKey] = useState(null);
+  const [editingRelationRole, setEditingRelationRole] = useState('العم');
 
   const [expandedCards, setExpandedCards] = useState({});
 
@@ -1047,6 +1049,47 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   useEffect(() => {
     loadData();
   }, [priest?.id]);
+
+  // ضمان وجود وتحديث سجل الأسرة في priest_family_visitations عند أي تأكيد أو تعديل
+  const upsertFamilyVisitationRecord = async (fam, extraPatch = {}) => {
+    if (!priest?.id || !fam) return null;
+    const basePayload = {
+      priest_id: priest.id,
+      family_title: fam.family_title || 'أسرة بدون عنوان',
+      family_name: fam.family_title || 'أسرة بدون عنوان',
+      address: fam.address || '',
+      housing_type: fam.housing_type || 'تمليك',
+      family_status: fam.family_status || 'مستقرة',
+      phone: fam.phone || fam.husband?.phone || fam.wife?.phone || '',
+      next_visit_date: fam.next_visit_date || null,
+      notes: fam.notes || '',
+      husband: fam.husband || emptyPerson('متزوج'),
+      wife: fam.wife || emptyPerson('متزوجة'),
+      father: fam.father || emptyPerson('متزوج'),
+      mother: fam.mother || emptyPerson('متزوجة'),
+      children: fam.children || [],
+      visitations_log: fam.visitations_log || [],
+      updated_at: new Date().toISOString(),
+      ...extraPatch
+    };
+
+    if (fam.savedId) {
+      const { data } = await supabase
+        .from('priest_family_visitations')
+        .update(basePayload)
+        .eq('id', fam.savedId)
+        .select()
+        .single();
+      return data || null;
+    }
+
+    const { data } = await supabase
+      .from('priest_family_visitations')
+      .insert([basePayload])
+      .select()
+      .single();
+    return data || null;
+  };
 
   const findKinshipCandidatesForFamily = useMemo(() => {
     const people = churchUsers.filter(u => u.role !== 'admin' && u.role !== 'priest');
@@ -1250,7 +1293,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     return map;
   }, [unifiedFamilies]);
 
-  // تعديل وتحديث قاعدة البيانات فعلياً عند الربط أو تأكيد القرابة
   const handleLinkPersonInDatabase = async (fam, targetUser, relationType, kinshipLabel = '') => {
     if (!fam || !targetUser) return;
     setLinkBusy(true);
@@ -1339,7 +1381,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
         await safeUpdateChurchUser(targetUser.id, patch);
       } else {
-        // تحديث القرابة المتبادلة في الداتابيز (عم، خال، خالة، أخت، زوج أخت، جد، جدة، حفيد)
         const primaryRelatives = Array.isArray(primaryUser.permissions?.extended_relatives)
           ? primaryUser.permissions.extended_relatives
           : [];
@@ -1383,13 +1424,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         ]);
       }
 
-      // تحديث أو إنشاء سجل الأسرة في priest_family_visitations لضمان بقاء التحديث محفوظاً
-      if (fam.savedId && priest?.id) {
-        await supabase
-          .from('priest_family_visitations')
-          .update({ updated_at: new Date().toISOString() })
-          .eq('id', fam.savedId);
-      }
+      await upsertFamilyVisitationRecord(fam);
 
       logActivity({
         user: priest,
@@ -1406,6 +1441,80 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     } finally {
       setLinkBusy(false);
     }
+  };
+
+  // تعديل صلة قرابة مؤكدة مباشرة من الكارت وتحديث الداتابيز
+  const handleUpdateConfirmedRelation = async (fam, extItem, nextRole) => {
+    if (!fam || !extItem?.user_id) return;
+    const primaryUserId = extItem.anchor_user_id || fam.husband?.user_id || fam.wife?.user_id;
+    const primaryUser = churchUsers.find(u => u.id === primaryUserId);
+    const targetUser = churchUsers.find(u => u.id === extItem.user_id);
+
+    if (primaryUser) {
+      const list = Array.isArray(primaryUser.permissions?.extended_relatives)
+        ? primaryUser.permissions.extended_relatives
+        : [];
+      const updatedList = list.map(r =>
+        r.user_id === extItem.user_id ? { ...r, kinship_role: nextRole } : r
+      );
+      await safeUpdateChurchUser(primaryUser.id, {
+        permissions: { ...(primaryUser.permissions || {}), extended_relatives: updatedList }
+      });
+    }
+
+    if (targetUser && primaryUser) {
+      const tList = Array.isArray(targetUser.permissions?.extended_relatives)
+        ? targetUser.permissions.extended_relatives
+        : [];
+      const reverseRole = REVERSE_KINSHIP_MAP[nextRole] || `قريب (${getDisplayQuadName(primaryUser)})`;
+      const updatedTList = tList.map(r =>
+        r.user_id === primaryUser.id ? { ...r, kinship_role: reverseRole } : r
+      );
+      await safeUpdateChurchUser(targetUser.id, {
+        permissions: { ...(targetUser.permissions || {}), extended_relatives: updatedTList }
+      });
+    }
+
+    await upsertFamilyVisitationRecord(fam);
+    await loadData();
+    setEditingRelationKey(null);
+  };
+
+  // حذف صلة قرابة مؤكدة من الداتابيز
+  const handleRemoveConfirmedRelation = async (fam, extItem) => {
+    if (!fam || !extItem?.user_id) return;
+    if (!confirm(`إزالة صلة القرابة (${extItem.full_name}) من الداتابيز؟`)) return;
+
+    const primaryUserId = extItem.anchor_user_id || fam.husband?.user_id || fam.wife?.user_id;
+    const primaryUser = churchUsers.find(u => u.id === primaryUserId);
+    const targetUser = churchUsers.find(u => u.id === extItem.user_id);
+
+    if (primaryUser) {
+      const list = Array.isArray(primaryUser.permissions?.extended_relatives)
+        ? primaryUser.permissions.extended_relatives
+        : [];
+      await safeUpdateChurchUser(primaryUser.id, {
+        permissions: {
+          ...(primaryUser.permissions || {}),
+          extended_relatives: list.filter(r => r.user_id !== extItem.user_id)
+        }
+      });
+    }
+
+    if (targetUser && primaryUser) {
+      const tList = Array.isArray(targetUser.permissions?.extended_relatives)
+        ? targetUser.permissions.extended_relatives
+        : [];
+      await safeUpdateChurchUser(targetUser.id, {
+        permissions: {
+          ...(targetUser.permissions || {}),
+          extended_relatives: tList.filter(r => r.user_id !== primaryUser.id)
+        }
+      });
+    }
+
+    await loadData();
+    setEditingRelationKey(null);
   };
 
   const handleConfirmKinshipCandidate = async (fam, candidate) => {
@@ -1639,61 +1748,11 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       ...(Array.isArray(selectedFamily.visitations_log) ? selectedFamily.visitations_log : [])
     ];
 
-    if (selectedFamily.savedId) {
-      const { data, error } = await supabase
-        .from('priest_family_visitations')
-        .update({ visitations_log: nextLog, updated_at: new Date().toISOString() })
-        .eq('id', selectedFamily.savedId)
-        .select()
-        .single();
-
-      if (!error && data) {
-        setSavedRecords(prev => prev.map(r => (r.id === data.id ? data : r)));
-        setSelectedFamily({ ...selectedFamily, ...data, savedId: data.id, hasSavedRecord: true });
-        setVisitDraft(emptyVisitDraft(todayISO));
-      } else if (error) {
-        alert(error.message);
-      }
-    } else {
-      const payload = {
-        priest_id: priest.id,
-        family_title: selectedFamily.family_title,
-        family_name: selectedFamily.family_title,
-        address: selectedFamily.address || '',
-        housing_type: selectedFamily.housing_type || 'تمليك',
-        family_status: selectedFamily.family_status || 'مستقرة',
-        phone: selectedFamily.phone || '',
-        next_visit_date: selectedFamily.next_visit_date || null,
-        notes: selectedFamily.notes || '',
-        husband: selectedFamily.husband || emptyPerson('متزوج'),
-        wife: selectedFamily.wife || emptyPerson('متزوجة'),
-        father: selectedFamily.father || emptyPerson('متزوج'),
-        mother: selectedFamily.mother || emptyPerson('متزوجة'),
-        children: selectedFamily.children || [],
-        visitations_log: nextLog,
-        updated_at: new Date().toISOString()
-      };
-
-      const { data, error } = await supabase
-        .from('priest_family_visitations')
-        .insert([payload])
-        .select()
-        .single();
-
-      if (!error && data) {
-        setSavedRecords(prev => [data, ...prev]);
-        setSelectedFamily({ ...selectedFamily, ...data, savedId: data.id, hasSavedRecord: true });
-        setVisitDraft(emptyVisitDraft(todayISO));
-        logActivity({
-          user: priest,
-          actionType: 'تسجيل_افتقاد_أسرة',
-          targetTable: 'priest_family_visitations',
-          targetId: data.id,
-          description: `سجل زيارة افتقاد لأسرة (${data.family_title})`
-        });
-      } else if (error) {
-        alert(error.message);
-      }
+    const data = await upsertFamilyVisitationRecord(selectedFamily, { visitations_log: nextLog });
+    if (data) {
+      await loadData();
+      setSelectedFamily({ ...selectedFamily, ...data, savedId: data.id, hasSavedRecord: true });
+      setVisitDraft(emptyVisitDraft(todayISO));
     }
   };
 
@@ -2353,14 +2412,71 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                             ✅ أقارب وقرابات مؤكدة ومحدثة في الداتابيز ({confirmedExt.length}):
                           </strong>
                           <div className="flex flex-wrap gap-1.5">
-                            {confirmedExt.map((ext, idx) => (
-                              <span
-                                key={idx}
-                                className="px-2.5 py-1 bg-white text-emerald-950 border border-emerald-200 rounded-xl text-[10px] font-black"
-                              >
-                                {ext.kinship_role}: {ext.full_name} {ext.phone ? `• 📞 ${ext.phone}` : ''}
-                              </span>
-                            ))}
+                            {confirmedExt.map((ext, idx) => {
+                              const relKey = `${fam.id}:${ext.user_id || idx}`;
+                              const isEditingThis = editingRelationKey === relKey;
+
+                              return (
+                                <div
+                                  key={relKey}
+                                  className="px-2.5 py-1 bg-white text-emerald-950 border border-emerald-200 rounded-xl text-[10px] font-black flex flex-wrap items-center gap-1.5"
+                                >
+                                  {isEditingThis ? (
+                                    <>
+                                      <span>{ext.full_name}:</span>
+                                      <select
+                                        className="p-0.5 border rounded bg-[#fbfaf7] text-[10px] font-black"
+                                        value={editingRelationRole}
+                                        onChange={e => setEditingRelationRole(e.target.value)}
+                                      >
+                                        {KINSHIP_ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                                      </select>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUpdateConfirmedRelation(fam, ext, editingRelationRole)}
+                                        className="px-1.5 py-0.5 bg-emerald-700 text-white rounded cursor-pointer"
+                                      >
+                                        حفظ
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingRelationKey(null)}
+                                        className="px-1.5 py-0.5 bg-gray-100 text-gray-700 rounded cursor-pointer"
+                                      >
+                                        إلغاء
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span>
+                                        {ext.kinship_role}: {ext.full_name} {ext.phone ? `• 📞 ${ext.phone}` : ''}
+                                      </span>
+                                      {ext.user_id && (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingRelationKey(relKey);
+                                              setEditingRelationRole(ext.kinship_role || 'العم');
+                                            }}
+                                            className="px-1.5 py-0.5 bg-amber-100 text-amber-950 rounded text-[9px] cursor-pointer"
+                                          >
+                                            تعديل
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRemoveConfirmedRelation(fam, ext)}
+                                            className="px-1.5 py-0.5 bg-rose-100 text-rose-900 rounded text-[9px] cursor-pointer"
+                                          >
+                                            حذف
+                                          </button>
+                                        </>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       )}
