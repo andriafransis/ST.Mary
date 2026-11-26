@@ -11,8 +11,8 @@ import BirthdayBanner from '../components/BirthdayBanner';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
 import { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/ServiceGroupFeed';
 import MonthlyAnalyticsAndRewards from '../components/MonthlyAnalyticsAndRewards';
-import PriestInvitationModal from '../components/PriestInvitationModal';
-import InvitationScannerModal from '../components/InvitationScannerModal';
+import PriestInvitationModal from '../components/priest/PriestInvitationModal';
+import InvitationScannerModal from '../components/priest/InvitationScannerModal';
 
 const STAGE_OPTIONS = [
   'حضانة',
