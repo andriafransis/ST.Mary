@@ -76,14 +76,26 @@ const getDisplayQuadName = (u) => {
     .join(' ');
 };
 
-const extractUserAddress = (u) => {
+const extractUserAddress = (u, streetMap = null) => {
   if (!u) return '';
+  const linkedStreet = u.street_id && streetMap ? streetMap.get(String(u.street_id)) : null;
+  const structuredBits = [];
+  if (linkedStreet?.street_name) {
+    structuredBits.push(`شارع ${String(linkedStreet.street_name).replace(/^شارع\s*/i, '').trim()}`);
+  }
+  const areaVal = linkedStreet?.area_name || u.sector || u.area || u.region || u.district || '';
+  if (areaVal) {
+    structuredBits.push(`منطقة ${String(areaVal).replace(/^منطقة\s*/i, '').trim()}`);
+  }
+  if (u.building_no) structuredBits.push(`عمارة ${String(u.building_no).trim()}`);
+  if (u.floor_no) structuredBits.push(`دور ${String(u.floor_no).trim()}`);
+  if (u.apartment_no) structuredBits.push(`شقة ${String(u.apartment_no).trim()}`);
+  if (u.address_notes) structuredBits.push(String(u.address_notes).trim());
+
   const parts = [
     u.address,
+    structuredBits.join(' - '),
     u.street,
-    u.area,
-    u.region,
-    u.district,
     u.governorate
   ]
     .map(v => (typeof v === 'string' ? v.trim() : ''))
@@ -92,6 +104,7 @@ const extractUserAddress = (u) => {
   const uniqueParts = [];
   for (const p of parts) {
     const pNorm = normalizeArabic(p);
+    if (!pNorm) continue;
     if (!uniqueParts.some(existing => normalizeArabic(existing).includes(pNorm) || pNorm.includes(normalizeArabic(existing)))) {
       uniqueParts.push(p);
     }
@@ -114,6 +127,11 @@ const emptyPerson = (defaultMarital = 'متزوج') => ({
 const emptyFamilyForm = {
   family_title: '',
   address: '',
+  street_id: '',
+  building_no: '',
+  floor_no: '',
+  apartment_no: '',
+  address_notes: '',
   housing_type: 'تمليك',
   family_status: 'مستقرة',
   phone: '',
@@ -142,7 +160,7 @@ const calcAge = (dob) => {
   return Number.isFinite(yrs) && yrs >= 0 ? `${yrs} سنة` : '—';
 };
 
-const toPersonObjectFromUser = (u, defaultMarital = 'متزوج') => ({
+const toPersonObjectFromUser = (u, defaultMarital = 'متزوج', streetMap = null) => ({
   user_id: u.id,
   full_name: getDisplayQuadName(u),
   dob: u.dob || '',
@@ -152,7 +170,7 @@ const toPersonObjectFromUser = (u, defaultMarital = 'متزوج') => ({
     : (u.detailed_stage || u.service_stage || ''),
   job_title: u.job_title || '',
   phone: u.phone || '',
-  address: extractUserAddress(u),
+  address: extractUserAddress(u, streetMap),
   is_alive: true
 });
 
@@ -175,11 +193,13 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   const todayISO = new Date().toLocaleDateString('en-CA');
   const [savedRecords, setSavedRecords] = useState([]);
   const [churchUsers, setChurchUsers] = useState(Array.isArray(passedUsers) ? passedUsers : []);
+  const [streetsList, setStreetsList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [clearingAll, setClearingAll] = useState(false);
 
   const [searchQ, setSearchQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [streetFilter, setStreetFilter] = useState('all');
 
   const [selectedRoleByCandidate, setSelectedRoleByCandidate] = useState({});
   const [editingRelationKey, setEditingRelationKey] = useState(null);
@@ -228,16 +248,25 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             .select('*')
             .order('updated_at', { ascending: false });
 
-      const [famRes, usrRes] = await Promise.all([
+      const [famRes, usrRes, strRes] = await Promise.all([
         famQuery,
         supabase
           .from('church_users')
           .select('*')
-          .order('full_name', { ascending: true })
+          .order('full_name', { ascending: true }),
+        supabase
+          .from('visitation_streets')
+          .select('id, area_name, street_name, sort_order, assigned_priest_id, notes')
+          .order('sort_order', { ascending: true })
+          .order('area_name', { ascending: true })
+          .order('street_name', { ascending: true })
       ]);
       if (!famRes.error && famRes.data) setSavedRecords(famRes.data);
       if (!usrRes.error && usrRes.data && usrRes.data.length > 0) {
         setChurchUsers(usrRes.data);
+      }
+      if (!strRes.error && Array.isArray(strRes.data)) {
+        setStreetsList(strRes.data);
       }
     } finally {
       setLoading(false);
@@ -247,6 +276,22 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   useEffect(() => {
     loadData();
   }, [priest?.id]);
+
+  const streetMap = useMemo(() => {
+    const map = new Map();
+    for (const st of streetsList || []) {
+      if (st?.id) map.set(String(st.id), st);
+    }
+    return map;
+  }, [streetsList]);
+
+  const usersById = useMemo(() => {
+    const map = new Map();
+    for (const u of churchUsers || []) {
+      if (u?.id) map.set(String(u.id), u);
+    }
+    return map;
+  }, [churchUsers]);
 
   const familiesList = useMemo(() => {
     return (savedRecords || []).map(sr => {
@@ -268,12 +313,54 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         ...combinedRelatives.map(r => r.user_id)
       ].filter(Boolean);
 
+      const primaryLinkedUser = linkedUserIds
+        .map(id => usersById.get(String(id)))
+        .find(u => u?.street_id || u?.building_no || u?.floor_no || u?.apartment_no || u?.address);
+
+      const effectiveStreetId = sr.street_id || primaryLinkedUser?.street_id || '';
+      const linkedStreet = effectiveStreetId ? streetMap.get(String(effectiveStreetId)) || null : null;
+      const effectiveBuilding = sr.building_no || primaryLinkedUser?.building_no || '';
+      const effectiveFloor = sr.floor_no || primaryLinkedUser?.floor_no || '';
+      const effectiveApartment = sr.apartment_no || primaryLinkedUser?.apartment_no || '';
+      const effectiveNotes = sr.address_notes || primaryLinkedUser?.address_notes || '';
+
+      const builtLocationParts = [];
+      if (linkedStreet?.street_name) {
+        builtLocationParts.push(`شارع ${String(linkedStreet.street_name).replace(/^شارع\s*/i, '').trim()}`);
+      }
+      if (linkedStreet?.area_name) {
+        builtLocationParts.push(`منطقة ${String(linkedStreet.area_name).replace(/^منطقة\s*/i, '').trim()}`);
+      }
+      if (effectiveBuilding) builtLocationParts.push(`عمارة ${String(effectiveBuilding).trim()}`);
+      if (effectiveFloor) builtLocationParts.push(`دور ${String(effectiveFloor).trim()}`);
+      if (effectiveApartment) builtLocationParts.push(`شقة ${String(effectiveApartment).trim()}`);
+      if (effectiveNotes) builtLocationParts.push(String(effectiveNotes).trim());
+
+      const combinedAddress = (() => {
+        const baseAddr = String(sr.address || sr.husband?.address || sr.wife?.address || '').trim();
+        const structStr = builtLocationParts.join(' - ');
+        if (!baseAddr) return structStr;
+        if (!structStr) return baseAddr;
+        return normalizeArabic(baseAddr).includes(normalizeArabic(structStr))
+          ? baseAddr
+          : `${baseAddr} (${structStr})`;
+      })();
+
       return {
         ...sr,
         savedId: sr.id,
         family_title: sr.family_title || sr.family_name || 'أسرة بدون عنوان',
         family_status: sr.family_status || 'مستقرة',
         housing_type: sr.housing_type || 'تمليك',
+        street_id: effectiveStreetId,
+        street_name: linkedStreet?.street_name || '',
+        area_name: linkedStreet?.area_name || '',
+        street_sort_order: linkedStreet ? Number(linkedStreet.sort_order ?? 999999) : 999999,
+        building_no: effectiveBuilding,
+        floor_no: effectiveFloor,
+        apartment_no: effectiveApartment,
+        address_notes: effectiveNotes,
+        resolvedAddress: combinedAddress,
         husband: { ...emptyPerson('متزوج'), ...(sr.husband || {}) },
         wife: { ...emptyPerson('متزوجة'), ...(sr.wife || {}) },
         father: { ...emptyPerson('متزوج'), ...(sr.father || {}) },
@@ -284,7 +371,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         visitations_log: Array.isArray(sr.visitations_log) ? sr.visitations_log : []
       };
     });
-  }, [savedRecords]);
+  }, [savedRecords, usersById, streetMap]);
 
   const handleClearAllFamilies = async () => {
     const ok1 = confirm(
@@ -336,7 +423,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       ...(priest?.id ? { priest_id: priest.id } : {}),
       family_title: fam.family_title || 'أسرة بدون عنوان',
       family_name: fam.family_title || 'أسرة بدون عنوان',
-      address: fam.address || '',
+      address: fam.address || fam.resolvedAddress || '',
       housing_type: fam.housing_type || 'تمليك',
       family_status: fam.family_status || 'مستقرة',
       phone: fam.phone || fam.husband?.phone || fam.wife?.phone || '',
@@ -384,7 +471,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       if (['الابن', 'الابنة', 'الحفيد', 'الحفيدة'].includes(kinshipLabel)) {
         if (!nextChildren.some(c => c.user_id && c.user_id === targetUser.id)) {
           nextChildren.push({
-            ...toPersonObjectFromUser(targetUser, 'أعزب'),
+            ...toPersonObjectFromUser(targetUser, 'أعزب', streetMap),
             kinship_role: kinshipLabel
           });
         }
@@ -509,7 +596,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
     if (isDirectChildRole) {
       const childObj = {
-        ...toPersonObjectFromUser(dbUser, 'أعزب'),
+        ...toPersonObjectFromUser(dbUser, 'أعزب', streetMap),
         full_name: displayName,
         kinship_role: memberRoleChoice
       };
@@ -552,11 +639,32 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         relatives: form.relatives || []
       };
 
+      const selectedStreetObj = form.street_id ? streetMap.get(String(form.street_id)) || null : null;
+      const addrPieces = [];
+      if (selectedStreetObj?.street_name) {
+        addrPieces.push(`شارع ${String(selectedStreetObj.street_name).replace(/^شارع\s*/i, '').trim()}`);
+      }
+      if (selectedStreetObj?.area_name) {
+        addrPieces.push(`منطقة ${String(selectedStreetObj.area_name).replace(/^منطقة\s*/i, '').trim()}`);
+      }
+      if ((form.building_no || '').trim()) addrPieces.push(`عمارة ${String(form.building_no).trim()}`);
+      if ((form.floor_no || '').trim()) addrPieces.push(`دور ${String(form.floor_no).trim()}`);
+      if ((form.apartment_no || '').trim()) addrPieces.push(`شقة ${String(form.apartment_no).trim()}`);
+      if ((form.address_notes || '').trim()) addrPieces.push(String(form.address_notes).trim());
+
+      const structuredText = addrPieces.join(' - ');
+      const rawAddrText = (form.address || '').trim();
+      const finalAddress = !rawAddrText
+        ? structuredText
+        : (!structuredText || normalizeArabic(rawAddrText).includes(normalizeArabic(structuredText))
+            ? rawAddrText
+            : `${rawAddrText} (${structuredText})`);
+
       const payload = {
         ...(priest?.id ? { priest_id: priest.id } : {}),
         family_title: derivedTitle,
         family_name: derivedTitle,
-        address: (form.address || '').trim(),
+        address: finalAddress,
         housing_type: form.housing_type || 'تمليك',
         family_status: form.family_status || 'مستقرة',
         phone: (form.phone || form.husband?.phone || form.wife?.phone || '').trim(),
@@ -570,6 +678,19 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         visitations_log: form.visitations_log || [],
         updated_at: new Date().toISOString()
       };
+
+      const primaryDbUserId =
+        form.husband?.user_id || form.wife?.user_id || form.father?.user_id || form.mother?.user_id || null;
+      if (primaryDbUserId && (form.street_id || form.building_no || form.floor_no || form.apartment_no || form.address_notes)) {
+        await safeUpdateChurchUser(primaryDbUserId, {
+          ...(form.street_id ? { street_id: form.street_id } : {}),
+          ...(form.building_no ? { building_no: String(form.building_no).trim() } : {}),
+          ...(form.floor_no ? { floor_no: String(form.floor_no).trim() } : {}),
+          ...(form.apartment_no ? { apartment_no: String(form.apartment_no).trim() } : {}),
+          ...(form.address_notes ? { address_notes: String(form.address_notes).trim() } : {}),
+          address: finalAddress
+        });
+      }
 
       if (editingSavedId) {
         const { data, error } = await supabase
@@ -657,7 +778,12 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     setForm({
       ...emptyFamilyForm,
       family_title: fam.family_title || '',
-      address: fam.address || '',
+      address: fam.address || fam.resolvedAddress || '',
+      street_id: fam.street_id || '',
+      building_no: fam.building_no || '',
+      floor_no: fam.floor_no || '',
+      apartment_no: fam.apartment_no || '',
+      address_notes: fam.address_notes || '',
       housing_type: fam.housing_type || 'تمليك',
       family_status: fam.family_status || 'مستقرة',
       phone: fam.phone || '',
@@ -675,7 +801,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   };
 
   const importFromChurchUser = (u, roleKey) => {
-    const uAddr = extractUserAddress(u);
+    const uAddr = extractUserAddress(u, streetMap);
     const patch = {
       user_id: u.id,
       full_name: getDisplayQuadName(u),
@@ -691,12 +817,43 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       ...prev,
       family_title: prev.family_title || `أسرة ${getDisplayQuadName(u)}`,
       address: prev.address || uAddr || '',
+      street_id: prev.street_id || u.street_id || '',
+      building_no: prev.building_no || u.building_no || '',
+      floor_no: prev.floor_no || u.floor_no || '',
+      apartment_no: prev.apartment_no || u.apartment_no || '',
+      address_notes: prev.address_notes || u.address_notes || '',
       housing_type: prev.housing_type || u.housing_type || 'تمليك',
       phone: prev.phone || u.phone || '',
       [roleKey]: { ...prev[roleKey], ...patch }
     }));
     setUserLookupQ('');
   };
+
+  const filteredRecords = useMemo(() => {
+    const base = familiesList.filter(r => {
+      if (statusFilter !== 'all' && r.family_status !== statusFilter) return false;
+      if (streetFilter !== 'all' && String(r.street_id || '') !== String(streetFilter)) return false;
+      if (!searchQ.trim()) return true;
+      return normalizeArabic(JSON.stringify(r)).includes(normalizeArabic(searchQ));
+    });
+
+    if (streetFilter !== 'all') {
+      return [...base].sort((a, b) => {
+        const bA = String(a.building_no || '').localeCompare(String(b.building_no || ''), 'ar', { numeric: true });
+        if (bA !== 0) return bA;
+        return String(a.floor_no || '').localeCompare(String(b.floor_no || ''), 'ar', { numeric: true });
+      });
+    }
+
+    return [...base].sort((a, b) => {
+      if (a.street_sort_order !== b.street_sort_order) {
+        return a.street_sort_order - b.street_sort_order;
+      }
+      const bA = String(a.building_no || '').localeCompare(String(b.building_no || ''), 'ar', { numeric: true });
+      if (bA !== 0) return bA;
+      return String(a.floor_no || '').localeCompare(String(b.floor_no || ''), 'ar', { numeric: true });
+    });
+  }, [familiesList, statusFilter, streetFilter, searchQ]);
 
   const handleExportExcelSheet = () => {
     const headers = [
@@ -735,7 +892,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         : '';
       const kidsAndRelInfo = [kidsPart, relPart].filter(Boolean).join(' | ') || '—';
 
-      const addr = fam.address || fam.husband?.address || fam.wife?.address || 'غير مسجل';
+      const addr = fam.resolvedAddress || fam.address || fam.husband?.address || fam.wife?.address || 'غير مسجل';
       const visits = Array.isArray(fam.visitations_log) ? fam.visitations_log : [];
       const lastVisit = visits[0] ? `${visits[0].visit_date}: ${visits[0].summary}` : fam.notes || '—';
 
@@ -766,14 +923,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     URL.revokeObjectURL(url);
   };
 
-  const filteredRecords = useMemo(() => {
-    return familiesList.filter(r => {
-      if (statusFilter !== 'all' && r.family_status !== statusFilter) return false;
-      if (!searchQ.trim()) return true;
-      return normalizeArabic(JSON.stringify(r)).includes(normalizeArabic(searchQ));
-    });
-  }, [familiesList, statusFilter, searchQ]);
-
   const allUsersList = useMemo(
     () => (Array.isArray(churchUsers) ? churchUsers : []),
     [churchUsers]
@@ -790,13 +939,14 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         u.second_name,
         u.third_name,
         u.fourth_name,
-        u.phone
+        u.phone,
+        extractUserAddress(u, streetMap)
       ]
         .filter(Boolean)
         .join(' ');
       return normalizeArabic(searchable).includes(q);
     });
-  }, [allUsersList, memberFilterQ]);
+  }, [allUsersList, memberFilterQ, streetMap]);
 
   const matchedLookupUsers = useMemo(() => {
     const q = normalizeArabic(userLookupQ);
@@ -1009,14 +1159,32 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             onChange={e => setSearchQ(e.target.value)}
           />
         </div>
-        {searchQ && (
+        {(searchQ || streetFilter !== 'all' || statusFilter !== 'all') && (
           <button
             type="button"
-            onClick={() => setSearchQ('')}
+            onClick={() => {
+              setSearchQ('');
+              setStreetFilter('all');
+              setStatusFilter('all');
+            }}
             className="px-3 py-2 bg-rose-50 text-rose-800 border border-rose-200 rounded-xl font-black cursor-pointer"
           >
             مسح الفلتر ✕
           </button>
+        )}
+        {streetsList.length > 0 && (
+          <select
+            className="p-2 border rounded-xl bg-[#fbfaf7] font-bold"
+            value={streetFilter}
+            onChange={e => setStreetFilter(e.target.value)}
+          >
+            <option value="all">كل الشوارع المرتبة</option>
+            {streetsList.map(st => (
+              <option key={st.id} value={st.id}>
+                {st.street_name} {st.area_name ? `(${st.area_name})` : ''}
+              </option>
+            ))}
+          </select>
         )}
         <select
           className="p-2 border rounded-xl bg-[#fbfaf7] font-bold"
@@ -1046,7 +1214,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               const rels = Array.isArray(fam.relatives) ? fam.relatives : [];
               const visits = Array.isArray(fam.visitations_log) ? fam.visitations_log : [];
               const primaryPhone = fam.phone || fam.husband?.phone || fam.wife?.phone || '';
-              const displayAddress = fam.address || fam.husband?.address || fam.wife?.address || 'غير مسجل';
+              const displayAddress = fam.resolvedAddress || fam.address || fam.husband?.address || fam.wife?.address || 'غير مسجل';
 
               return (
                 <div
@@ -1066,6 +1234,11 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                         <span className="px-1.5 py-0.5 bg-amber-100 text-amber-950 rounded text-[9px] font-black">
                           {fam.family_status}
                         </span>
+                        {fam.street_name && (
+                          <span className="px-1.5 py-0.5 bg-purple-100 text-purple-950 rounded text-[9px] font-black">
+                            {fam.street_name}
+                          </span>
+                        )}
                         <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-900 rounded text-[9px] font-bold">
                           🕊️ {visits.length}
                         </span>
@@ -1300,7 +1473,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               const kids = Array.isArray(fam.children) ? fam.children : [];
               const rels = Array.isArray(fam.relatives) ? fam.relatives : [];
               const visits = Array.isArray(fam.visitations_log) ? fam.visitations_log : [];
-              const addr = fam.address || fam.husband?.address || fam.wife?.address || '—';
+              const addr = fam.resolvedAddress || fam.address || fam.husband?.address || fam.wife?.address || '—';
               const primaryPhone = fam.phone || fam.husband?.phone || fam.wife?.phone || '—';
 
               return (
@@ -1499,6 +1672,42 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                     <option value="سكن عائلي مشترك">سكن عائلي مشترك</option>
                   </select>
                 </div>
+
+                {streetsList.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                    <select
+                      className="p-2 border rounded-xl bg-white"
+                      value={form.street_id || ''}
+                      onChange={e => setForm({ ...form, street_id: e.target.value })}
+                    >
+                      <option value="">-- اختر الشارع --</option>
+                      {streetsList.map(st => (
+                        <option key={st.id} value={st.id}>
+                          {st.street_name} {st.area_name ? `(${st.area_name})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      placeholder="رقم العمارة"
+                      className="p-2 border rounded-xl bg-white"
+                      value={form.building_no || ''}
+                      onChange={e => setForm({ ...form, building_no: e.target.value })}
+                    />
+                    <input
+                      placeholder="الدور"
+                      className="p-2 border rounded-xl bg-white"
+                      value={form.floor_no || ''}
+                      onChange={e => setForm({ ...form, floor_no: e.target.value })}
+                    />
+                    <input
+                      placeholder="الشقة"
+                      className="p-2 border rounded-xl bg-white"
+                      value={form.apartment_no || ''}
+                      onChange={e => setForm({ ...form, apartment_no: e.target.value })}
+                    />
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <input
                     placeholder="العنوان السكني والمنطقة بالتفصيل"
@@ -1685,7 +1894,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               <div>
                 <h3 className="text-base font-black text-[#7a1c24]">{selectedFamily.family_title}</h3>
                 <p className="text-[11px] text-gray-500">
-                  📍 العنوان: {selectedFamily.address || selectedFamily.husband?.address || selectedFamily.wife?.address || 'غير مسجل'} • 🏷️ {selectedFamily.family_status}
+                  📍 العنوان: {selectedFamily.resolvedAddress || selectedFamily.address || selectedFamily.husband?.address || selectedFamily.wife?.address || 'غير مسجل'} • 🏷️ {selectedFamily.family_status}
                 </p>
               </div>
               <button type="button" onClick={() => setSelectedFamily(null)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer">
