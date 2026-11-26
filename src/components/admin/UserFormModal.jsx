@@ -50,6 +50,23 @@ function buildIsoDob(day, month, year) {
   return `${y}-${m}-${d}`;
 }
 
+function composeFullAddress({ streetObj, sector, buildingNo, floorNo, apartmentNo, addressNotes, rawAddress }) {
+  const manual = String(rawAddress || '').trim();
+  const pieces = [];
+  if (streetObj?.street_name) pieces.push(`شارع ${String(streetObj.street_name).replace(/^شارع\s*/i, '').trim()}`);
+  const areaPart = streetObj?.area_name || String(sector || '').trim();
+  if (areaPart) pieces.push(`منطقة ${String(areaPart).replace(/^منطقة\s*/i, '').trim()}`);
+  if (String(buildingNo || '').trim()) pieces.push(`عمارة ${String(buildingNo).trim()}`);
+  if (String(floorNo || '').trim()) pieces.push(`دور ${String(floorNo).trim()}`);
+  if (String(apartmentNo || '').trim()) pieces.push(`شقة ${String(apartmentNo).trim()}`);
+  if (String(addressNotes || '').trim()) pieces.push(String(addressNotes).trim());
+
+  const structured = pieces.join(' - ');
+  if (!manual) return structured;
+  if (!structured) return manual;
+  return manual.includes(structured) ? manual : `${manual} (${structured})`;
+}
+
 export default function UserFormModal({
   isEditing = false,
   isVisitorMode = false,
@@ -61,6 +78,7 @@ export default function UserFormModal({
   effectiveGroups = [],
   services = [],
   deaconRanksTable = [],
+  streetsList: passedStreets = null,
   onClose,
   onSubmit,
   onVisitorSuccess
@@ -68,6 +86,7 @@ export default function UserFormModal({
   const [submittingVisitor, setSubmittingVisitor] = useState(false);
   const [visitorStatus, setVisitorStatus] = useState({ type: '', msg: '' });
   const [nameError, setNameError] = useState('');
+  const [streets, setStreets] = useState(Array.isArray(passedStreets) ? passedStreets : []);
 
   const initialDob = parseDobParts(formData.dob);
   const [dobDay, setDobDay] = useState(initialDob.day);
@@ -78,6 +97,33 @@ export default function UserFormModal({
     setVisitorStatus({ type: '', msg: '' });
     setNameError('');
   }, [isVisitorMode, isEditing]);
+
+  useEffect(() => {
+    if (Array.isArray(passedStreets) && passedStreets.length > 0) {
+      setStreets(passedStreets);
+      return;
+    }
+    let active = true;
+    (async () => {
+      try {
+        if (!supabase || typeof supabase.from !== 'function') return;
+        const { data, error } = await supabase
+          .from('visitation_streets')
+          .select('id, area_name, street_name, sort_order, assigned_priest_id, notes')
+          .order('sort_order', { ascending: true })
+          .order('area_name', { ascending: true })
+          .order('street_name', { ascending: true });
+        if (active && !error && Array.isArray(data)) {
+          setStreets(data);
+        }
+      } catch {
+        // ignore if table not created yet
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [passedStreets]);
 
   useEffect(() => {
     const parsed = parseDobParts(formData.dob);
@@ -310,14 +356,31 @@ export default function UserFormModal({
               : (formData.detailed_stage || '')));
 
     const resolvedClass = inService ? (formData.assigned_class || '') : '';
+    const selectedStreet = streets.find(st => String(st.id) === String(formData.street_id || '')) || null;
+    const effectiveSectorInput = (formData.sector || '').trim() || (selectedStreet?.area_name || '');
+
     const resolvedSector =
       observer
-        ? 'زائر موقع (خارج الخدمة)'
+        ? (effectiveSectorInput || 'زائر موقع (خارج الخدمة)')
         : (resolvedEngagement === 'hall_meeting'
-            ? (formData.sector || 'اجتماع الصالة')
+            ? (effectiveSectorInput || 'اجتماع الصالة')
             : (formData.role === 'parish' || guardianActive || resolvedEngagement === 'parish_only'
-                ? (formData.sector || 'شعب (رعية)')
-                : (formData.sector || '')));
+                ? (effectiveSectorInput || 'شعب (رعية)')
+                : effectiveSectorInput));
+
+    const cleanBuilding = (formData.building_no || '').trim();
+    const cleanFloor = (formData.floor_no || '').trim();
+    const cleanApartment = (formData.apartment_no || '').trim();
+    const cleanAddressNotes = (formData.address_notes || '').trim();
+    const resolvedAddress = composeFullAddress({
+      streetObj: selectedStreet,
+      sector: resolvedSector,
+      buildingNo: cleanBuilding,
+      floorNo: cleanFloor,
+      apartmentNo: cleanApartment,
+      addressNotes: cleanAddressNotes,
+      rawAddress: formData.address
+    });
 
     const finalDob = buildIsoDob(dobDay, dobMonth, dobYear) || formData.dob || null;
 
@@ -357,7 +420,12 @@ export default function UserFormModal({
       phone: (formData.phone || '').trim(),
       job_title: formData.job_title || '',
       sector: resolvedSector,
-      address: (formData.address || '').trim(),
+      street_id: formData.street_id || null,
+      building_no: cleanBuilding || null,
+      floor_no: cleanFloor || null,
+      apartment_no: cleanApartment || null,
+      address_notes: cleanAddressNotes || null,
+      address: resolvedAddress,
       permissions: {
         ...(formData.permissions || {}),
         engagement_mode: resolvedEngagement,
@@ -365,7 +433,11 @@ export default function UserFormModal({
         service_membership_status: observer ? 'not_in_service' : 'in_service',
         after_accept_action: observer ? 'click_out_non_member' : 'standard_access',
         view_parent_panel: guardianActive,
-        ...(resolvedGuardianType ? { guardian_type: resolvedGuardianType } : {})
+        ...(resolvedGuardianType ? { guardian_type: resolvedGuardianType } : {}),
+        ...(formData.street_id ? { street_id: formData.street_id } : {}),
+        ...(cleanBuilding ? { building_no: cleanBuilding } : {}),
+        ...(cleanFloor ? { floor_no: cleanFloor } : {}),
+        ...(cleanApartment ? { apartment_no: cleanApartment } : {})
       }
     };
   };
@@ -394,16 +466,17 @@ export default function UserFormModal({
     if (!(formData.phone || '').trim()) {
       return setVisitorStatus({ type: 'error', msg: 'يرجى إدخال رقم الهاتف.' });
     }
-    if (!(formData.address || '').trim()) {
-      return setVisitorStatus({ type: 'error', msg: 'يرجى إدخال العنوان التفصيلي.' });
+
+    const builtPayload = buildStandardPayload(true);
+    if (!(builtPayload.address || '').trim()) {
+      return setVisitorStatus({ type: 'error', msg: 'يرجى اختيار الشارع أو إدخال العنوان التفصيلي.' });
     }
 
     setSubmittingVisitor(true);
     try {
-      const payload = buildStandardPayload(true);
       const { data, error } = await supabase
         .from('church_users')
-        .insert([payload])
+        .insert([builtPayload])
         .select()
         .single();
 
@@ -1054,25 +1127,100 @@ export default function UserFormModal({
             </div>
           </div>
 
-          {/* القطاع / المنطقة + العنوان التفصيلي */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <div>
-              <label className="block mb-1">القطاع / المنطقة</label>
-              <input
-                className="w-full p-2.5 border rounded-xl bg-white"
-                value={formData.sector || ''}
-                onChange={e => setFormData({ ...formData, sector: e.target.value })}
-              />
+          {/* بيانات السكن والربط بقاعدة بيانات الشوارع من أول تسجيل */}
+          <div className="bg-[#fbfaf7] p-3 rounded-2xl border border-amber-200 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <strong className="text-[#7a1c24] font-extrabold">
+                🏠 بيانات السكن والشارع (مربوط بجدول الشوارع للفرز والافتقاد)
+              </strong>
+              <span className="text-[10px] text-gray-500">اختياري تدريجياً لعدم تعطيل التسجيل</span>
             </div>
-            <div>
-              <label className="block mb-1">العنوان التفصيلي *</label>
-              <input
-                required
-                placeholder="الشارع، رقم العقار، المنطقة..."
-                className="w-full p-2.5 border rounded-xl bg-white"
-                value={formData.address || ''}
-                onChange={e => setFormData({ ...formData, address: e.target.value })}
-              />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div>
+                <label className="block mb-1">الشارع (من جدول الشوارع)</label>
+                <select
+                  className="w-full p-2.5 border rounded-xl bg-white"
+                  value={formData.street_id || ''}
+                  onChange={e => {
+                    const nextStreetId = e.target.value;
+                    const foundStreet = streets.find(st => String(st.id) === String(nextStreetId));
+                    setFormData(prev => ({
+                      ...prev,
+                      street_id: nextStreetId,
+                      sector: foundStreet?.area_name ? (prev.sector || foundStreet.area_name) : prev.sector
+                    }));
+                  }}
+                >
+                  <option value="">-- اختر الشارع / المنطقة --</option>
+                  {streets.map(st => (
+                    <option key={st.id} value={st.id}>
+                      {st.street_name} {st.area_name ? `(${st.area_name})` : ''} {st.sort_order ? `[ترتيب #${st.sort_order}]` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block mb-1">القطاع / المنطقة</label>
+                <input
+                  className="w-full p-2.5 border rounded-xl bg-white"
+                  placeholder="مثال: منطقة كذا..."
+                  value={formData.sector || ''}
+                  onChange={e => setFormData({ ...formData, sector: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="block mb-1 text-[11px]">رقم / اسم العمارة</label>
+                <input
+                  placeholder="مثال: عمارة 4"
+                  className="w-full p-2 border rounded-xl bg-white"
+                  value={formData.building_no || ''}
+                  onChange={e => setFormData({ ...formData, building_no: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block mb-1 text-[11px]">الدور</label>
+                <input
+                  placeholder="مثال: الثالث / 3"
+                  className="w-full p-2 border rounded-xl bg-white"
+                  value={formData.floor_no || ''}
+                  onChange={e => setFormData({ ...formData, floor_no: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block mb-1 text-[11px]">رقم الشقة</label>
+                <input
+                  placeholder="مثال: شقة 8"
+                  className="w-full p-2 border rounded-xl bg-white"
+                  value={formData.apartment_no || ''}
+                  onChange={e => setFormData({ ...formData, apartment_no: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div>
+                <label className="block mb-1">العنوان التفصيلي *</label>
+                <input
+                  placeholder="الشارع، رقم العقار، المنطقة..."
+                  className="w-full p-2.5 border rounded-xl bg-white"
+                  value={formData.address || ''}
+                  onChange={e => setFormData({ ...formData, address: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block mb-1">ملاحظات العنوان / علامة مميزة</label>
+                <input
+                  placeholder="بجوار... / تفاصيل إضافية"
+                  className="w-full p-2.5 border rounded-xl bg-white"
+                  value={formData.address_notes || ''}
+                  onChange={e => setFormData({ ...formData, address_notes: e.target.value })}
+                />
+              </div>
             </div>
           </div>
 
