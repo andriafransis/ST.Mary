@@ -69,7 +69,7 @@ export default function InvitationQrCard({ invite = {} }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      // تجاهل
+      // تجاهل خطأ الحافظة
     }
   };
 
