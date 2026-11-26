@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLogger';
-import PriestInvitationModal from '../components/PriestInvitationModal';
+import PriestInvitationModal from '../components/priest/PriestInvitationModal';
 import {
   Phone, AlertCircle, CheckCircle2, Calendar, BookOpen,
   Clock, UserCheck, MessageCircle, Bus, MapPin, Layers, XCircle, MailPlus
@@ -250,7 +250,6 @@ export default function MemberDashboard({
     return Array.from(matchedMap.values());
   }, [member, services, serviceGroups, servants]);
 
-  // تقسيم الرحلات إلى: رحلات عام (مكتب الرحلات) ورحلات خدمتي (الخاصة بخدمة / فصل / اجتماع المخدوم)
   const { generalTrips, myServiceTrips } = useMemo(() => {
     const memberServiceTokens = [
       ...myServiceCards.map(c => c.title),
