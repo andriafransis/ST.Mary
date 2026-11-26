@@ -35,13 +35,14 @@ export default function MemberDashboard({
   onMemberUpdated
 }) {
   const [activeTab, setActiveTab] = useState('services'); // 'services' | 'confessions' | 'masses' | 'trips' | 'invite'
+  const [tripSubTab, setTripSubTab] = useState('my_service'); // 'my_service' | 'general'
   const [selectedPriestId, setSelectedPriestId] = useState(member?.confession_father_id || '');
   const [savingFather, setSavingFather] = useState(false);
   const [filterPriestId, setFilterPriestId] = useState(member?.confession_father_id || 'all');
   const [myBookings, setMyBookings] = useState([]);
   const [bookingBusy, setBookingBusy] = useState(null);
 
-  const [publicTrips, setPublicTrips] = useState([]);
+  const [allTrips, setAllTrips] = useState([]);
   const [myTripRegs, setMyTripRegs] = useState([]);
   const [tripBusy, setTripBusy] = useState(null);
   const [confessionIntervalDays, setConfessionIntervalDays] = useState(45);
@@ -81,7 +82,6 @@ export default function MemberDashboard({
       supabase
         .from('church_trips')
         .select('*')
-        .eq('is_public', true)
         .order('trip_date', { ascending: true }),
       supabase
         .from('trip_registrations')
@@ -95,7 +95,7 @@ export default function MemberDashboard({
     ]).then(([cb, tr, reg, intv]) => {
       if (cancelled) return;
       if (!cb.error && cb.data) setMyBookings(cb.data);
-      if (!tr.error && tr.data) setPublicTrips(tr.data);
+      if (!tr.error && tr.data) setAllTrips(tr.data);
       if (!reg.error && reg.data) setMyTripRegs(reg.data);
       if (!intv.error && intv.data?.value?.days) {
         setConfessionIntervalDays(Number(intv.data.value.days) || 45);
@@ -250,6 +250,57 @@ export default function MemberDashboard({
     return Array.from(matchedMap.values());
   }, [member, services, serviceGroups, servants]);
 
+  // تقسيم الرحلات إلى: رحلات عام (مكتب الرحلات) ورحلات خدمتي (الخاصة بخدمة / فصل / اجتماع المخدوم)
+  const { generalTrips, myServiceTrips } = useMemo(() => {
+    const memberServiceTokens = [
+      ...myServiceCards.map(c => c.title),
+      ...myServiceCards.map(c => c.stageLabel),
+      ...splitList(member?.assigned_class),
+      ...splitList(member?.detailed_stage),
+      ...splitList(member?.service_stage),
+      ...splitList(member?.general_service_name),
+      ...(Array.isArray(member?.permissions?.extra_services) ? member.permissions.extra_services : [])
+    ]
+      .map(t => normalizeText(t))
+      .filter(Boolean);
+
+    const gen = [];
+    const mine = [];
+
+    for (const tr of allTrips) {
+      const targetSrvRaw = String(
+        tr.target_service || tr.stage_name || tr.service_name || tr.assigned_class || ''
+      ).trim();
+      const normTarget = normalizeText(targetSrvRaw);
+      const scopeType = normalizeText(tr.trip_scope || tr.scope_type || '');
+
+      const isGeneralTrip =
+        Boolean(tr.is_general_trip) ||
+        scopeType === 'general' ||
+        scopeType === 'trips_office' ||
+        !normTarget ||
+        normTarget === 'عام' ||
+        normTarget === 'رحلات عام' ||
+        normTarget === 'مكتب الرحلات' ||
+        normTarget.includes('مكتب الرحلات');
+
+      if (isGeneralTrip) {
+        if (tr.is_public !== false) gen.push(tr);
+        continue;
+      }
+
+      const matchesMine = memberServiceTokens.some(
+        tok => normTarget === tok || normTarget.includes(tok) || tok.includes(normTarget)
+      );
+
+      if (matchesMine) {
+        mine.push(tr);
+      }
+    }
+
+    return { generalTrips: gen, myServiceTrips: mine };
+  }, [allTrips, myServiceCards, member]);
+
   const onlyMassEvents = useMemo(
     () => events.filter(ev => (ev.event_type || '').includes('قداس') || (ev.event_type || '').includes('عشية')),
     [events]
@@ -357,7 +408,7 @@ export default function MemberDashboard({
     const countInput = prompt(`اشتراك في رحلة (${trip.title}):\nاكتب عدد الأفراد المطلوب حجزهم:`, '1');
     if (!countInput) return;
     const seatsCount = Math.max(1, Number(countInput) || 1);
-    const notesInput = prompt('أي ملاحظات لمكتب الرحلات (اختياري):', '') || '';
+    const notesInput = prompt('أي ملاحظات للرحلة (اختياري):', '') || '';
 
     setTripBusy(trip.id);
     try {
@@ -438,6 +489,101 @@ export default function MemberDashboard({
     : confessionIntervalDays === 60
       ? 'كل شهرين (60 يوم)'
       : `كل ${confessionIntervalDays} يوم`;
+
+  const visibleTripsList = tripSubTab === 'general' ? generalTrips : myServiceTrips;
+
+  const renderTripCards = (list, isGeneralSection) => {
+    if (list.length === 0) {
+      return (
+        <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+          {isGeneralSection
+            ? 'لا توجد رحلات عامة معلنة من مكتب الرحلات حالياً.'
+            : 'لا توجد رحلات مضافة لخدمتك أو اجتماعك حالياً.'}
+        </div>
+      );
+    }
+
+    return (
+      <div className="grid gap-3">
+        {list.map(tr => {
+          const myReg = myTripRegs.find(r => r.trip_id === tr.id);
+          const isOvernight = Number(tr.days_count || 1) > 1 || (Array.isArray(tr.rooms) && tr.rooms.length > 0);
+          return (
+            <div key={tr.id} className="p-4 bg-purple-50/40 border border-purple-200 rounded-2xl space-y-2.5">
+              <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-3">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="px-2 py-0.5 bg-purple-100 text-purple-950 rounded-lg text-[10px] font-black">
+                      {isGeneralSection ? '🌐 رحلات عام (مكتب الرحلات)' : `🏫 رحلات خدمتي (${tr.target_service || tr.stage_name || 'خدمتي'})`}
+                    </span>
+                    <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded-lg text-[10px] font-bold">
+                      {tr.trip_category || 'رحلة'}
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${
+                        isOvernight ? 'bg-indigo-100 text-indigo-950' : 'bg-amber-100 text-amber-950'
+                      }`}
+                    >
+                      {isOvernight ? `🌙 ${tr.days_count} أيام` : '☀️ يوم واحد (داي يوز)'}
+                    </span>
+                    {Number(tr.cost_per_person) > 0 && (
+                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded-lg text-[10px] font-black">
+                        💰 {tr.cost_per_person} ج.م
+                      </span>
+                    )}
+                  </div>
+                  <strong className="text-sm sm:text-base text-gray-900 block">{tr.title}</strong>
+                  <p className="text-gray-600">
+                    📅 {tr.trip_date || 'قريباً'}
+                    {tr.gathering_time && ` • تجمع: ${tr.gathering_time}`}
+                    {tr.departure_time && ` • تحرك: ${tr.departure_time}`}
+                    {tr.return_time && ` • عودة: ${tr.return_time}`}
+                  </p>
+                </div>
+
+                {myReg ? (
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <span className="px-3.5 py-2 bg-green-100 text-green-900 rounded-xl font-black text-xs">
+                      ✅ تم تسجيل اشتراكك ({myReg.seats_count} فرد)
+                    </span>
+                    <button
+                      type="button"
+                      disabled={tripBusy === tr.id}
+                      onClick={() => handleCancelTripReg(myReg, tr.title)}
+                      className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold text-xs cursor-pointer transition"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={tripBusy === tr.id}
+                    onClick={() => handleJoinTrip(tr)}
+                    className="w-full sm:w-auto px-4 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black text-xs cursor-pointer shrink-0 transition"
+                  >
+                    {tripBusy === tr.id ? 'جاري التسجيل...' : '✋ اشتراك في الرحلة'}
+                  </button>
+                )}
+              </div>
+
+              {tr.monasteries && (
+                <p className="text-gray-800">
+                  ⛪ <strong>الأماكن والزيارات:</strong> {tr.monasteries}
+                </p>
+              )}
+              {tr.daily_program && (
+                <div className="p-3 bg-white border border-purple-100 rounded-xl text-gray-700 whitespace-pre-line">
+                  <strong className="text-[#7a1c24] block mb-1">📋 برنامج الرحلة التفصيلي:</strong>
+                  {tr.daily_program}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-3 text-xs" dir="rtl">
@@ -542,7 +688,7 @@ export default function MemberDashboard({
             activeTab === 'trips' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
           }`}
         >
-          <Bus size={14} /> الرحلات ({publicTrips.length})
+          <Bus size={14} /> الرحلات ({myServiceTrips.length + generalTrips.length})
         </button>
         <button
           type="button"
@@ -796,91 +942,34 @@ export default function MemberDashboard({
         )}
 
         {activeTab === 'trips' && (
-          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
-            <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
-              <Bus size={17} /> رحلات الكنيسة المتاحة (للعرض والاشتراك)
-            </h3>
-            {publicTrips.length === 0 ? (
-              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
-                لا توجد رحلات عامة معلنة حالياً.
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+              <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5">
+                <Bus size={17} /> الرحلات المتاحة لك
+              </h3>
+              <div className="flex items-center gap-1.5 bg-[#fbfaf7] p-1 rounded-2xl border">
+                <button
+                  type="button"
+                  onClick={() => setTripSubTab('my_service')}
+                  className={`px-3.5 py-1.5 rounded-xl font-black text-xs cursor-pointer transition ${
+                    tripSubTab === 'my_service' ? 'bg-[#7a1c24] text-white' : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  رحلات خدمتي ({myServiceTrips.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTripSubTab('general')}
+                  className={`px-3.5 py-1.5 rounded-xl font-black text-xs cursor-pointer transition ${
+                    tripSubTab === 'general' ? 'bg-[#7a1c24] text-white' : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  رحلات عام ({generalTrips.length})
+                </button>
               </div>
-            ) : (
-              <div className="grid gap-3">
-                {publicTrips.map(tr => {
-                  const myReg = myTripRegs.find(r => r.trip_id === tr.id);
-                  const isOvernight = Number(tr.days_count || 1) > 1 || (Array.isArray(tr.rooms) && tr.rooms.length > 0);
-                  return (
-                    <div key={tr.id} className="p-4 bg-purple-50/40 border border-purple-200 rounded-2xl space-y-2.5">
-                      <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-3">
-                        <div className="space-y-1">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="px-2 py-0.5 bg-purple-100 text-purple-950 rounded-lg text-[10px] font-black">
-                              {tr.trip_category || 'رحلة عامة'}
-                            </span>
-                            <span
-                              className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${
-                                isOvernight ? 'bg-indigo-100 text-indigo-950' : 'bg-amber-100 text-amber-950'
-                              }`}
-                            >
-                              {isOvernight ? `🌙 ${tr.days_count} أيام` : '☀️ يوم واحد (داي يوز)'}
-                            </span>
-                            {Number(tr.cost_per_person) > 0 && (
-                              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded-lg text-[10px] font-black">
-                                💰 {tr.cost_per_person} ج.م
-                              </span>
-                            )}
-                          </div>
-                          <strong className="text-sm sm:text-base text-gray-900 block">{tr.title}</strong>
-                          <p className="text-gray-600">
-                            📅 {tr.trip_date || 'قريباً'}
-                            {tr.gathering_time && ` • تجمع: ${tr.gathering_time}`}
-                            {tr.departure_time && ` • تحرك: ${tr.departure_time}`}
-                            {tr.return_time && ` • عودة: ${tr.return_time}`}
-                          </p>
-                        </div>
+            </div>
 
-                        {myReg ? (
-                          <div className="flex flex-wrap items-center gap-2 shrink-0">
-                            <span className="px-3.5 py-2 bg-green-100 text-green-900 rounded-xl font-black text-xs">
-                              ✅ تم تسجيل اشتراكك ({myReg.seats_count} فرد)
-                            </span>
-                            <button
-                              type="button"
-                              disabled={tripBusy === tr.id}
-                              onClick={() => handleCancelTripReg(myReg, tr.title)}
-                              className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-xl font-bold text-xs cursor-pointer transition"
-                            >
-                              إلغاء
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={tripBusy === tr.id}
-                            onClick={() => handleJoinTrip(tr)}
-                            className="w-full sm:w-auto px-4 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black text-xs cursor-pointer shrink-0 transition"
-                          >
-                            {tripBusy === tr.id ? 'جاري التسجيل...' : '✋ اشتراك في الرحلة'}
-                          </button>
-                        )}
-                      </div>
-
-                      {tr.monasteries && (
-                        <p className="text-gray-800">
-                          ⛪ <strong>الأماكن والزيارات:</strong> {tr.monasteries}
-                        </p>
-                      )}
-                      {tr.daily_program && (
-                        <div className="p-3 bg-white border border-purple-100 rounded-xl text-gray-700 whitespace-pre-line">
-                          <strong className="text-[#7a1c24] block mb-1">📋 برنامج الرحلة التفصيلي:</strong>
-                          {tr.daily_program}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            {renderTripCards(visibleTripsList, tripSubTab === 'general')}
           </div>
         )}
 
