@@ -36,6 +36,18 @@ const KINSHIP_ROLE_OPTIONS = [
   'زوج الأخت'
 ];
 
+const REVERSE_KINSHIP_MAP = {
+  'العم': 'ابن/ابنة الأخ',
+  'الخال': 'ابن/ابنة الأخت',
+  'الخالة': 'ابن/ابنة الأخت',
+  'الأخت': 'أخ / أخت',
+  'زوج الأخت': 'نسيب / صهر',
+  'الجد': 'حفيد / حفيدة',
+  'الجدة': 'حفيد / حفيدة',
+  'الحفيد': 'جد / جدة',
+  'الحفيدة': 'جد / جدة'
+};
+
 const normalizeArabic = (str = '') =>
   String(str || '')
     .trim()
@@ -200,10 +212,22 @@ const isUserMarriedOrParent = (u, allPeople, userChildren) => {
   return false;
 };
 
-/**
- * تحليل الاسم الرباعي (1: الأول، 2: الثاني/الأب، 3: الثالث/الجد، 4: الرابع/جد الجد)
- * وتحديد القرابة المحتملة بين شخص مرجعي وشخص مرشح من قاعدة البيانات
- */
+// تحديث آمن لصف في church_users مع معالجة أي اختلاف في الأعمدة
+async function safeUpdateChurchUser(userId, patch) {
+  if (!userId || !patch || Object.keys(patch).length === 0) return { ok: true };
+  const { error } = await supabase.from('church_users').update(patch).eq('id', userId);
+  if (!error) return { ok: true };
+
+  const fallbackPatch = { ...patch };
+  delete fallbackPatch.permissions;
+  delete fallbackPatch.housing_type;
+  delete fallbackPatch.father_phone;
+  delete fallbackPatch.mother_phone;
+  const retry = await supabase.from('church_users').update(fallbackPatch).eq('id', userId);
+  if (!retry.error) return { ok: true };
+  return { ok: false, error: retry.error.message || error.message };
+}
+
 function analyzeQuadKinship(anchorName = '', anchorUser = null, candidateUser = null) {
   const candName = getDisplayQuadName(candidateUser);
   const aToks = getNameTokens(anchorName);
@@ -229,7 +253,7 @@ function analyzeQuadKinship(anchorName = '', anchorUser = null, candidateUser = 
 
   const aAge = getNumericAge(anchorUser?.dob);
   const cAge = getNumericAge(candidateUser?.dob);
-  const ageDiff = aAge !== null && cAge !== null ? cAge - aAge : null; // موجب = المرشح أكبر، سالب = المرشح أصغر
+  const ageDiff = aAge !== null && cAge !== null ? cAge - aAge : null;
 
   let score = 0;
   let inferredRole = null;
@@ -245,7 +269,6 @@ function analyzeQuadKinship(anchorName = '', anchorUser = null, candidateUser = 
     }
   }
 
-  // 1. هل هو الأب أو الجد أو الجد الرابع؟ (الاسم الرباعي للمرشح يطابق سلسلة نسب المرجع)
   const anchorLineageFromSecond = aToks.slice(1).join(' ');
   const anchorLineageFromThird = aToks.slice(2).join(' ');
   const candNorm = cToks.join(' ');
@@ -264,7 +287,6 @@ function analyzeQuadKinship(anchorName = '', anchorUser = null, candidateUser = 
     reasons.push(`الاسم الأول للمرشح يطابق الاسم الرابع (${aFourth})`);
   }
 
-  // 2. هل هو الابن أو الحفيد؟ (اسم المرجع الأول موجود في موقع الأب أو الجد لدى المرشح)
   if (!inferredRole) {
     if (cSecond === aFirst && (!isFemale || anchorUser?.gender === 'أنثى')) {
       if (ageDiff !== null && ageDiff > 5) {
@@ -283,7 +305,6 @@ function analyzeQuadKinship(anchorName = '', anchorUser = null, candidateUser = 
     }
   }
 
-  // 3. هل هو العم (نفس الأب أو نفس الجد الثالث/الرابع، باسم أول مختلف)؟
   if (!inferredRole && !isFemale && cFirst !== aFirst) {
     const sameFather = aSecond && cSecond === aSecond && aThird && cThird === aThird;
     const sameGrandFather = aThird && cThird === aThird && (!aFourth || !cFourth || cFourth === aFourth);
@@ -303,7 +324,6 @@ function analyzeQuadKinship(anchorName = '', anchorUser = null, candidateUser = 
     }
   }
 
-  // 4. الأخت أو زوج الأخت أو الخال أو الخالة أو الزوجة
   if (!inferredRole) {
     const sameFather = aSecond && cSecond === aSecond && aThird && cThird === aThird;
     if (isFemale && sameFather && cFirst !== aFirst) {
@@ -338,7 +358,6 @@ function analyzeQuadKinship(anchorName = '', anchorUser = null, candidateUser = 
     }
   }
 
-  // تطابق عام في مقاطع الاسم الرباعي (1-2-3-4)
   if (score === 0) {
     const commonToks = aToks.filter(t => cToks.includes(t));
     if (commonToks.length >= 3) {
@@ -414,6 +433,7 @@ function buildAutoFamiliesFromDatabase({
         motherPhoneHint: '',
         childUsers: new Map(),
         extraChildren: [],
+        confirmedExtended: [],
         addressHint: '',
         housingHint: 'تمليك',
         belongsToPriest: false
@@ -448,6 +468,7 @@ function buildAutoFamiliesFromDatabase({
     if (s.belongsToPriest) t.belongsToPriest = true;
     s.childUsers.forEach((cu, cid) => t.childUsers.set(cid, cu));
     s.extraChildren.forEach(ec => t.extraChildren.push(ec));
+    s.confirmedExtended.forEach(ex => t.confirmedExtended.push(ex));
 
     for (const [uid, bKey] of userToHeadBucketKey.entries()) {
       if (bKey === sourceKey) userToHeadBucketKey.set(uid, targetKey);
@@ -626,6 +647,24 @@ function buildAutoFamiliesFromDatabase({
     markPriestLink(parentBucket, u);
   });
 
+  // تجميع الأقارب المؤكدين في الداتابيز (عم، خال، خالة، أخت، زوج أخت، جد، جدة، حفيد)
+  people.forEach(u => {
+    const extList = Array.isArray(u.permissions?.extended_relatives) ? u.permissions.extended_relatives : [];
+    if (extList.length === 0) return;
+    const bKey = userToHeadBucketKey.get(u.id);
+    if (!bKey || !buckets.has(bKey)) return;
+    const bucket = buckets.get(bKey);
+    extList.forEach(rel => {
+      const relUser = rel.user_id ? byId.get(rel.user_id) : null;
+      bucket.confirmedExtended.push({
+        user_id: rel.user_id || null,
+        full_name: rel.full_name || getDisplayQuadName(relUser) || '',
+        kinship_role: rel.kinship_role || 'قريب عائلة',
+        phone: rel.phone || relUser?.phone || ''
+      });
+    });
+  });
+
   userChildren.forEach(uc => {
     const bKey = userToHeadBucketKey.get(uc.parent_user_id);
     if (!bKey || !buckets.has(bKey)) return;
@@ -760,6 +799,19 @@ function buildAutoFamiliesFromDatabase({
         );
       }
     });
+
+    bucket.confirmedExtended.forEach(ext => {
+      if (!ext.user_id) return;
+      const extOwnKey = userToHeadBucketKey.get(ext.user_id);
+      if (extOwnKey && extOwnKey !== bKey) {
+        addFamilyRelation(
+          bKey,
+          extOwnKey,
+          `${ext.kinship_role} (${ext.full_name})`,
+          ext.full_name
+        );
+      }
+    });
   }
 
   const familiesList = [];
@@ -873,7 +925,8 @@ function buildAutoFamiliesFromDatabase({
       wife.user_id,
       fatherObj.user_id,
       motherObj.user_id,
-      ...allChildren.map(c => c.user_id)
+      ...allChildren.map(c => c.user_id),
+      ...bucket.confirmedExtended.map(ex => ex.user_id)
     ].filter(Boolean);
 
     const connectedFamilies = relationsGraph.has(bucket.key)
@@ -896,6 +949,7 @@ function buildAutoFamiliesFromDatabase({
       linkedUserIds: linkedIds,
       lineageParentName: fatherObj.full_name || '',
       connectedFamilies,
+      confirmedExtended: bucket.confirmedExtended,
       family_title: titleCandidate,
       address: resolvedAddress,
       housing_type: bucket.housingHint || 'تمليك',
@@ -934,7 +988,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   const [searchQ, setSearchQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  // الدور المختار لكل مرشح قبل الضغط على "تأكيد إنه تبع العيلة"
   const [selectedRoleByCandidate, setSelectedRoleByCandidate] = useState({});
   const [dismissedSuggestions, setDismissedSuggestions] = useState({});
   const [confirmingUserId, setConfirmingUserId] = useState(null);
@@ -995,7 +1048,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     loadData();
   }, [priest?.id]);
 
-  // استخراج المرشحين من الداتابيز بالاسم الرباعي (1-2-3-4) وتحديد صلة القرابة المحتملة
   const findKinshipCandidatesForFamily = useMemo(() => {
     const people = churchUsers.filter(u => u.role !== 'admin' && u.role !== 'priest');
     const byId = new Map(people.map(p => [p.id, p]));
@@ -1175,7 +1227,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     });
   }, [churchUsers, userChildren, memberSiblings, savedRecords, priest?.id, priest?.full_name]);
 
-  // بحث فوري بالاسم الرباعي (1-2-3-4) مع تحليل صلة القرابة المحتملة
   const quadSearchMatches = useMemo(() => {
     const q = searchQ.trim();
     if (getNameTokens(q).length < 2) return [];
@@ -1199,6 +1250,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     return map;
   }, [unifiedFamilies]);
 
+  // تعديل وتحديث قاعدة البيانات فعلياً عند الربط أو تأكيد القرابة
   const handleLinkPersonInDatabase = async (fam, targetUser, relationType, kinshipLabel = '') => {
     if (!fam || !targetUser) return;
     setLinkBusy(true);
@@ -1210,6 +1262,9 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         return;
       }
 
+      const primaryName = getDisplayQuadName(primaryUser);
+      const targetName = getDisplayQuadName(targetUser);
+
       if (relationType === 'spouse') {
         const primaryIsFemale = primaryUser.gender === 'أنثى';
         const targetIsFemale = targetUser.gender === 'أنثى';
@@ -1217,60 +1272,46 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         const targetNextMarital = targetIsFemale ? 'متزوجة' : 'متزوج';
 
         await Promise.all([
-          supabase
-            .from('church_users')
-            .update({
-              marital_status: primaryNextMarital,
-              spouse_name: getDisplayQuadName(targetUser),
-              spouse_phone: targetUser.phone || '',
-              permissions: {
-                ...(primaryUser.permissions || {}),
-                linked_spouse_id: targetUser.id
-              }
-            })
-            .eq('id', primaryUser.id),
-          supabase
-            .from('church_users')
-            .update({
-              marital_status: targetNextMarital,
-              spouse_name: getDisplayQuadName(primaryUser),
-              spouse_phone: primaryUser.phone || '',
-              permissions: {
-                ...(targetUser.permissions || {}),
-                linked_spouse_id: primaryUser.id
-              }
-            })
-            .eq('id', targetUser.id)
+          safeUpdateChurchUser(primaryUser.id, {
+            marital_status: primaryNextMarital,
+            spouse_name: targetName,
+            spouse_phone: targetUser.phone || '',
+            permissions: {
+              ...(primaryUser.permissions || {}),
+              linked_spouse_id: targetUser.id
+            }
+          }),
+          safeUpdateChurchUser(targetUser.id, {
+            marital_status: targetNextMarital,
+            spouse_name: primaryName,
+            spouse_phone: primaryUser.phone || '',
+            permissions: {
+              ...(targetUser.permissions || {}),
+              linked_spouse_id: primaryUser.id
+            }
+          })
         ]);
       } else if (relationType === 'father') {
         await Promise.all([
-          supabase
-            .from('church_users')
-            .update({
-              father_id: targetUser.id,
-              father_full_name: getDisplayQuadName(targetUser),
-              father_phone: targetUser.phone || ''
-            })
-            .eq('id', primaryUser.id),
-          supabase
-            .from('church_users')
-            .update({ marital_status: 'متزوج' })
-            .eq('id', targetUser.id)
+          safeUpdateChurchUser(primaryUser.id, {
+            father_id: targetUser.id,
+            father_full_name: targetName,
+            father_phone: targetUser.phone || ''
+          }),
+          safeUpdateChurchUser(targetUser.id, {
+            marital_status: 'متزوج'
+          })
         ]);
       } else if (relationType === 'mother') {
         await Promise.all([
-          supabase
-            .from('church_users')
-            .update({
-              mother_id: targetUser.id,
-              mother_full_name: getDisplayQuadName(targetUser),
-              mother_phone: targetUser.phone || ''
-            })
-            .eq('id', primaryUser.id),
-          supabase
-            .from('church_users')
-            .update({ marital_status: 'متزوجة' })
-            .eq('id', targetUser.id)
+          safeUpdateChurchUser(primaryUser.id, {
+            mother_id: targetUser.id,
+            mother_full_name: targetName,
+            mother_phone: targetUser.phone || ''
+          }),
+          safeUpdateChurchUser(targetUser.id, {
+            marital_status: 'متزوجة'
+          })
         ]);
       } else if (relationType === 'child') {
         const isPrimaryFemale = primaryUser.gender === 'أنثى';
@@ -1283,7 +1324,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           patch.father_phone = fam.husband.phone || '';
         } else if (!isPrimaryFemale) {
           patch.father_id = primaryUser.id;
-          patch.father_full_name = getDisplayQuadName(primaryUser);
+          patch.father_full_name = primaryName;
           patch.father_phone = primaryUser.phone || '';
         }
         if (fam.wife?.user_id) {
@@ -1292,57 +1333,81 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           patch.mother_phone = fam.wife.phone || '';
         } else if (isPrimaryFemale) {
           patch.mother_id = primaryUser.id;
-          patch.mother_full_name = getDisplayQuadName(primaryUser);
+          patch.mother_full_name = primaryName;
           patch.mother_phone = primaryUser.phone || '';
         }
 
-        await supabase
-          .from('church_users')
-          .update(patch)
-          .eq('id', targetUser.id);
+        await safeUpdateChurchUser(targetUser.id, patch);
       } else {
-        // ربط قريب ممتد (العم، الخال، الخالة، الأخت، زوج الأخت، الجد، الجدة، الحفيد) وحفظ صلة القرابة في الداتابيز
-        const existingRelatives = Array.isArray(primaryUser.permissions?.extended_relatives)
+        // تحديث القرابة المتبادلة في الداتابيز (عم، خال، خالة، أخت، زوج أخت، جد، جدة، حفيد)
+        const primaryRelatives = Array.isArray(primaryUser.permissions?.extended_relatives)
           ? primaryUser.permissions.extended_relatives
           : [];
-        const nextRelatives = [
-          ...existingRelatives.filter(r => r.user_id !== targetUser.id),
+        const nextPrimaryRelatives = [
+          ...primaryRelatives.filter(r => r.user_id !== targetUser.id),
           {
             user_id: targetUser.id,
-            full_name: getDisplayQuadName(targetUser),
+            full_name: targetName,
             kinship_role: kinshipLabel || 'قريب عائلة',
             phone: targetUser.phone || ''
           }
         ];
-        await supabase
-          .from('church_users')
-          .update({
+
+        const targetRelatives = Array.isArray(targetUser.permissions?.extended_relatives)
+          ? targetUser.permissions.extended_relatives
+          : [];
+        const reverseRole = REVERSE_KINSHIP_MAP[kinshipLabel] || `قريب (${primaryName})`;
+        const nextTargetRelatives = [
+          ...targetRelatives.filter(r => r.user_id !== primaryUser.id),
+          {
+            user_id: primaryUser.id,
+            full_name: primaryName,
+            kinship_role: reverseRole,
+            phone: primaryUser.phone || ''
+          }
+        ];
+
+        await Promise.all([
+          safeUpdateChurchUser(primaryUser.id, {
             permissions: {
               ...(primaryUser.permissions || {}),
-              extended_relatives: nextRelatives
+              extended_relatives: nextPrimaryRelatives
+            }
+          }),
+          safeUpdateChurchUser(targetUser.id, {
+            permissions: {
+              ...(targetUser.permissions || {}),
+              extended_relatives: nextTargetRelatives
             }
           })
-          .eq('id', primaryUser.id);
+        ]);
+      }
+
+      // تحديث أو إنشاء سجل الأسرة في priest_family_visitations لضمان بقاء التحديث محفوظاً
+      if (fam.savedId && priest?.id) {
+        await supabase
+          .from('priest_family_visitations')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', fam.savedId);
       }
 
       logActivity({
         user: priest,
-        actionType: 'تأكيد_صلة_قرابة_أسرة',
+        actionType: 'تعديل_وتحديث_داتابيز_الأسرة',
         targetTable: 'church_users',
         targetId: primaryUser.id,
-        description: `تأكيد صلة (${kinshipLabel || relationType}) لـ (${getDisplayQuadName(targetUser)}) مع أسرة (${fam.family_title})`
+        description: `تعديل وتحديث الداتابيز: تأكيد صلة (${kinshipLabel || relationType}) لـ (${targetName}) مع أسرة (${fam.family_title})`
       });
 
       await loadData();
       setLinkModalFam(null);
       setLinkSearchQ('');
-      alert(`تم تأكيد القرابة (${kinshipLabel || 'تبع العيلة'}) وتحديث الداتابيز بنجاح ✅`);
+      alert(`تم تعديل وتحديث الداتابيز بنجاح (${kinshipLabel || 'تبع العيلة'}) ✅`);
     } finally {
       setLinkBusy(false);
     }
   };
 
-  // تأكيد القرابة المختارة للمرشح وربطه مباشرة في الداتابيز
   const handleConfirmKinshipCandidate = async (fam, candidate) => {
     if (!fam || !candidate) return;
     setConfirmingUserId(candidate.user.id);
@@ -1380,10 +1445,11 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     const removedNameKey = `name:${normalizeArabic(targetChild.full_name || '')}`;
 
     if (targetChild.user_id) {
-      await supabase
-        .from('church_users')
-        .update({ parent_id: null, father_id: null, mother_id: null })
-        .eq('id', targetChild.user_id);
+      await safeUpdateChurchUser(targetChild.user_id, {
+        parent_id: null,
+        father_id: null,
+        mother_id: null
+      });
     }
 
     if (targetChild.sourceTable === 'user_children' && targetChild.id) {
@@ -1401,10 +1467,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           .map(s => s.trim())
           .filter(n => n && normalizeArabic(n) !== normalizeArabic(targetChild.full_name))
           .join(' ، ');
-        await supabase
-          .from('church_users')
-          .update({ children_names: cleanedNames })
-          .eq('id', parentObj.id);
+        await safeUpdateChurchUser(parentObj.id, { children_names: cleanedNames });
       }
     }
 
@@ -1439,12 +1502,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         patch.housing_type = sharedHousing;
       }
 
-      updates.push(
-        supabase
-          .from('church_users')
-          .update(patch)
-          .eq('id', personObj.user_id)
-      );
+      updates.push(safeUpdateChurchUser(personObj.user_id, patch));
     };
 
     syncOne(familyData.husband, 'husband');
@@ -1462,12 +1520,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         if (c.job_title?.trim()) cPatch.job_title = c.job_title.trim();
         if (c.phone?.trim()) cPatch.phone = c.phone.trim();
         if (sharedAddress) cPatch.address = sharedAddress;
-        updates.push(
-          supabase
-            .from('church_users')
-            .update(cPatch)
-            .eq('id', c.user_id)
-        );
+        updates.push(safeUpdateChurchUser(c.user_id, cPatch));
       });
     }
 
@@ -1552,7 +1605,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       setShowForm(false);
       setEditingSavedId(null);
       setForm(emptyFamilyForm);
-      alert('تم الحفظ وتحديث الداتابيز بنجاح ✅');
+      alert('تم التعديل وتحديث الداتابيز بنجاح ✅');
     } finally {
       setSaving(false);
     }
@@ -1926,7 +1979,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             <Users size={18} /> سجل افتقاد أسر ومخدومي الأب الكاهن ({unifiedFamilies.length} أسرة متصلة)
           </h3>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            تحليل الاسم الرباعي (1-2-3-4) وتحديد القرابة (أب/أم/ابن/حفيد/جد/جدة/زوجة/عم/خال/خالة/أخت/زوج أخت) مع سؤال التأكيد
+            تحليل الاسم الرباعي (1-2-3-4) وتحديد القرابة وتحديث قاعدة البيانات فوراً عند التأكيد أو التعديل
           </p>
         </div>
 
@@ -2028,7 +2081,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
           </select>
         </div>
 
-        {/* لوحة تحليل الاسم الرباعي والقرابات عند البحث */}
         {quadSearchMatches.length > 0 && (
           <div className="bg-amber-50/80 border border-amber-300 rounded-2xl p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
@@ -2036,7 +2088,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                 <Sparkles size={14} className="text-amber-700" />
                 تحليل الاسم الرباعي والقرابات من الداتابيز لـ "{searchQ}":
               </strong>
-              <span className="text-[10px] text-amber-800">اختر القرابة وأكد: هل ده تبع العيلة ولا لأ؟</span>
+              <span className="text-[10px] text-amber-800">اختر القرابة وأكد لتحديث الداتابيز فوراً</span>
             </div>
             <div className="grid sm:grid-cols-2 gap-2">
               {quadSearchMatches.map(m => {
@@ -2098,6 +2150,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               const kids = Array.isArray(fam.children) ? fam.children : [];
               const visits = Array.isArray(fam.visitations_log) ? fam.visitations_log : [];
               const connected = Array.isArray(fam.connectedFamilies) ? fam.connectedFamilies : [];
+              const confirmedExt = Array.isArray(fam.confirmedExtended) ? fam.confirmedExtended : [];
               const suggestions = findKinshipCandidatesForFamily(fam);
               const primaryPhone = fam.phone || fam.husband?.phone || fam.wife?.phone || '';
               const displayAddress = fam.address || fam.husband?.address || fam.wife?.address || 'غير مسجل';
@@ -2163,7 +2216,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                     </div>
                   </div>
 
-                  {/* بطاقات السؤال الفوري: هل ده تبع العيلة ولا لأ؟ مع تحديد نوع القرابة */}
                   {suggestions.length > 0 && (
                     <div
                       onClick={e => e.stopPropagation()}
@@ -2171,7 +2223,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                     >
                       <div className="text-[10px] font-black text-sky-950 flex items-center gap-1">
                         <Sparkles size={12} className="text-sky-700" />
-                        <span>مطابقة الاسم الرباعي — هل ده تبع العيلة ولا لأ؟ (حدد القرابة وأكد)</span>
+                        <span>مطابقة الاسم الرباعي — هل ده تبع العيلة ولا لأ؟ (تحديث مباشر في الداتابيز)</span>
                       </div>
                       <div className="space-y-1.5">
                         {suggestions.map(sug => {
@@ -2294,6 +2346,24 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                           )}
                         </div>
                       </div>
+
+                      {confirmedExt.length > 0 && (
+                        <div className="bg-emerald-50/70 p-2.5 rounded-2xl border border-emerald-200 space-y-1.5">
+                          <strong className="text-[10px] text-emerald-950 block">
+                            ✅ أقارب وقرابات مؤكدة ومحدثة في الداتابيز ({confirmedExt.length}):
+                          </strong>
+                          <div className="flex flex-wrap gap-1.5">
+                            {confirmedExt.map((ext, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2.5 py-1 bg-white text-emerald-950 border border-emerald-200 rounded-xl text-[10px] font-black"
+                              >
+                                {ext.kinship_role}: {ext.full_name} {ext.phone ? `• 📞 ${ext.phone}` : ''}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
                       {connected.length > 0 && (
                         <div className="bg-purple-50/60 p-2.5 rounded-2xl border border-purple-200 space-y-1.5">
@@ -2457,7 +2527,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                   🔗 ربط أفراد وقرابات أسرة: {linkModalFam.family_title}
                 </h3>
                 <p className="text-[11px] text-gray-500 font-normal mt-0.5">
-                  اربط الشخص وتأكد من صلة القرابة (أب، أم، ابن، حفيد، جد، جدة، زوجة، عم، خال، خالة، أخت، زوج أخت).
+                  اربط الشخص وتأكد من صلة القرابة ليتم تعديل وتحديث الداتابيز مباشرة.
                 </p>
               </div>
               <button type="button" onClick={() => setLinkModalFam(null)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer">
@@ -2521,7 +2591,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                           }}
                           className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-[11px] font-black cursor-pointer"
                         >
-                          ✅ تأكيد ({chosenRole})
+                          ✅ تأكيد وتحديث ({chosenRole})
                         </button>
                       </div>
                     </div>
