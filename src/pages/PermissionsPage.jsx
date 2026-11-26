@@ -25,7 +25,9 @@ import {
   Plus,
   CheckSquare,
   Square,
-  Sparkles
+  Sparkles,
+  MailPlus,
+  QrCode
 } from 'lucide-react';
 
 const LOCAL_ALL_SCREENS = Array.from(new Set([...ALL_SCREENS, 'hidden_families']));
@@ -83,6 +85,10 @@ export const DEFAULT_ROLE_TEMPLATES = [
       can_create: false,
       can_edit: false,
       can_delete: false,
+      can_send_invitations: false,
+      can_scan_invitations: false,
+      send_invitations: false,
+      scan_invitations: false,
       manage_edu_center: false,
       manage_trips: false,
       manage_joseph: false,
@@ -100,6 +106,10 @@ export const DEFAULT_ROLE_TEMPLATES = [
       can_create: false,
       can_edit: false,
       can_delete: false,
+      can_send_invitations: false,
+      can_scan_invitations: false,
+      send_invitations: false,
+      scan_invitations: false,
       view_parent_panel: true,
       manage_edu_center: false,
       manage_trips: false,
@@ -118,6 +128,10 @@ export const DEFAULT_ROLE_TEMPLATES = [
       can_create: true,
       can_edit: true,
       can_delete: false,
+      can_send_invitations: false,
+      can_scan_invitations: false,
+      send_invitations: false,
+      scan_invitations: false,
       manage_edu_center: false,
       manage_trips: false,
       manage_joseph: false,
@@ -135,6 +149,10 @@ export const DEFAULT_ROLE_TEMPLATES = [
       can_create: true,
       can_edit: true,
       can_delete: true,
+      can_send_invitations: true,
+      can_scan_invitations: true,
+      send_invitations: true,
+      scan_invitations: true,
       manage_edu_center: true,
       manage_trips: true,
       manage_joseph: true,
@@ -152,6 +170,10 @@ export const DEFAULT_ROLE_TEMPLATES = [
       can_create: true,
       can_edit: true,
       can_delete: false,
+      can_send_invitations: true,
+      can_scan_invitations: true,
+      send_invitations: true,
+      scan_invitations: true,
       manage_edu_center: true,
       manage_trips: true,
       manage_joseph: true,
@@ -173,6 +195,10 @@ export const DEFAULT_ROLE_TEMPLATES = [
       can_create: true,
       can_edit: false,
       can_delete: false,
+      can_send_invitations: false,
+      can_scan_invitations: false,
+      send_invitations: false,
+      scan_invitations: false,
       view_cases: true,
       manage_edu_center: false,
       manage_trips: false,
@@ -229,12 +255,30 @@ const EMPTY_TPL_FORM = {
     can_create: false,
     can_edit: false,
     can_delete: false,
+    can_send_invitations: false,
+    can_scan_invitations: false,
+    send_invitations: false,
+    scan_invitations: false,
     manage_edu_center: false,
     manage_trips: false,
     manage_joseph: false,
     can_edit_public: false
   }
 };
+
+function getInvitationPermissionState(perms = {}) {
+  const canSend = Boolean(
+    perms?.can_send_invitations === true ||
+    perms?.actions?.send_invitations === true ||
+    perms?.actions?.can_send_invitations === true
+  );
+  const canScan = Boolean(
+    perms?.can_scan_invitations === true ||
+    perms?.actions?.scan_invitations === true ||
+    perms?.actions?.can_scan_invitations === true
+  );
+  return { canSend, canScan };
+}
 
 function buildMergedUserFromPolicies(user, selectedPolicyKeys, allPolicies, preserveCustom = true) {
   const prevPerms = user?.permissions || {};
@@ -271,12 +315,31 @@ function buildMergedUserFromPolicies(user, selectedPolicyKeys, allPolicies, pres
     ? 'admin'
     : (primaryPolicy?.base_role || user.role || 'member');
 
+  const canSend = Boolean(
+    mergedActions.send_invitations === true ||
+    mergedActions.can_send_invitations === true ||
+    (preserveCustom && prevPerms.can_send_invitations === true)
+  );
+  const canScan = Boolean(
+    mergedActions.scan_invitations === true ||
+    mergedActions.can_scan_invitations === true ||
+    (preserveCustom && prevPerms.can_scan_invitations === true)
+  );
+
   return {
     ...user,
     role: nextRole,
     permissions: {
       ...prevPerms,
       ...mergedActions,
+      can_send_invitations: canSend,
+      can_scan_invitations: canScan,
+      actions: {
+        ...(prevPerms.actions || {}),
+        ...mergedActions,
+        send_invitations: canSend,
+        scan_invitations: canScan
+      },
       policy_keys: policyKeys,
       template_key: policyKeys[0] || '',
       custom_role_label: combinedLabel,
@@ -408,11 +471,19 @@ export default function PermissionsPage({
     }
     const baseScreens = Array.from(effectiveSet);
     const normalizedMap = buildScreenPermissionsMap(baseScreens, rawPerms, rawPerms.screen_permissions);
+    const invState = getInvitationPermissionState(rawPerms);
 
     setSelectedUser({
       ...u,
       permissions: {
         ...rawPerms,
+        can_send_invitations: invState.canSend,
+        can_scan_invitations: invState.canScan,
+        actions: {
+          ...(rawPerms.actions || {}),
+          send_invitations: invState.canSend,
+          scan_invitations: invState.canScan
+        },
         policy_keys: policyKeys,
         template_key: policyKeys[0] || rawPerms.template_key || '',
         custom_role_label: rawPerms.custom_role_label || ROLE_LABELS[u.role] || u.role,
@@ -434,6 +505,87 @@ export default function PermissionsPage({
     }
   }, [initialUserId, users.length, roleTemplates.length]);
 
+  const toggleSelectedUserInvitationPerm = (permType, checked) => {
+    if (!isAdmin || !selectedUser) return;
+    const prevPerms = selectedUser.permissions || {};
+    const prevActions = prevPerms.actions || {};
+
+    if (permType === 'send') {
+      setSelectedUser({
+        ...selectedUser,
+        permissions: {
+          ...prevPerms,
+          can_send_invitations: checked,
+          actions: {
+            ...prevActions,
+            send_invitations: checked
+          }
+        }
+      });
+    } else if (permType === 'scan') {
+      setSelectedUser({
+        ...selectedUser,
+        permissions: {
+          ...prevPerms,
+          can_scan_invitations: checked,
+          actions: {
+            ...prevActions,
+            scan_invitations: checked
+          }
+        }
+      });
+    } else if (permType === 'both') {
+      setSelectedUser({
+        ...selectedUser,
+        permissions: {
+          ...prevPerms,
+          can_send_invitations: checked,
+          can_scan_invitations: checked,
+          actions: {
+            ...prevActions,
+            send_invitations: checked,
+            scan_invitations: checked
+          }
+        }
+      });
+    }
+  };
+
+  const toggleTemplateInvitationPerm = (permType, checked) => {
+    if (!isAdmin) return;
+    const prevActions = newTplForm.actions || {};
+    if (permType === 'send') {
+      setNewTplForm({
+        ...newTplForm,
+        actions: {
+          ...prevActions,
+          can_send_invitations: checked,
+          send_invitations: checked
+        }
+      });
+    } else if (permType === 'scan') {
+      setNewTplForm({
+        ...newTplForm,
+        actions: {
+          ...prevActions,
+          can_scan_invitations: checked,
+          scan_invitations: checked
+        }
+      });
+    } else if (permType === 'both') {
+      setNewTplForm({
+        ...newTplForm,
+        actions: {
+          ...prevActions,
+          can_send_invitations: checked,
+          can_scan_invitations: checked,
+          send_invitations: checked,
+          scan_invitations: checked
+        }
+      });
+    }
+  };
+
   const applyPresetToSelectedUser = (presetKey) => {
     if (!isAdmin || !selectedUser) return;
     const preset = CATEGORY_PRESETS[presetKey];
@@ -452,6 +604,9 @@ export default function PermissionsPage({
       ? [mappedTplKey]
       : (selectedUser.permissions?.policy_keys || []);
 
+    const canSend = presetKey === 'head_servant' || presetKey === 'priest';
+    const canScan = presetKey === 'head_servant' || presetKey === 'priest';
+
     setSelectedUser({
       ...selectedUser,
       role: selectedUser.role === 'admin' ? 'admin' : preset.baseRole,
@@ -466,6 +621,13 @@ export default function PermissionsPage({
         can_create: preset.actions.create,
         can_edit: preset.actions.edit,
         can_delete: preset.actions.delete,
+        can_send_invitations: canSend,
+        can_scan_invitations: canScan,
+        actions: {
+          ...(selectedUser.permissions?.actions || {}),
+          send_invitations: canSend,
+          scan_invitations: canScan
+        },
         screen_permissions: nextMap,
         allowed_screens: extractAllowedScreensFromMap(nextMap)
       }
@@ -477,6 +639,8 @@ export default function PermissionsPage({
     const preset = CATEGORY_PRESETS[presetKey];
     if (!preset) return;
     const nextMap = makePresetScreenMap(presetKey);
+    const canSend = presetKey === 'head_servant' || presetKey === 'priest';
+    const canScan = presetKey === 'head_servant' || presetKey === 'priest';
     setNewTplForm((prev) => ({
       ...prev,
       base_role: preset.baseRole,
@@ -488,6 +652,10 @@ export default function PermissionsPage({
         can_create: preset.actions.create,
         can_edit: preset.actions.edit,
         can_delete: preset.actions.delete,
+        can_send_invitations: canSend,
+        can_scan_invitations: canScan,
+        send_invitations: canSend,
+        scan_invitations: canScan,
         manage_edu_center: presetKey === 'head_servant' || presetKey === 'priest',
         manage_trips: presetKey === 'head_servant' || presetKey === 'priest',
         manage_joseph: presetKey === 'head_servant' || presetKey === 'priest',
@@ -598,8 +766,17 @@ export default function PermissionsPage({
         ? selectedUser.permissions.policy_keys
         : [];
 
+      const invState = getInvitationPermissionState(selectedUser.permissions);
+
       const finalPerms = {
         ...selectedUser.permissions,
+        can_send_invitations: invState.canSend,
+        can_scan_invitations: invState.canScan,
+        actions: {
+          ...(selectedUser.permissions?.actions || {}),
+          send_invitations: invState.canSend,
+          scan_invitations: invState.canScan
+        },
         policy_keys: policyKeys,
         template_key: policyKeys[0] || '',
         screen_permissions: normalizedMap,
@@ -652,13 +829,22 @@ export default function PermissionsPage({
 
     const key = newTplForm.key || ('tpl_' + Date.now());
     const finalScreens = extractAllowedScreensFromMap(newTplForm.screen_permissions);
+    const invState = getInvitationPermissionState({ actions: newTplForm.actions });
+
+    const finalActions = {
+      ...newTplForm.actions,
+      can_send_invitations: invState.canSend,
+      can_scan_invitations: invState.canScan,
+      send_invitations: invState.canSend,
+      scan_invitations: invState.canScan
+    };
 
     const bodyObj = {
       label: newTplForm.label.trim(),
       base_role: newTplForm.base_role,
       screens: finalScreens,
       screen_permissions: newTplForm.screen_permissions,
-      actions: newTplForm.actions,
+      actions: finalActions,
       hidden: false
     };
     const bodyJson = JSON.stringify(bodyObj);
@@ -830,6 +1016,9 @@ export default function PermissionsPage({
     ? selectedUser.permissions.policy_keys
     : (selectedUser?.permissions?.template_key ? [selectedUser.permissions.template_key] : []);
 
+  const selectedUserInvState = getInvitationPermissionState(selectedUser?.permissions);
+  const templateFormInvState = getInvitationPermissionState({ actions: newTplForm.actions });
+
   return (
     <div className="space-y-4 text-xs md:text-sm" dir="rtl">
       <div className="bg-white p-4 rounded-3xl border shadow-sm space-y-3">
@@ -884,6 +1073,7 @@ export default function PermissionsPage({
                 )
                 .map((u) => {
                   const pCount = Array.isArray(u.permissions?.policy_keys) ? u.permissions.policy_keys.length : 0;
+                  const uInv = getInvitationPermissionState(u.permissions);
                   return (
                     <button
                       key={u.id}
@@ -898,6 +1088,11 @@ export default function PermissionsPage({
                         <span className="text-[11px] text-gray-600 block">
                           {u.permissions?.custom_role_label || ROLE_LABELS[u.role] || u.role} • @{u.username}
                         </span>
+                        {(uInv.canSend || uInv.canScan) && (
+                          <span className="inline-block mt-1 px-2 py-0.5 rounded bg-purple-100 text-purple-900 text-[10px] font-black">
+                            💌 دعوات: {[uInv.canSend ? 'إضافة' : '', uInv.canScan ? 'Scan' : ''].filter(Boolean).join(' + ')}
+                          </span>
+                        )}
                       </div>
                       <span className="px-2 py-1 bg-white border rounded-lg text-[10px] font-bold shrink-0">
                         {pCount > 1 ? `${pCount} جروبات` : (u.permissions?.can_edit ? '✏️ يعدل' : '👀 يشوف')}
@@ -974,6 +1169,74 @@ export default function PermissionsPage({
                         </button>
                       );
                     })}
+                  </div>
+                </div>
+
+                {/* صندوق واضح لصلاحيات الدعوات (إضافة الدعوات + مسح QR الدعوات) */}
+                <div className="bg-purple-50/70 p-3.5 rounded-2xl border-2 border-purple-200 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <strong className="text-purple-950 text-xs flex items-center gap-1.5">
+                        💌 صلاحيات الدعوات (إضافة الدعوات + مسح QR الدعوات — Scan)
+                      </strong>
+                      <p className="text-[11px] text-purple-800 font-normal mt-0.5">
+                        حدد هنا إذا كان هذا الشخص يقدر <strong>يضيف/يبعت دعوات</strong> أو يعمل لها <strong>Scan</strong> أو الاثنين معاً.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        toggleSelectedUserInvitationPerm(
+                          'both',
+                          !(selectedUserInvState.canSend && selectedUserInvState.canScan)
+                        )
+                      }
+                      className={`px-3 py-1.5 rounded-xl text-[11px] font-black cursor-pointer border ${
+                        selectedUserInvState.canSend && selectedUserInvState.canScan
+                          ? 'bg-purple-800 text-white border-purple-800'
+                          : 'bg-white text-purple-900 border-purple-300 hover:bg-purple-100'
+                      }`}
+                    >
+                      {selectedUserInvState.canSend && selectedUserInvState.canScan
+                        ? '✅ مفعّلان معاً (إضافة + Scan)'
+                        : 'تفعيل الاثنين معاً (إضافة + Scan)'}
+                    </button>
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 gap-2.5">
+                    <label className={`p-3 rounded-2xl border flex items-center justify-between gap-2 cursor-pointer font-bold ${
+                      selectedUserInvState.canSend
+                        ? 'bg-white border-purple-500 text-purple-950'
+                        : 'bg-white/70 border-purple-200 text-gray-700'
+                    }`}>
+                      <span className="flex items-center gap-2 text-xs">
+                        <MailPlus size={15} className="text-purple-700" />
+                        ➕ إضافة / إرسال الدعوات
+                      </span>
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 cursor-pointer"
+                        checked={selectedUserInvState.canSend}
+                        onChange={(e) => toggleSelectedUserInvitationPerm('send', e.target.checked)}
+                      />
+                    </label>
+
+                    <label className={`p-3 rounded-2xl border flex items-center justify-between gap-2 cursor-pointer font-bold ${
+                      selectedUserInvState.canScan
+                        ? 'bg-white border-emerald-500 text-emerald-950'
+                        : 'bg-white/70 border-purple-200 text-gray-700'
+                    }`}>
+                      <span className="flex items-center gap-2 text-xs">
+                        <QrCode size={15} className="text-emerald-700" />
+                        📷 مسح QR الدعوات (Scan)
+                      </span>
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 cursor-pointer"
+                        checked={selectedUserInvState.canScan}
+                        onChange={(e) => toggleSelectedUserInvitationPerm('scan', e.target.checked)}
+                      />
+                    </label>
                   </div>
                 </div>
 
@@ -1097,6 +1360,55 @@ export default function PermissionsPage({
                     <option key={k} value={k}>{v}</option>
                   ))}
                 </select>
+              </div>
+            </div>
+
+            {/* صندوق واضح لصلاحيات الدعوات داخل جروب الـ Policy */}
+            <div className="bg-purple-50/70 p-3.5 rounded-2xl border-2 border-purple-200 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <strong className="text-purple-950 text-xs">
+                  💌 صلاحيات الدعوات داخل الجروب (إضافة الدعوات + مسح QR الدعوات — Scan)
+                </strong>
+                <button
+                  type="button"
+                  onClick={() =>
+                    toggleTemplateInvitationPerm(
+                      'both',
+                      !(templateFormInvState.canSend && templateFormInvState.canScan)
+                    )
+                  }
+                  className="px-3 py-1 rounded-xl bg-white border border-purple-300 text-purple-900 text-[11px] font-black cursor-pointer"
+                >
+                  {templateFormInvState.canSend && templateFormInvState.canScan
+                    ? '✅ مفعّلان معاً'
+                    : 'تفعيل الاثنين معاً'}
+                </button>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-2.5">
+                <label className="p-2.5 rounded-xl bg-white border border-purple-200 flex items-center justify-between gap-2 cursor-pointer text-xs">
+                  <span className="flex items-center gap-1.5">
+                    <MailPlus size={14} className="text-purple-700" /> ➕ إضافة / إرسال الدعوات
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 cursor-pointer"
+                    checked={templateFormInvState.canSend}
+                    onChange={(e) => toggleTemplateInvitationPerm('send', e.target.checked)}
+                  />
+                </label>
+
+                <label className="p-2.5 rounded-xl bg-white border border-purple-200 flex items-center justify-between gap-2 cursor-pointer text-xs">
+                  <span className="flex items-center gap-1.5">
+                    <QrCode size={14} className="text-emerald-700" /> 📷 مسح QR الدعوات (Scan)
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 cursor-pointer"
+                    checked={templateFormInvState.canScan}
+                    onChange={(e) => toggleTemplateInvitationPerm('scan', e.target.checked)}
+                  />
+                </label>
               </div>
             </div>
 
