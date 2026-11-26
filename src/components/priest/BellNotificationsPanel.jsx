@@ -1,5 +1,18 @@
-import { useState, useEffect, useRef } from 'react';
-import { Bell, Volume2, VolumeX, X, Check, CheckCheck, Eye, RotateCcw } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { supabase } from '../../lib/supabase';
+import {
+  Bell,
+  Volume2,
+  VolumeX,
+  X,
+  Check,
+  CheckCheck,
+  Eye,
+  RotateCcw,
+  RefreshCw,
+  Clock,
+  Sparkles
+} from 'lucide-react';
 
 export function playTingTingChime() {
   try {
@@ -21,14 +34,33 @@ export function playTingTingChime() {
     };
     playTone(880, 0, 0.22);
     playTone(1174.66, 0.24, 0.35);
-    setTimeout(() => { try { ctx.close(); } catch {} }, 1000);
+    setTimeout(() => {
+      try {
+        ctx.close();
+      } catch {
+        // تجاهل
+      }
+    }, 1000);
   } catch {
     // تجاهل إذا منع المتصفح الصوت
   }
 }
 
+function formatDateTimeAr(val) {
+  if (!val) return 'الآن';
+  const d = new Date(val);
+  if (Number.isNaN(d.getTime())) return String(val);
+  return d.toLocaleString('ar-EG', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
 export default function BellNotificationsPanel({
   priestId = null,
+  currentUser = null,
   personalItems = [],
   masses = [],
   confessionBookings = [],
@@ -39,17 +71,24 @@ export default function BellNotificationsPanel({
   onOpenWhatsApp,
   onNavigateCard
 }) {
+  const effectiveActorId = priestId || currentUser?.id || null;
   const storageScope =
-    priestId ||
+    effectiveActorId ||
     myConfessors?.[0]?.confession_father_id ||
     personalItems?.[0]?.priest_id ||
     masses?.[0]?.priest_id ||
     'default';
+
   const READ_STORAGE_KEY = `priest_read_alerts_${storageScope}`;
   const SOUND_STORAGE_KEY = `priest_bell_sound_${storageScope}`;
 
   const [open, setOpen] = useState(false);
   const [showReadAlerts, setShowReadAlerts] = useState(false);
+  const [liveBookings, setLiveBookings] = useState([]);
+  const [liveInvitations, setLiveInvitations] = useState([]);
+  const [liveAttendanceLogs, setLiveAttendanceLogs] = useState([]);
+  const [specialAlertsFromDb, setSpecialAlertsFromDb] = useState([]);
+  const [refreshingLive, setRefreshingLive] = useState(false);
 
   const [readIds, setReadIds] = useState(() => {
     try {
@@ -71,8 +110,92 @@ export default function BellNotificationsPanel({
   });
 
   const playedOnceRef = useRef(false);
+  const prevUnreadCountRef = useRef(0);
 
-  // مزامنة الإشعارات المقروءة عند التنقل بين كروت شاشة الكاهن
+  const fetchLiveDatabaseNotifications = useCallback(async () => {
+    if (!supabase || typeof supabase.from !== 'function') return;
+    setRefreshingLive(true);
+    try {
+      const [bkRes, invRes, attRes, spRes] = await Promise.all([
+        supabase
+          .from('confession_bookings')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(20),
+        supabase
+          .from('church_invitations')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(20),
+        supabase
+          .from('church_attendance_logs')
+          .select('*')
+          .order('checked_in_at', { ascending: false })
+          .limit(20),
+        supabase
+          .from('church_notifications')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(20)
+      ]);
+
+      if (!bkRes.error && Array.isArray(bkRes.data)) {
+        setLiveBookings(bkRes.data);
+      }
+      if (!invRes.error && Array.isArray(invRes.data)) {
+        setLiveInvitations(invRes.data);
+      }
+      if (!attRes.error && Array.isArray(attRes.data)) {
+        setLiveAttendanceLogs(attRes.data);
+      }
+      if (!spRes.error && Array.isArray(spRes.data)) {
+        setSpecialAlertsFromDb(spRes.data);
+      }
+    } catch {
+      // تجاهل أي خطأ شبكة مؤقت
+    } finally {
+      setRefreshingLive(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchLiveDatabaseNotifications();
+  }, [fetchLiveDatabaseNotifications]);
+
+  useEffect(() => {
+    if (!supabase || typeof supabase.channel !== 'function') return;
+
+    const channel = supabase
+      .channel(`bell-live-sync-${storageScope}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'confession_bookings' },
+        () => fetchLiveDatabaseNotifications()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'church_invitations' },
+        () => fetchLiveDatabaseNotifications()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'church_attendance_logs' },
+        () => fetchLiveDatabaseNotifications()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'church_notifications' },
+        () => fetchLiveDatabaseNotifications()
+      )
+      .subscribe();
+
+    return () => {
+      if (typeof supabase.removeChannel === 'function') {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [storageScope, fetchLiveDatabaseNotifications]);
+
   useEffect(() => {
     const syncRead = () => {
       try {
@@ -104,20 +227,16 @@ export default function BellNotificationsPanel({
     persistReadIds([...readIds, alertId]);
   };
 
-  const markAllAsRead = () => {
-    persistReadIds([...readIds, ...alerts.map(a => a.id)]);
-  };
-
   const restoreAlert = (alertId) => {
-    persistReadIds(readIds.filter(id => id !== alertId));
+    persistReadIds(readIds.filter((id) => id !== alertId));
   };
 
   const baseToday = todayISO || new Date().toISOString().split('T')[0];
-  const tomorrowDate = new Date(baseToday + 'T00:00:00');
+  const tomorrowDate = new Date(`${baseToday}T00:00:00`);
   tomorrowDate.setDate(tomorrowDate.getDate() + 1);
   const tomorrowISO = tomorrowDate.toISOString().split('T')[0];
 
-  const weekLimitDate = new Date(baseToday + 'T00:00:00');
+  const weekLimitDate = new Date(`${baseToday}T00:00:00`);
   weekLimitDate.setDate(weekLimitDate.getDate() + 7);
   const weekLimitISO = weekLimitDate.toISOString().split('T')[0];
 
@@ -134,91 +253,128 @@ export default function BellNotificationsPanel({
   };
 
   const alerts = [];
+  const seenAlertKeys = new Set();
+
+  const pushAlert = (al) => {
+    if (!al?.id || seenAlertKeys.has(al.id)) return;
+    seenAlertKeys.add(al.id);
+    alerts.push(al);
+  };
 
   // 1. مناسبات الجدول الخاص
-  personalItems.forEach(p => {
+  personalItems.forEach((p) => {
     if (!p.event_date) return;
     if (p.event_date === baseToday) {
-      alerts.push({
+      pushAlert({
         id: `pers_today_${p.id}_${baseToday}`,
         urgency: 'urgent',
         badge: 'اليوم 🔴',
         icon: '📅',
-        title: `اليوم: ${p.event_type} — ${p.title}`,
+        title: `اليوم: ${p.event_type || 'مناسبة'} — ${p.title || ''}`,
         sub: `${p.event_time ? `⏰ الساعة ${p.event_time}` : ''} ${p.location ? `• 📍 ${p.location}` : ''}`,
-        action: () => { setOpen(false); onNavigateCard?.('personal'); }
+        action: () => {
+          setOpen(false);
+          onNavigateCard?.('personal');
+        }
       });
     } else if (p.event_date === tomorrowISO) {
-      alerts.push({
+      pushAlert({
         id: `pers_tmr_${p.id}_${baseToday}`,
         urgency: 'urgent',
         badge: 'بكرة (قبلها بيوم) 🔔',
         icon: '👑',
-        title: `تذكير: عندك بكرة ${p.event_type} — ${p.title}`,
+        title: `تذكير: عندك بكرة ${p.event_type || 'مناسبة'} — ${p.title || ''}`,
         sub: `📅 ${p.event_date} ${p.event_time ? `• ⏰ الساعة ${p.event_time}` : ''} ${p.location ? `• 📍 ${p.location}` : ''}`,
-        action: () => { setOpen(false); onNavigateCard?.('personal'); }
+        action: () => {
+          setOpen(false);
+          onNavigateCard?.('personal');
+        }
       });
     } else if (p.event_date > tomorrowISO && p.event_date <= weekLimitISO) {
-      alerts.push({
+      pushAlert({
         id: `pers_wk_${p.id}_${p.event_date}`,
         urgency: 'week',
         badge: 'هذا الأسبوع 📆',
         icon: '📅',
-        title: `${p.event_type}: ${p.title}`,
-        sub: `📅 ${p.event_date} ${p.event_time ? `• ⏰ ${p.event_time}` : ''}`,
-        action: () => { setOpen(false); onNavigateCard?.('personal'); }
+        title: `${p.event_type || 'مناسبة'}: ${p.title || ''}`,
+        sub: `📅 ${p.event_date} ${p.event_time ? `• ⏰ الساعة ${p.event_time}` : ''}`,
+        action: () => {
+          setOpen(false);
+          onNavigateCard?.('personal');
+        }
       });
     }
   });
 
   // 2. جدول القداسات
-  masses.forEach(m => {
+  masses.forEach((m) => {
     if (!m.mass_date || m.is_available === false) return;
     if (m.mass_date === baseToday) {
-      alerts.push({
+      pushAlert({
         id: `mass_today_${m.id}_${baseToday}`,
         urgency: 'urgent',
         badge: 'قداس اليوم ⛪',
         icon: '⛪',
         title: `اليوم قداس: ${m.mass_name} (${m.church_name})`,
-        sub: `⏰ ${m.mass_time} • ${m.priest_role}`,
-        action: () => { setOpen(false); onNavigateCard?.('masses'); }
+        sub: `⏰ ${m.mass_time || ''} ${m.priest_role ? `• ${m.priest_role}` : ''}`,
+        action: () => {
+          setOpen(false);
+          onNavigateCard?.('masses');
+        }
       });
     } else if (m.mass_date === tomorrowISO) {
-      alerts.push({
+      pushAlert({
         id: `mass_tmr_${m.id}_${baseToday}`,
         urgency: 'urgent',
         badge: 'قداس بكرة 🔔',
         icon: '⛪',
         title: `تذكير: قداس بكرة (${m.mass_name})`,
-        sub: `📅 ${m.mass_date} • ⏰ ${m.mass_time} • 📍 ${m.church_name}`,
-        action: () => { setOpen(false); onNavigateCard?.('masses'); }
+        sub: `📅 ${m.mass_date} • ⏰ ${m.mass_time || ''} • 📍 ${m.church_name || ''}`,
+        action: () => {
+          setOpen(false);
+          onNavigateCard?.('masses');
+        }
       });
     } else if (m.mass_date > tomorrowISO && m.mass_date <= weekLimitISO) {
-      alerts.push({
+      pushAlert({
         id: `mass_wk_${m.id}_${m.mass_date}`,
         urgency: 'week',
         badge: 'قداس الأسبوع 📆',
         icon: '⛪',
         title: `لديك قداس يوم ${m.mass_date}: ${m.mass_name}`,
-        sub: `⏰ ${m.mass_time} • 📍 ${m.church_name} (${m.priest_role})`,
-        action: () => { setOpen(false); onNavigateCard?.('masses'); }
+        sub: `⏰ ${m.mass_time || ''} • 📍 ${m.church_name || ''} ${m.priest_role ? `(${m.priest_role})` : ''}`,
+        action: () => {
+          setOpen(false);
+          onNavigateCard?.('masses');
+        }
       });
     }
   });
 
-  // 3. حجوزات المعترفين
-  confessionBookings
-    .filter(b => b.status === 'محجوز' && b.booking_date >= baseToday && b.booking_date <= weekLimitISO)
-    .forEach(b => {
-      const memberObj = allUsers.find(u => u.id === b.member_id);
+  // 3. حجوزات المعترفين (من الـ props + التحديثات اللحظية)
+  const combinedBookings = [
+    ...confessionBookings,
+    ...liveBookings.filter((lb) => !confessionBookings.some((cb) => cb.id === lb.id))
+  ];
+
+  combinedBookings
+    .filter((b) => b.status === 'محجوز' && b.booking_date >= baseToday && b.booking_date <= weekLimitISO)
+    .forEach((b) => {
+      const memberObj = allUsers.find((u) => u.id === b.member_id);
       const isUrgent = b.booking_date === baseToday || b.booking_date === tomorrowISO;
-      alerts.push({
+      pushAlert({
         id: `book_${b.id}_${b.booking_date}`,
         urgency: isUrgent ? 'urgent' : 'week',
-        badge: b.booking_date === baseToday ? 'حجز اعتراف اليوم 🙏' : b.booking_date === tomorrowISO ? 'حجز اعتراف بكرة 🔔' : 'حجز اعتراف قادم',
+        badge:
+          b.booking_date === baseToday
+            ? 'حجز اعتراف اليوم 🙏'
+            : b.booking_date === tomorrowISO
+              ? 'حجز اعتراف بكرة 🔔'
+              : 'حجز اعتراف قادم',
         icon: '🙏',
-        title: `${b.member_name || memberObj?.full_name || 'معترف'} حاجز اعتراف ${b.booking_date === baseToday ? 'اليوم' : b.booking_date === tomorrowISO ? 'بكرة' : `يوم ${b.booking_date}`}`,
+        title: `${b.member_name || memberObj?.full_name || 'معترف'} حاجز اعتراف ${
+          b.booking_date === baseToday ? 'اليوم' : b.booking_date === tomorrowISO ? 'بكرة' : `يوم ${b.booking_date}`
+        }`,
         sub: `${b.booking_time ? `⏰ ${b.booking_time} • ` : ''}اضغط لفتح الملف الروحي والقانون السابق`,
         action: () => {
           setOpen(false);
@@ -230,10 +386,10 @@ export default function BellNotificationsPanel({
 
   // 4. أعياد الميلاد
   const currentYear = new Date().getFullYear();
-  myConfessors.forEach(m => {
+  myConfessors.forEach((m) => {
     const d = daysUntilBirthday(m.dob);
     if (d === null) return;
-    alerts.push({
+    pushAlert({
       id: `bday_${m.id}_${currentYear}`,
       urgency: d === 0 ? 'urgent' : 'week',
       badge: d === 0 ? 'عيد ميلاد اليوم 🎂' : `عيد ميلاد خلال ${d} يوم 🎂`,
@@ -242,16 +398,103 @@ export default function BellNotificationsPanel({
       sub: `📅 ${m.dob} • اضغط لفتح تهنئة واتساب`,
       action: () => {
         setOpen(false);
-        onOpenWhatsApp?.({ name: m.full_name, phone: m.phone || '', targetId: m.id, defaultCategory: 'معايدة' });
+        onOpenWhatsApp?.({
+          name: m.full_name,
+          phone: m.phone || '',
+          targetId: m.id,
+          defaultCategory: 'معايدة'
+        });
       }
     });
   });
 
-  const unreadAlerts = alerts.filter(a => !readIds.includes(a.id));
-  const readAlertsList = alerts.filter(a => readIds.includes(a.id));
+  // 5. تنبيهات خاصة من قاعدة البيانات (church_notifications) ببياناتها الكاملة
+  specialAlertsFromDb.forEach((sp) => {
+    const targetMatches =
+      !sp.target_user_id ||
+      !effectiveActorId ||
+      String(sp.target_user_id) === String(effectiveActorId);
+    if (!targetMatches) return;
 
-  const urgentAlerts = unreadAlerts.filter(a => a.urgency === 'urgent');
-  const weekAlerts = unreadAlerts.filter(a => a.urgency === 'week');
+    pushAlert({
+      id: `special_db_${sp.id}`,
+      urgency: sp.is_urgent ? 'urgent' : 'special',
+      badge: sp.category || 'تنبيه خاص ✨',
+      icon: '✨',
+      title: sp.title || 'تنبيه خاص',
+      sub: [
+        sp.message || sp.body || sp.description || '',
+        sp.created_at ? `🕒 ${formatDateTimeAr(sp.created_at)}` : ''
+      ]
+        .filter(Boolean)
+        .join(' • '),
+      action: () => {
+        setOpen(false);
+        if (sp.target_card) onNavigateCard?.(sp.target_card);
+      }
+    });
+  });
+
+  // 6. مستجدات الدعوات وحضور وانصراف QR اللحظية مع تفاصيلها الكاملة
+  liveInvitations.slice(0, 6).forEach((inv) => {
+    const isChecked = inv.status === 'checked_in';
+    pushAlert({
+      id: `inv_live_${inv.id}_${inv.status}`,
+      urgency: isChecked ? 'special' : 'week',
+      badge: isChecked ? 'تم Scan دعوة ✅' : 'دعوة جديدة 🎟️',
+      icon: '🎟️',
+      title: `${inv.event_title || 'دعوة'} — ${inv.recipient_name || ''}`,
+      sub: [
+        inv.seat_or_zone ? `📍 ${inv.seat_or_zone}` : '',
+        inv.checked_in_by ? `بواسطة: ${inv.checked_in_by}` : '',
+        `🕒 ${formatDateTimeAr(inv.checked_in_at || inv.created_at)}`
+      ]
+        .filter(Boolean)
+        .join(' • '),
+      action: () => {
+        setOpen(false);
+        onNavigateCard?.('invitations');
+      }
+    });
+  });
+
+  liveAttendanceLogs.slice(0, 6).forEach((log) => {
+    const isOut = Boolean(log.checked_out_at);
+    pushAlert({
+      id: `att_live_${log.id}_${isOut ? 'out' : 'in'}`,
+      urgency: 'special',
+      badge: isOut ? 'انصراف QR 👋' : 'حضور QR ✅',
+      icon: isOut ? '👋' : '✅',
+      title: `${log.full_name} — ${isOut ? 'تسجيل انصراف' : 'تسجيل حضور'}`,
+      sub: [
+        `🕒 ${formatDateTimeAr(isOut ? log.checked_out_at : log.checked_in_at)}`,
+        isOut
+          ? log.checked_out_by
+            ? `بواسطة: ${log.checked_out_by}`
+            : ''
+          : log.checked_in_by
+            ? `بواسطة: ${log.checked_in_by}`
+            : ''
+      ]
+        .filter(Boolean)
+        .join(' • '),
+      action: () => {
+        setOpen(false);
+        onNavigateCard?.('attendance');
+      }
+    });
+  });
+
+  const markAllAsRead = () => {
+    persistReadIds([...readIds, ...alerts.map((a) => a.id)]);
+  };
+
+  const unreadAlerts = alerts.filter((a) => !readIds.includes(a.id));
+  const readAlertsList = alerts.filter((a) => readIds.includes(a.id));
+
+  const urgentAlerts = unreadAlerts.filter((a) => a.urgency === 'urgent');
+  const specialAlerts = unreadAlerts.filter((a) => a.urgency === 'special');
+  const weekAlerts = unreadAlerts.filter((a) => a.urgency === 'week');
 
   useEffect(() => {
     if (!soundEnabled || playedOnceRef.current || unreadAlerts.length === 0) return;
@@ -266,22 +509,65 @@ export default function BellNotificationsPanel({
     return () => window.removeEventListener('pointerdown', trigger);
   }, [unreadAlerts.length, soundEnabled]);
 
+  useEffect(() => {
+    if (unreadAlerts.length > prevUnreadCountRef.current && soundEnabled) {
+      playTingTingChime();
+    }
+    prevUnreadCountRef.current = unreadAlerts.length;
+  }, [unreadAlerts.length, soundEnabled]);
+
   const handleAlertClick = (al) => {
     markAsRead(al.id);
-    al.action();
+    al.action?.();
   };
 
+  const renderAlertCard = (al, containerStyle, badgeStyle) => (
+    <div
+      key={al.id}
+      className={`w-full p-3 rounded-2xl flex items-start justify-between gap-2 transition ${containerStyle}`}
+    >
+      <button
+        type="button"
+        onClick={() => handleAlertClick(al)}
+        className="flex-1 text-right cursor-pointer space-y-1"
+      >
+        <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-black ${badgeStyle}`}>
+          {al.badge}
+        </span>
+        <strong className="text-sm text-gray-900 block">
+          {al.icon} {al.title}
+        </strong>
+        {al.sub && (
+          <span className="text-xs text-gray-700 block leading-relaxed">
+            {al.sub}
+          </span>
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={() => markAsRead(al.id)}
+        className="px-2.5 py-1.5 bg-white hover:bg-emerald-100 text-emerald-800 border border-gray-200 rounded-xl text-[11px] font-black flex items-center gap-1 shrink-0 cursor-pointer"
+        title="تمت القراءة / إزالة التنبيه"
+      >
+        <Check size={13} /> تمت القراءة
+      </button>
+    </div>
+  );
+
   return (
-    <div className="relative print:hidden">
+    <div className="relative print:hidden" dir="rtl">
       <div className="flex items-center gap-1.5">
         <button
           type="button"
           onClick={() => {
-            if (!open && soundEnabled && unreadAlerts.length > 0) playTingTingChime();
+            if (!open) {
+              fetchLiveDatabaseNotifications();
+              if (soundEnabled && unreadAlerts.length > 0) playTingTingChime();
+            }
             setOpen(!open);
           }}
           className="relative px-3.5 py-2.5 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-2xl font-black text-xs md:text-sm flex items-center gap-1.5 cursor-pointer shadow transition"
-          title="جرس التنبيهات والمواعيد وأعياد الميلاد"
+          title="جرس التنبيهات والمواعيد وأعياد الميلاد والتنبيهات الخاصة"
         >
           <Bell size={18} className={urgentAlerts.length > 0 ? 'animate-bounce' : ''} />
           <span>التنبيهات</span>
@@ -297,7 +583,11 @@ export default function BellNotificationsPanel({
           onClick={() => {
             const next = !soundEnabled;
             setSoundEnabled(next);
-            try { localStorage.setItem(SOUND_STORAGE_KEY, String(next)); } catch {}
+            try {
+              localStorage.setItem(SOUND_STORAGE_KEY, String(next));
+            } catch {
+              // ignore
+            }
             if (next) playTingTingChime();
           }}
           className="p-2.5 bg-amber-100 hover:bg-amber-200 text-[#7a1c24] rounded-2xl cursor-pointer border border-amber-300"
@@ -314,10 +604,18 @@ export default function BellNotificationsPanel({
               <div className="flex items-center gap-2">
                 <Bell className="text-[#7a1c24]" size={20} />
                 <h3 className="text-base font-black text-[#7a1c24]">
-                  جرس تنبيهات أبونا ({unreadAlerts.length} جديد)
+                  الإشعارات والبيانات التفصيلية ({unreadAlerts.length} جديد)
                 </h3>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={fetchLiveDatabaseNotifications}
+                  className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                  title="تحديث البيانات من قاعدة البيانات"
+                >
+                  <RefreshCw size={13} className={refreshingLive ? 'animate-spin' : ''} /> تحديث
+                </button>
                 {unreadAlerts.length > 0 && (
                   <button
                     type="button"
@@ -333,7 +631,8 @@ export default function BellNotificationsPanel({
                     onClick={() => setShowReadAlerts(!showReadAlerts)}
                     className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
                   >
-                    <Eye size={13} /> {showReadAlerts ? 'إخفاء المقروءة' : `المقروءة (${readAlertsList.length})`}
+                    <Eye size={13} />{' '}
+                    {showReadAlerts ? 'إخفاء المقروءة' : `المقروءة (${readAlertsList.length})`}
                   </button>
                 )}
                 <button
@@ -343,7 +642,11 @@ export default function BellNotificationsPanel({
                 >
                   🔔 تجربة الصوت
                 </button>
-                <button type="button" onClick={() => setOpen(false)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer">
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="p-1.5 bg-gray-100 rounded-xl cursor-pointer"
+                >
                   <X size={18} />
                 </button>
               </div>
@@ -358,74 +661,69 @@ export default function BellNotificationsPanel({
               <div className="space-y-4">
                 {urgentAlerts.length > 0 && (
                   <div className="space-y-2">
-                    <strong className="text-xs text-red-800 block">🔴 تنبيهات عاجلة (اليوم وبكرة - قبلها بيوم):</strong>
-                    {urgentAlerts.map(al => (
-                      <div
-                        key={al.id}
-                        className="w-full p-3 bg-red-50 hover:bg-red-100 border-2 border-red-200 rounded-2xl flex items-start justify-between gap-2 transition"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => handleAlertClick(al)}
-                          className="flex-1 text-right cursor-pointer"
-                        >
-                          <span className="inline-block px-2 py-0.5 bg-red-700 text-white rounded text-[10px] font-black mb-1">{al.badge}</span>
-                          <strong className="text-sm text-gray-900 block">{al.icon} {al.title}</strong>
-                          <span className="text-xs text-gray-700">{al.sub}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => markAsRead(al.id)}
-                          className="px-2.5 py-1.5 bg-white hover:bg-emerald-100 text-emerald-800 border border-red-200 rounded-xl text-[11px] font-black flex items-center gap-1 shrink-0 cursor-pointer"
-                          title="تمت القراءة / إزالة التنبيه"
-                        >
-                          <Check size={13} /> تمت القراءة
-                        </button>
-                      </div>
-                    ))}
+                    <strong className="text-xs text-red-800 block">
+                      🔴 تنبيهات عاجلة (اليوم وبكرة - قبلها بيوم):
+                    </strong>
+                    {urgentAlerts.map((al) =>
+                      renderAlertCard(
+                        al,
+                        'bg-red-50 hover:bg-red-100 border-2 border-red-200',
+                        'bg-red-700 text-white'
+                      )
+                    )}
+                  </div>
+                )}
+
+                {specialAlerts.length > 0 && (
+                  <div className="space-y-2">
+                    <strong className="text-xs text-indigo-900 flex items-center gap-1">
+                      <Sparkles size={13} /> تنبيهات خاصة ومستجدات (دعوات / حضور وانصراف / إشعارات):
+                    </strong>
+                    {specialAlerts.map((al) =>
+                      renderAlertCard(
+                        al,
+                        'bg-indigo-50/70 hover:bg-indigo-100/80 border border-indigo-200',
+                        'bg-indigo-700 text-white'
+                      )
+                    )}
                   </div>
                 )}
 
                 {weekAlerts.length > 0 && (
                   <div className="space-y-2">
-                    <strong className="text-xs text-amber-900 block">🟡 مواعيد وأحداث هذا الأسبوع:</strong>
-                    {weekAlerts.map(al => (
-                      <div
-                        key={al.id}
-                        className="w-full p-3 bg-amber-50/70 hover:bg-amber-100 border border-amber-200 rounded-2xl flex items-start justify-between gap-2 transition"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => handleAlertClick(al)}
-                          className="flex-1 text-right cursor-pointer"
-                        >
-                          <span className="inline-block px-2 py-0.5 bg-amber-200 text-amber-950 rounded text-[10px] font-black mb-1">{al.badge}</span>
-                          <strong className="text-sm text-gray-900 block">{al.icon} {al.title}</strong>
-                          <span className="text-xs text-gray-700">{al.sub}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => markAsRead(al.id)}
-                          className="px-2.5 py-1.5 bg-white hover:bg-emerald-100 text-emerald-800 border border-amber-300 rounded-xl text-[11px] font-black flex items-center gap-1 shrink-0 cursor-pointer"
-                          title="تمت القراءة / إزالة التنبيه"
-                        >
-                          <Check size={13} /> تمت القراءة
-                        </button>
-                      </div>
-                    ))}
+                    <strong className="text-xs text-amber-900 flex items-center gap-1">
+                      <Clock size={13} /> مواعيد وأحداث هذا الأسبوع:
+                    </strong>
+                    {weekAlerts.map((al) =>
+                      renderAlertCard(
+                        al,
+                        'bg-amber-50/70 hover:bg-amber-100 border border-amber-200',
+                        'bg-amber-200 text-amber-950'
+                      )
+                    )}
                   </div>
                 )}
               </div>
             )}
 
-            {/* عرض الإشعارات المقروءة السابقة إذا أراد أبونا مراجعتها */}
             {showReadAlerts && readAlertsList.length > 0 && (
               <div className="border-t pt-3 space-y-2">
-                <strong className="text-xs text-gray-600 block">📂 تنبيهات تمت قراءتها ({readAlertsList.length}):</strong>
-                {readAlertsList.map(al => (
-                  <div key={al.id} className="p-2.5 bg-gray-50 border rounded-2xl flex items-center justify-between gap-2 opacity-75">
-                    <button type="button" onClick={al.action} className="flex-1 text-right cursor-pointer">
-                      <strong className="text-xs text-gray-800 block">{al.icon} {al.title}</strong>
+                <strong className="text-xs text-gray-600 block">
+                  📂 تنبيهات تمت قراءتها ({readAlertsList.length}):
+                </strong>
+                {readAlertsList.map((al) => (
+                  <div
+                    key={al.id}
+                    className="p-2.5 bg-gray-50 border rounded-2xl flex items-center justify-between gap-2 opacity-75"
+                  >
+                    <button
+                      type="button"
+                      onClick={al.action}
+                      className="flex-1 text-right cursor-pointer"
+                    >
+                      <strong className="text-xs text-gray-800 block">
+                        {al.icon} {al.title}
+                      </strong>
                       <span className="text-[11px] text-gray-500">{al.sub}</span>
                     </button>
                     <button
