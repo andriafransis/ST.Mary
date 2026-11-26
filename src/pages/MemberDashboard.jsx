@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo } from 'react';
+import QRCode from 'qrcode';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLogger';
 import PriestInvitationModal from '../components/priest/PriestInvitationModal';
 import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
 import {
   Phone, AlertCircle, CheckCircle2, Calendar, BookOpen,
-  Clock, UserCheck, MessageCircle, Bus, MapPin, Layers, XCircle, MailPlus, QrCode
+  Clock, UserCheck, MessageCircle, Bus, MapPin, Layers, XCircle, MailPlus, QrCode, X, RefreshCw, Download, ShieldCheck, User
 } from 'lucide-react';
 
 const normalizeText = (val = '') =>
@@ -17,11 +18,162 @@ const normalizeText = (val = '') =>
     .replace(/ة/g, 'ه')
     .replace(/\s+/g, ' ');
 
+const normalizePhoneNumber = (phone = '') => {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('20') && digits.length === 12) {
+    return digits.slice(2);
+  }
+  if (digits.startsWith('0020') && digits.length === 14) {
+    return digits.slice(4);
+  }
+  return digits;
+};
+
 const splitList = (val) =>
   String(val || '')
     .split(/[,،]/)
     .map(s => s.trim())
     .filter(Boolean);
+
+function buildMemberQrPayload(member = {}) {
+  return JSON.stringify({
+    v: 1,
+    type: 'church_member_attendance',
+    user_id: member.id || '',
+    username: member.username || '',
+    full_name: member.full_name || member.name || '',
+    role: member.role || 'member',
+    role_label: member.permissions?.custom_role_label || member.role || 'مخدوم'
+  });
+}
+
+function MemberPersonalQrModal({ member, onClose }) {
+  const [qrUrl, setQrUrl] = useState('');
+
+  const generateQr = () => {
+    if (!member?.id && !member?.username) {
+      setQrUrl('');
+      return;
+    }
+    const payload = buildMemberQrPayload(member);
+    QRCode.toDataURL(payload, {
+      errorCorrectionLevel: 'H',
+      margin: 3,
+      width: 340,
+      color: {
+        dark: '#0f172a',
+        light: '#ffffff'
+      }
+    })
+      .then((url) => setQrUrl(url))
+      .catch(() => setQrUrl(''));
+  };
+
+  useEffect(() => {
+    generateQr();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [member?.id, member?.username, member?.full_name, member?.role]);
+
+  if (!member) return null;
+
+  const displayName = member.full_name || member.name || member.username || 'مخدوم';
+  const roleLabel = member.permissions?.custom_role_label || member.role || 'مخدوم';
+
+  const handleDownload = () => {
+    if (!qrUrl) return;
+    const link = document.createElement('a');
+    link.href = qrUrl;
+    link.download = `My-QR-${member.username || member.id || 'member'}.png`;
+    link.click();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4"
+      dir="rtl"
+    >
+      <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl p-5 space-y-4 text-xs border border-slate-200">
+        <div className="flex items-center justify-between border-b pb-3">
+          <div className="flex items-center gap-2 text-[#7a1c24]">
+            <div className="p-2 rounded-2xl bg-[#f9ecee]">
+              <QrCode size={20} />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-base font-black">الـ QR Code بتاعي</h3>
+              <p className="text-[11px] text-gray-500">
+                اعرضه للخادم عند الدخول لتسجيل الحضور وعند الخروج لتسجيل الانصراف
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="إغلاق"
+            className="p-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 cursor-pointer"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="flex flex-col items-center justify-center bg-[#fbfaf7] border-2 border-slate-200 rounded-3xl p-4 space-y-3">
+          <div className="w-48 h-48 rounded-2xl bg-white border-2 border-slate-900/15 p-2.5 flex items-center justify-center shadow-inner">
+            {qrUrl ? (
+              <img
+                src={qrUrl}
+                alt="My Attendance QR Code"
+                className="w-full h-full object-contain rounded-xl"
+              />
+            ) : (
+              <span className="text-gray-400 text-xs font-bold">جاري توليد الـ QR...</span>
+            )}
+          </div>
+
+          <div className="text-center space-y-1">
+            <div className="flex items-center justify-center gap-1.5 font-black text-sm text-gray-900">
+              <User size={15} className="text-[#7a1c24]" />
+              <span>{displayName}</span>
+            </div>
+            <div className="flex items-center justify-center gap-1.5 text-[11px] text-gray-600 font-bold">
+              <ShieldCheck size={13} className="text-emerald-700" />
+              <span>{roleLabel}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={generateQr}
+              className="px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <RefreshCw size={13} /> تحديث
+            </button>
+            {qrUrl && (
+              <button
+                type="button"
+                onClick={handleDownload}
+                className="px-3 py-2 rounded-xl bg-[#7a1c24] hover:bg-[#5c1319] text-white font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Download size={13} /> حفظ QR
+              </button>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-black text-xs cursor-pointer"
+          >
+            تم
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function MemberDashboard({
   member,
@@ -49,6 +201,7 @@ export default function MemberDashboard({
   const [confessionIntervalDays, setConfessionIntervalDays] = useState(45);
   const [receivedInvitesCount, setReceivedInvitesCount] = useState(0);
   const [liveInviteToast, setLiveInviteToast] = useState('');
+  const [showMyQrModal, setShowMyQrModal] = useState(false);
 
   const todayISO = new Date().toLocaleDateString('en-CA');
 
@@ -113,6 +266,11 @@ export default function MemberDashboard({
   useEffect(() => {
     if (!member?.id || !supabase || typeof supabase.channel !== 'function') return;
 
+    const userPhones = [member.phone, member.father_phone, member.mother_phone]
+      .map(normalizePhoneNumber)
+      .filter(Boolean);
+    const normMemberName = normalizeText(member.full_name);
+
     const channel = supabase
       .channel(`member-invites-alert-${member.id}`)
       .on(
@@ -124,9 +282,15 @@ export default function MemberDashboard({
         },
         (payload) => {
           const row = payload.new || payload.old;
-          const matchesUser =
-            row?.recipient_user_id === member.id ||
-            (member.phone && row?.recipient_phone === member.phone);
+          if (!row) return;
+
+          const rowRecipientId = String(row.recipient_user_id || '').trim();
+          const matchesUser = rowRecipientId
+            ? rowRecipientId === String(member.id)
+            : (normalizePhoneNumber(row.recipient_phone) &&
+                userPhones.includes(normalizePhoneNumber(row.recipient_phone))) ||
+              (normMemberName && normalizeText(row.recipient_name) === normMemberName);
+
           if (!matchesUser) return;
 
           if (payload.eventType === 'INSERT' && payload.new) {
@@ -146,7 +310,7 @@ export default function MemberDashboard({
         supabase.removeChannel(channel);
       }
     };
-  }, [member?.id, member?.phone]);
+  }, [member?.id, member?.phone, member?.father_phone, member?.mother_phone, member?.full_name]);
 
   const myServiceCards = useMemo(() => {
     if (!member) return [];
@@ -627,6 +791,13 @@ export default function MemberDashboard({
 
   return (
     <div className="space-y-3 text-xs" dir="rtl">
+      {showMyQrModal && (
+        <MemberPersonalQrModal
+          member={member}
+          onClose={() => setShowMyQrModal(false)}
+        />
+      )}
+
       {liveInviteToast && (
         <div className="bg-emerald-50 border-2 border-emerald-400 p-3 rounded-2xl flex items-center justify-between gap-2 text-emerald-950 font-black">
           <span>{liveInviteToast}</span>
@@ -677,6 +848,13 @@ export default function MemberDashboard({
               {myAtt.length > 0 ? `${Math.round((presentCount / myAtt.length) * 100)}%` : 'جديد'}
             </strong>
           </div>
+          <button
+            type="button"
+            onClick={() => setShowMyQrModal(true)}
+            className="px-4 py-2.5 bg-emerald-400 hover:bg-emerald-300 text-slate-950 rounded-2xl font-black flex items-center justify-center gap-1.5 cursor-pointer shadow"
+          >
+            <QrCode size={15} /> الـ QR Code بتاعي
+          </button>
           <button
             type="button"
             onClick={() => setActiveTab('invite')}
