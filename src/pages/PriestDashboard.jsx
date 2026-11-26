@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
-import PriestInvitationTab from '../components/priest/PriestInvitationTab';
 import { startUserSession, logActivity } from '../lib/activityLogger';
 import {
   loadAdminCardsConfig,
@@ -11,7 +10,7 @@ import WhatsAppComposerModal, { FALLBACK_WA_TEMPLATES, formatWaMessage } from '.
 import BellNotificationsPanel from '../components/priest/BellNotificationsPanel';
 import ConfessorProfileModal from '../components/priest/ConfessorProfileModal';
 import PriestFamilyVisitation from '../components/priest/PriestFamilyVisitation';
-import PriestInvitationsTab from './PriestInvitationsTab';
+import PriestInvitationsTab from '../components/priest/PriestInvitationsTab';
 import CertificatesRegistry from '../components/CertificatesRegistry';
 import EducationalCenterManager from '../components/EducationalCenterManager';
 import JosephArimatheaManager from '../components/JosephArimatheaManager';
