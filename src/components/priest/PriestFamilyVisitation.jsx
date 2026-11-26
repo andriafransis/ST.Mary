@@ -116,6 +116,7 @@ const emptyFamilyForm = {
   father: emptyPerson('متزوج'),
   mother: emptyPerson('متزوجة'),
   children: [],
+  excluded_children_keys: [],
   visitations_log: []
 };
 
@@ -420,6 +421,14 @@ function buildAutoFamiliesFromDatabase({
     const parentBucket = ensureBucket(targetParentBucketKey);
     if (parentBucket.husbandUser?.id === u.id || parentBucket.wifeUser?.id === u.id) return;
 
+    // عدم إضافة أب أو أم الأسرة كـ "ابن" داخل نفس الأسرة
+    if (
+      (parentBucket.husbandUser?.father_id && parentBucket.husbandUser.father_id === u.id) ||
+      (parentBucket.wifeUser?.father_id && parentBucket.wifeUser.father_id === u.id)
+    ) {
+      return;
+    }
+
     if (!parentBucket.fatherNameHint && fatherNameStr) parentBucket.fatherNameHint = fatherNameStr;
     if (!parentBucket.fatherPhoneHint && u.father_phone) parentBucket.fatherPhoneHint = u.father_phone;
     if (!parentBucket.motherNameHint && motherNameStr) parentBucket.motherNameHint = motherNameStr;
@@ -442,6 +451,8 @@ function buildAutoFamiliesFromDatabase({
     const existsExtra = bucket.extraChildren.some(ec => normalizeArabic(ec.full_name) === ucNorm);
     if (!existsAsUser && !existsExtra && uc.child_name) {
       bucket.extraChildren.push({
+        id: uc.id || null,
+        sourceTable: 'user_children',
         user_id: null,
         full_name: uc.child_name,
         dob: uc.dob || '',
@@ -463,6 +474,8 @@ function buildAutoFamiliesFromDatabase({
       const existsExtra = bucket.extraChildren.some(ec => normalizeArabic(ec.full_name) === sibNorm);
       if (!existsAsUser && !existsExtra && sib.sibling_full_name) {
         bucket.extraChildren.push({
+          id: sib.id || null,
+          sourceTable: 'member_siblings',
           user_id: null,
           full_name: sib.sibling_full_name,
           dob: sib.dob || '',
@@ -627,11 +640,13 @@ function buildAutoFamiliesFromDatabase({
       }
     }
 
-    const childUserObjs = Array.from(bucket.childUsers.values()).map(cu => ({
-      ...toPersonObjectFromUser(cu, cu.gender === 'أنثى' ? 'daughter' : 'son', false),
-      hasOwnFamily: userToHeadBucketKey.has(cu.id),
-      ownFamilyKey: userToHeadBucketKey.get(cu.id) || null
-    }));
+    const childUserObjs = Array.from(bucket.childUsers.values())
+      .filter(cu => cu.id !== husband.user_id && cu.id !== wife.user_id && cu.id !== fatherObj.user_id)
+      .map(cu => ({
+        ...toPersonObjectFromUser(cu, cu.gender === 'أنثى' ? 'daughter' : 'son', false),
+        hasOwnFamily: userToHeadBucketKey.has(cu.id),
+        ownFamilyKey: userToHeadBucketKey.get(cu.id) || null
+      }));
 
     const extraFromNamesText = [];
     [hUser, wUser].filter(Boolean).forEach(p => {
@@ -647,6 +662,8 @@ function buildAutoFamiliesFromDatabase({
             extraFromNamesText.some(ex => normalizeArabic(ex.full_name) === cNorm);
           if (!already) {
             extraFromNamesText.push({
+              sourceTable: 'church_users.children_names',
+              parentUserId: p.id,
               user_id: null,
               full_name: cName,
               dob: '',
@@ -705,12 +722,19 @@ function buildAutoFamiliesFromDatabase({
       father: fatherObj,
       mother: motherObj,
       children: allChildren,
+      excluded_children_keys: [],
       visitations_log: []
     });
   }
 
   return familiesList;
 }
+
+const getChildMatchKey = (child) => {
+  if (!child) return '';
+  if (child.user_id) return `uid:${child.user_id}`;
+  return `name:${normalizeArabic(child.full_name || '')}`;
+};
 
 export default function PriestFamilyVisitation({ priest, users: passedUsers = null, onOpenWhatsApp }) {
   const todayISO = new Date().toLocaleDateString('en-CA');
@@ -724,7 +748,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   const [searchQ, setSearchQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  // التحكم في فتح/طي الكروت الصغيرة
   const [expandedCards, setExpandedCards] = useState({});
 
   const [showForm, setShowForm] = useState(false);
@@ -838,13 +861,42 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         ? { ...autoFam.mother, marital_status: resolveMaritalStatusForRole(autoFam.mother.marital_status, 'mother', true) }
         : { ...autoFam.mother, ...(savedMatch.mother || {}), marital_status: resolveMaritalStatusForRole(savedMatch.mother?.marital_status, 'mother', true) };
 
+      const savedExcluded = Array.isArray(savedMatch.husband?.excluded_children_keys)
+        ? savedMatch.husband.excluded_children_keys
+        : Array.isArray(savedMatch.excluded_children_keys)
+        ? savedMatch.excluded_children_keys
+        : [];
+      const excludedSet = new Set(savedExcluded);
+
+      // دمج الأبناء مع احترام أي عنصر تم حذفه يدوياً وحفظه في الداتابيز
+      const combinedChildren = [];
+      const seenKeys = new Set();
+      const pushChildIfValid = (ch) => {
+        if (!ch || !ch.full_name) return;
+        const k = getChildMatchKey(ch);
+        const nameKey = `name:${normalizeArabic(ch.full_name)}`;
+        if (excludedSet.has(k) || excludedSet.has(nameKey)) return;
+        if (ch.user_id && (ch.user_id === mergedHusband.user_id || ch.user_id === mergedWife.user_id || ch.user_id === mergedFather.user_id)) return;
+        if (seenKeys.has(k) || seenKeys.has(nameKey)) return;
+        seenKeys.add(k);
+        seenKeys.add(nameKey);
+        combinedChildren.push(ch);
+      };
+
+      if (Array.isArray(savedMatch.children)) {
+        savedMatch.children.forEach(pushChildIfValid);
+      }
+      if (Array.isArray(autoFam.children)) {
+        autoFam.children.forEach(pushChildIfValid);
+      }
+
       return {
         ...autoFam,
         id: savedMatch.id,
         savedId: savedMatch.id,
         isAutoConnected: true,
         hasSavedRecord: true,
-        family_title: savedMatch.family_title || autoFam.family_title,
+        family_title: savedMatch.family_title || savedMatch.family_name || autoFam.family_title,
         address: savedMatch.address || autoFam.address,
         housing_type: savedMatch.housing_type || autoFam.housing_type,
         family_status: savedMatch.family_status || autoFam.family_status,
@@ -855,12 +907,8 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         wife: mergedWife,
         father: mergedFather,
         mother: mergedMother,
-        children:
-          autoFam.children?.length > 0
-            ? autoFam.children
-            : Array.isArray(savedMatch.children)
-            ? savedMatch.children
-            : [],
+        children: combinedChildren,
+        excluded_children_keys: savedExcluded,
         visitations_log: Array.isArray(savedMatch.visitations_log) ? savedMatch.visitations_log : []
       };
     });
@@ -869,6 +917,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       if (consumedSavedIds.has(sr.id)) return;
       merged.unshift({
         ...sr,
+        family_title: sr.family_title || sr.family_name || 'أسرة بدون عنوان',
         savedId: sr.id,
         isAutoConnected: false,
         hasSavedRecord: true,
@@ -1019,7 +1068,58 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     }
   };
 
-  // تحديث بيانات الأفراد المربوطين في جدول church_users نفسه عند حفظ التعديل
+  // حذف عنصر من قائمة الأبناء وتنظيف مصدره في الداتابيز لو أمكن
+  const handleRemoveChildItem = async (idx) => {
+    const targetChild = (form.children || [])[idx];
+    if (!targetChild) return;
+
+    const removedKey = getChildMatchKey(targetChild);
+    const removedNameKey = `name:${normalizeArabic(targetChild.full_name || '')}`;
+
+    // 1) إزالة الرابط الأبوي في church_users لو الابن له حساب مستقل
+    if (targetChild.user_id) {
+      await supabase
+        .from('church_users')
+        .update({ parent_id: null, father_id: null, mother_id: null })
+        .eq('id', targetChild.user_id);
+    }
+
+    // 2) حذف السجل من user_children لو جاي منها
+    if (targetChild.sourceTable === 'user_children' && targetChild.id) {
+      await supabase
+        .from('user_children')
+        .delete()
+        .eq('id', targetChild.id);
+    }
+
+    // 3) تنظيف الاسم من children_names في church_users لو جاي كنص
+    if (targetChild.sourceTable === 'church_users.children_names' && targetChild.parentUserId) {
+      const parentObj = churchUsers.find(u => u.id === targetChild.parentUserId);
+      if (parentObj?.children_names) {
+        const cleanedNames = String(parentObj.children_names)
+          .split(/[,،\n]/)
+          .map(s => s.trim())
+          .filter(n => n && normalizeArabic(n) !== normalizeArabic(targetChild.full_name))
+          .join(' ، ');
+        await supabase
+          .from('church_users')
+          .update({ children_names: cleanedNames })
+          .eq('id', parentObj.id);
+      }
+    }
+
+    setForm(prev => {
+      const nextExcluded = Array.from(
+        new Set([...(prev.excluded_children_keys || []), removedKey, removedNameKey].filter(Boolean))
+      );
+      return {
+        ...prev,
+        children: (prev.children || []).filter((_, i) => i !== idx),
+        excluded_children_keys: nextExcluded
+      };
+    });
+  };
+
   const syncEditedPeopleBackToChurchUsers = async (familyData) => {
     const updates = [];
     const sharedAddress = (familyData.address || '').trim();
@@ -1087,6 +1187,11 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
     setSaving(true);
     try {
+      const husbandWithExcluded = {
+        ...(form.husband || emptyPerson('متزوج')),
+        excluded_children_keys: form.excluded_children_keys || []
+      };
+
       const payload = {
         priest_id: priest.id,
         family_title: derivedTitle,
@@ -1097,7 +1202,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         phone: (form.phone || form.husband?.phone || form.wife?.phone || '').trim(),
         next_visit_date: form.next_visit_date || null,
         notes: (form.notes || '').trim(),
-        husband: form.husband,
+        husband: husbandWithExcluded,
         wife: form.wife,
         father: form.father,
         mother: form.mother,
@@ -1106,7 +1211,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         updated_at: new Date().toISOString()
       };
 
-      // مزامنة التعديلات في قاعدة بيانات الأفراد (church_users)
       await syncEditedPeopleBackToChurchUsers(payload);
 
       if (editingSavedId) {
@@ -1148,6 +1252,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       setShowForm(false);
       setEditingSavedId(null);
       setForm(emptyFamilyForm);
+      alert('تم الحفظ وتحديث الداتابيز بنجاح ✅');
     } finally {
       setSaving(false);
     }
@@ -1200,6 +1305,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       const payload = {
         priest_id: priest.id,
         family_title: selectedFamily.family_title,
+        family_name: selectedFamily.family_title,
         address: selectedFamily.address || '',
         housing_type: selectedFamily.housing_type || 'تمليك',
         family_status: selectedFamily.family_status || 'مستقرة',
@@ -1240,6 +1346,12 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
   const openEditFamily = (fam) => {
     setEditingSavedId(fam.savedId || null);
+    const exKeys = Array.isArray(fam.husband?.excluded_children_keys)
+      ? fam.husband.excluded_children_keys
+      : Array.isArray(fam.excluded_children_keys)
+      ? fam.excluded_children_keys
+      : [];
+
     setForm({
       ...emptyFamilyForm,
       family_title: fam.family_title || '',
@@ -1254,6 +1366,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       father: { ...emptyPerson('متزوج'), ...(fam.father || {}) },
       mother: { ...emptyPerson('متزوجة'), ...(fam.mother || {}) },
       children: Array.isArray(fam.children) ? fam.children : [],
+      excluded_children_keys: exKeys,
       visitations_log: Array.isArray(fam.visitations_log) ? fam.visitations_log : []
     });
     setShowForm(true);
@@ -1283,7 +1396,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     setUserLookupQ('');
   };
 
-  // تصدير شيت إكسيل (CSV UTF-8 مع BOM يفتح مباشرة بالعربي في Excel)
   const handleExportExcelSheet = () => {
     const headers = [
       'م',
@@ -1496,7 +1608,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
   return (
     <div className="space-y-4 text-xs" dir="rtl">
-      {/* إعدادات طباعة شيت الافتقاد بالعرض (Landscape Table) */}
       <style>{`
         @media print {
           @page {
@@ -1509,7 +1620,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         }
       `}</style>
 
-      {/* شريط التحكم العلوي (يختفي عند الطباعة) */}
       <div className="bg-white p-4 rounded-3xl border border-gray-200 shadow-2xs flex flex-wrap justify-between items-center gap-3 print:hidden">
         <div>
           <h3 className="text-sm sm:text-base font-black text-[#7a1c24] flex items-center gap-1.5">
@@ -1556,7 +1666,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         </div>
       </div>
 
-      {/* الفلاتر والبحث (يختفي عند الطباعة) */}
       <div className="bg-white p-3.5 rounded-2xl border border-gray-200 space-y-2.5 print:hidden">
         <div className="flex flex-wrap gap-1.5 font-black">
           <button
@@ -1620,7 +1729,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         </div>
       </div>
 
-      {/* عرض الشاشة التفاعلي: كروت صغيرة باسم كل أسرة تتفتح عند الضغط عليها (يختفي عند الطباعة) */}
       <div className="print:hidden">
         {loading ? (
           <div className="bg-white p-8 rounded-3xl border text-center text-gray-500 font-bold">جاري ربط وتجميع بيانات الأسر من الداتابيز...</div>
@@ -1647,7 +1755,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                       : 'border-gray-200 hover:border-[#7a1c24]/50 shadow-2xs p-3'
                   }`}
                 >
-                  {/* رأس الكارت الصغير القابل للضغط لفتح البيانات */}
                   <div
                     onClick={() => toggleCardExpand(fam.id)}
                     className="flex items-center justify-between gap-2 cursor-pointer select-none"
@@ -1695,7 +1802,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                     </div>
                   </div>
 
-                  {/* التفاصيل الكاملة عند الضغط على الكارت */}
                   {isExpanded && (
                     <div className="pt-3 border-t border-gray-100 space-y-3">
                       <div className="flex flex-wrap justify-between items-center gap-2">
@@ -1828,7 +1934,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         )}
       </div>
 
-      {/* شيت الطباعة الأفقي (Landscape Excel-Style Print Sheet) يظهر عند الطباعة فقط */}
       <div className="hidden print:block w-full text-black" dir="rtl">
         <div className="text-center border-b-2 border-black pb-2 mb-3">
           <h2 className="text-base font-black">كشف افتقاد الأسر والمخدومين — {priest?.full_name || 'الأب الكاهن'}</h2>
@@ -1911,7 +2016,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         </table>
       </div>
 
-      {/* مودال الربط المباشر بين الزوجين أو الوالدين والأبناء والمصاهرة في الداتابيز */}
       {linkModalFam && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-55 print:hidden">
           <div className="bg-white rounded-3xl w-full max-w-xl p-5 sm:p-6 space-y-3 font-bold max-h-[90vh] overflow-y-auto">
@@ -1933,7 +2037,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               <Search size={15} className="absolute right-3 top-2.5 text-gray-400" />
               <input
                 autoFocus
-                placeholder="ابحث بالاسم أو رقم الموبايل (مثلاً: ايريني / ابانوب / فرنسيس)..."
+                placeholder="ابحث بالاسم أو رقم الموبايل..."
                 className="w-full pr-9 pl-3 py-2 border rounded-xl bg-[#fbfaf7]"
                 value={linkSearchQ}
                 onChange={e => setLinkSearchQ(e.target.value)}
@@ -2002,7 +2106,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         </div>
       )}
 
-      {/* مودال تعديل وحفظ بيانات الأسرة في الداتابيز */}
       {showForm && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 print:hidden">
           <div className="bg-white rounded-3xl w-full max-w-4xl p-5 sm:p-6 space-y-4 font-bold max-h-[92vh] overflow-y-auto">
@@ -2153,8 +2256,8 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
                         </span>
                         <button
                           type="button"
-                          onClick={() => setForm(prev => ({ ...prev, children: prev.children.filter((_, i) => i !== idx) }))}
-                          className="text-red-700 cursor-pointer"
+                          onClick={() => handleRemoveChildItem(idx)}
+                          className="text-red-700 font-black cursor-pointer"
                         >
                           حذف
                         </button>
@@ -2189,7 +2292,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         </div>
       )}
 
-      {/* مودال سجل زيارات الافتقاد */}
       {selectedFamily && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 print:hidden">
           <div className="bg-white rounded-3xl w-full max-w-3xl p-5 sm:p-6 space-y-4 font-bold max-h-[92vh] overflow-y-auto">
