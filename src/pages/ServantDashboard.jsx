@@ -1,16 +1,18 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Phone, Search, UserPlus, Calendar, MessageSquareText, Layers,
   MessageCircle, Users, MapPin, X, FileSpreadsheet,
   Plus, Pencil, LayoutGrid, List,
-  CheckCircle2, SlidersHorizontal, Camera, Cake, Award, MailPlus, Bus
+  CheckCircle2, SlidersHorizontal, Camera, Cake, Award, MailPlus, Bus, QrCode
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { isScoutServant } from '../utils/scoutAccess';
 import BirthdayBanner from '../components/BirthdayBanner';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
 import { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/ServiceGroupFeed';
 import MonthlyAnalyticsAndRewards from '../components/MonthlyAnalyticsAndRewards';
 import PriestInvitationModal from '../components/PriestInvitationModal';
+import InvitationScannerModal from '../components/InvitationScannerModal';
 
 const STAGE_OPTIONS = [
   'حضانة',
@@ -204,6 +206,8 @@ export default function ServantDashboard({
 
   const [servantTrips, setServantTrips] = useState([]);
   const [tripSubTab, setTripSubTab] = useState('my_service'); // 'my_service' | 'general'
+
+  const [scannerOpen, setScannerOpen] = useState(false);
 
   const [noteTags, setNoteTags] = useState(() => {
     try {
@@ -538,6 +542,12 @@ export default function ServantDashboard({
     }),
     ...localGroups.map(g => [g.group_name, g])
   ]).values()];
+
+  // يظهر فقط لمن لديه ارتباط أو بند أو صلاحية الكشافة
+  const canScanInvitations = useMemo(
+    () => isScoutServant(servant, localServices, localGroups),
+    [servant, localServices, localGroups]
+  );
 
   const assignedClass = (servant?.assigned_class || '').trim();
   const baseStages = (servant?.service_stage || servant?.detailed_stage || '')
@@ -988,7 +998,6 @@ export default function ServantDashboard({
     memberMatchesScope(m, selectedScope, selectedGenderFilter, selectedYearFilter, selectedClassFilter)
   );
 
-  // تقسيم الرحلات للخادم إلى: رحلات خدمتي ورحلات عام
   const { generalTripsForServant, myServiceTripsForServant } = (() => {
     const scopeTokens = [
       selectedScope,
@@ -1486,6 +1495,15 @@ export default function ServantDashboard({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {canScanInvitations && (
+            <button
+              type="button"
+              onClick={() => setScannerOpen(true)}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer shadow"
+            >
+              <QrCode size={15} /> مسح QR الدعوات (الكشافة)
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setActiveTab('invite')}
@@ -1506,7 +1524,7 @@ export default function ServantDashboard({
             <button
               type="button"
               onClick={() => setShowItemsManager(prev => !prev)}
-              className={`px-3 py-2 rounded-xl font-black flex items-center gap-1.5 cursor-pointer shadow transition ${
+              className={`px-3.5 py-2 rounded-xl font-black flex items-center gap-1.5 cursor-pointer shadow transition ${
                 showItemsManager ? 'bg-amber-400 text-[#4a0e13]' : 'bg-white/15 hover:bg-white/25 text-white'
               }`}
             >
@@ -1691,7 +1709,7 @@ export default function ServantDashboard({
               <button
                 type="button"
                 onClick={handleAddYearToScope}
-                className="px-3 py-1.5 bg-amber-800 hover:bg-amber-900 text-white rounded-xl font-black flex items-center gap-1 cursor-pointer"
+                className="px-3.5 py-1.5 bg-amber-800 hover:bg-amber-900 text-white rounded-xl font-black flex items-center gap-1 cursor-pointer"
               >
                 <Plus size={14} /> إضافة سنة
               </button>
@@ -2381,6 +2399,14 @@ export default function ServantDashboard({
           </>
         )}
       </div>
+
+      {canScanInvitations && scannerOpen && (
+        <InvitationScannerModal
+          isOpen={scannerOpen}
+          onClose={() => setScannerOpen(false)}
+          currentUser={servant}
+        />
+      )}
 
       {quickStatusModal.open && quickStatusModal.member && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-55">
