@@ -35,7 +35,7 @@ import ParentDashboard from './pages/ParentDashboard';
 import DeaconSchedule from './pages/DeaconSchedule';
 import CertificatesRegistry from './pages/CertificatesRegistry';
 import SocialStatusPage from './pages/SocialStatusPage';
-import { LogOut, Bell, BellRing, GraduationCap, HeartHandshake, Menu, X } from 'lucide-react';
+import { LogOut, Bell, BellRing, GraduationCap, HeartHandshake, Menu, X, Check } from 'lucide-react';
 
 const SAVED_USER_KEY = 'church_app_logged_user_id';
 const PENDING_APPROVAL_KEY = 'church_pending_approval_user';
@@ -128,6 +128,18 @@ function getPostLoginScreen(user, roleScreens, roleTemplates = []) {
   return nonPublicTab || defaultScreen || '';
 }
 
+function formatNotifTime(val) {
+  if (!val) return '';
+  const d = new Date(val);
+  if (Number.isNaN(d.getTime())) return String(val);
+  return d.toLocaleString('ar-EG', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
 function AppInner() {
   const [currentUser, setCurrentUser] = useState(null);
   const [authView, setAuthView] = useState('public');
@@ -164,6 +176,7 @@ function AppInner() {
   const [pendingInvitesList, setPendingInvitesList] = useState([]);
   const [pendingJosephCount, setPendingJosephCount] = useState(0);
   const [todayPriestBookings, setTodayPriestBookings] = useState([]);
+  const [expandedSpecialGroup, setExpandedSpecialGroup] = useState(false);
   const [notifPermission, setNotifPermission] = useState(() =>
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
   );
@@ -322,6 +335,33 @@ function AppInner() {
     [childLinkRequests, currentUser]
   );
 
+  // التنبيهات الخاصة الحقيقية للمستخدم الحالي لعرض تفاصيلها كاملة عند الضغط
+  const mySpecialNotifications = useMemo(() => {
+    if (!currentUser) return [];
+    const role = currentUser.role;
+    return unreadSystemNotifications.filter(n => {
+      if (n.type === 'child_link_request') return false;
+      if (n.user_id === currentUser.id) return true;
+      if ((role === 'admin' || role === 'priest') && ['hidden_family_edit_request', 'priest_invitation'].includes(n.type)) {
+        return true;
+      }
+      return false;
+    });
+  }, [currentUser, unreadSystemNotifications]);
+
+  const handleMarkNotificationRead = async (notifId) => {
+    if (!notifId) return;
+    setUnreadSystemNotifications(prev => prev.filter(n => n.id !== notifId));
+    try {
+      await supabase
+        .from('church_notifications')
+        .update({ is_read: true })
+        .eq('id', notifId);
+    } catch {
+      // ignore
+    }
+  };
+
   // حساب إجمالي الإشعارات الفعلية للمستخدم الحالي
   const notificationStats = useMemo(() => {
     if (!currentUser) return { total: 0, items: [] };
@@ -343,6 +383,15 @@ function AppInner() {
       if (pendingJosephCount > 0) {
         items.push({ label: `تنبيهات يوسف الرامي (${pendingJosephCount})`, count: pendingJosephCount, extra: 'joseph_arimathea' });
       }
+      if (mySpecialNotifications.length > 0) {
+        items.push({
+          key: 'special_group',
+          label: `تنبيهات خاصة (${mySpecialNotifications.length})`,
+          count: mySpecialNotifications.length,
+          isSpecialGroup: true,
+          target: 'admin_panel'
+        });
+      }
     } else if (role === 'priest') {
       const myInvites = pendingInvitesList.filter(i => !i.priest_id || i.priest_id === currentUser.id).length;
       if (myInvites > 0) {
@@ -359,29 +408,51 @@ function AppInner() {
       if (hiddenReqs > 0) {
         items.push({ label: `طلبات الأسر المستترة (${hiddenReqs})`, count: hiddenReqs, target: 'priest_panel' });
       }
+      if (mySpecialNotifications.length > 0) {
+        items.push({
+          key: 'special_group',
+          label: `تنبيهات خاصة (${mySpecialNotifications.length})`,
+          count: mySpecialNotifications.length,
+          isSpecialGroup: true,
+          target: 'priest_panel'
+        });
+      }
     } else if (role === 'parent') {
       if (myPendingChildRequests.length > 0) {
         items.push({ label: `طلبات ربط أبناء (${myPendingChildRequests.length})`, count: myPendingChildRequests.length, target: 'parent_panel' });
       }
-      const personalNotifs = unreadSystemNotifications.filter(
-        n => n.user_id === currentUser.id && n.type !== 'child_link_request'
-      ).length;
-      if (personalNotifs > 0) {
-        items.push({ label: `تنبيهات خاصة (${personalNotifs})`, count: personalNotifs, target: 'parent_panel' });
+      if (mySpecialNotifications.length > 0) {
+        items.push({
+          key: 'special_group',
+          label: `تنبيهات خاصة (${mySpecialNotifications.length})`,
+          count: mySpecialNotifications.length,
+          isSpecialGroup: true,
+          target: 'parent_panel'
+        });
       }
     } else if (['head_servant', 'vice_head_servant', 'servant', 'meeting_servant', 'mercy_servant'].includes(role)) {
       const unreadNotes = memberNotes.filter(n => !n.is_read && !n.acknowledged).length;
       if (unreadNotes > 0) {
         items.push({ label: `ملاحظات متابعة (${unreadNotes})`, count: unreadNotes, target: 'servant_panel' });
       }
-      const personalNotifs = unreadSystemNotifications.filter(n => n.user_id === currentUser.id).length;
-      if (personalNotifs > 0) {
-        items.push({ label: `إشعارات الخدمة (${personalNotifs})`, count: personalNotifs, target: 'servant_panel' });
+      if (mySpecialNotifications.length > 0) {
+        items.push({
+          key: 'special_group',
+          label: `تنبيهات خاصة (${mySpecialNotifications.length})`,
+          count: mySpecialNotifications.length,
+          isSpecialGroup: true,
+          target: 'servant_panel'
+        });
       }
     } else {
-      const personalNotifs = unreadSystemNotifications.filter(n => n.user_id === currentUser.id).length;
-      if (personalNotifs > 0) {
-        items.push({ label: `تنبيهات حسابك (${personalNotifs})`, count: personalNotifs, target: 'member_panel' });
+      if (mySpecialNotifications.length > 0) {
+        items.push({
+          key: 'special_group',
+          label: `تنبيهات خاصة (${mySpecialNotifications.length})`,
+          count: mySpecialNotifications.length,
+          isSpecialGroup: true,
+          target: 'member_panel'
+        });
       }
     }
 
@@ -395,7 +466,8 @@ function AppInner() {
     pendingJosephCount,
     todayPriestBookings,
     myPendingChildRequests,
-    memberNotes
+    memberNotes,
+    mySpecialNotifications
   ]);
 
   const badgeCountRef = useRef(0);
@@ -464,10 +536,10 @@ function AppInner() {
       )
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'church_notifications' },
-        async ({ new: notif }) => {
+        { event: '*', schema: 'public', table: 'church_notifications' },
+        async ({ eventType, new: notif }) => {
           await fetchData();
-          if (!notif) return;
+          if (eventType !== 'INSERT' || !notif) return;
           const isForMe =
             notif.user_id === currentUser.id ||
             (currentUser.role === 'admin' && ['hidden_family_edit_request', 'priest_invitation'].includes(notif.type)) ||
@@ -1135,12 +1207,14 @@ function AppInner() {
     setActiveScreen(scr);
     setMobileMenuOpen(false);
     setShowNotifSummary(false);
+    setExpandedSpecialGroup(false);
   };
 
   const selectExtra = (ext) => {
     setExtraScreen(ext);
     setMobileMenuOpen(false);
     setShowNotifSummary(false);
+    setExpandedSpecialGroup(false);
   };
 
   return (
@@ -1199,7 +1273,13 @@ function AppInner() {
 
               <button
                 type="button"
-                onClick={() => setShowNotifSummary(prev => !prev)}
+                onClick={() => {
+                  setShowNotifSummary(prev => {
+                    const next = !prev;
+                    if (!next) setExpandedSpecialGroup(false);
+                    return next;
+                  });
+                }}
                 title="عرض ملخص الإشعارات الفعلية"
                 className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black flex items-center gap-1 shadow-xs cursor-pointer transition ${
                   notificationStats.total > 0
@@ -1240,12 +1320,19 @@ function AppInner() {
               </button>
 
               {showNotifSummary && (
-                <div className="absolute left-0 top-12 w-72 sm:w-80 bg-white text-gray-900 rounded-2xl shadow-2xl border border-amber-300 p-3.5 space-y-2 z-50 text-xs">
+                <div className="absolute left-0 top-12 w-80 sm:w-96 bg-white text-gray-900 rounded-2xl shadow-2xl border border-amber-300 p-3.5 space-y-2 z-50 text-xs max-h-[75vh] overflow-y-auto">
                   <div className="flex justify-between items-center border-b pb-2">
                     <strong className="text-[#7a1c24] font-black">
                       🔔 الإشعارات الحالية ({notificationStats.total})
                     </strong>
-                    <button type="button" onClick={() => setShowNotifSummary(false)} className="text-gray-400 hover:text-gray-700 cursor-pointer">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowNotifSummary(false);
+                        setExpandedSpecialGroup(false);
+                      }}
+                      className="text-gray-400 hover:text-gray-700 cursor-pointer"
+                    >
                       ✕
                     </button>
                   </div>
@@ -1265,20 +1352,70 @@ function AppInner() {
                   ) : (
                     <div className="space-y-1.5">
                       {notificationStats.items.map((item, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => {
-                            if (item.extra) selectExtra(item.extra);
-                            else if (item.target) selectScreen(item.target);
-                          }}
-                          className="w-full p-2.5 bg-[#fbfaf7] hover:bg-amber-50 border border-gray-200 rounded-xl flex justify-between items-center font-bold text-right cursor-pointer"
-                        >
-                          <span>{item.label}</span>
-                          <span className="px-2 py-0.5 bg-[#7a1c24] text-white rounded-full text-[10px] font-black">
-                            {item.count}
-                          </span>
-                        </button>
+                        <div key={idx} className="space-y-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (item.isSpecialGroup) {
+                                setExpandedSpecialGroup(prev => !prev);
+                                return;
+                              }
+                              if (item.extra) selectExtra(item.extra);
+                              else if (item.target) selectScreen(item.target);
+                            }}
+                            className="w-full p-2.5 bg-[#fbfaf7] hover:bg-amber-50 border border-gray-200 rounded-xl flex justify-between items-center font-bold text-right cursor-pointer"
+                          >
+                            <span>{item.label}</span>
+                            <span className="px-2 py-0.5 bg-[#7a1c24] text-white rounded-full text-[10px] font-black">
+                              {item.isSpecialGroup ? (expandedSpecialGroup ? '▲ إخفاء' : `${item.count} ▼`) : item.count}
+                            </span>
+                          </button>
+
+                          {item.isSpecialGroup && expandedSpecialGroup && (
+                            <div className="p-2 bg-amber-50/60 border border-amber-200 rounded-xl space-y-2">
+                              {mySpecialNotifications.map((sp) => (
+                                <div
+                                  key={sp.id}
+                                  className="p-2.5 bg-white border border-amber-200/80 rounded-xl space-y-1.5 shadow-2xs"
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <strong className="text-xs text-gray-900 block">
+                                      ✨ {sp.title || 'تنبيه خاص'}
+                                    </strong>
+                                    {sp.created_at && (
+                                      <span className="text-[10px] text-gray-500 shrink-0">
+                                        {formatNotifTime(sp.created_at)}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {sp.message && (
+                                    <p className="text-[11px] text-gray-700 leading-relaxed whitespace-pre-line">
+                                      {sp.message}
+                                    </p>
+                                  )}
+                                  <div className="flex items-center justify-end gap-1.5 pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMarkNotificationRead(sp.id)}
+                                      className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <Check size={11} /> مقروء
+                                    </button>
+                                    {item.target && (
+                                      <button
+                                        type="button"
+                                        onClick={() => selectScreen(item.target)}
+                                        className="px-2 py-1 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-lg text-[10px] font-black cursor-pointer"
+                                      >
+                                        فتح الشاشة
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       ))}
                     </div>
                   )}
