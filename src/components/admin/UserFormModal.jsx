@@ -24,6 +24,27 @@ function sanitizeArabicInput(val = '') {
   return String(val || '').replace(/[A-Za-z]/g, '');
 }
 
+function parseDobParts(dobStr = '') {
+  if (!dobStr) return { day: '', month: '', year: '' };
+  const parts = String(dobStr).split('-');
+  if (parts.length === 3) {
+    return {
+      year: parts[0] || '',
+      month: parts[1] ? String(Number(parts[1])) : '',
+      day: parts[2] ? String(Number(parts[2])) : ''
+    };
+  }
+  return { day: '', month: '', year: '' };
+}
+
+function buildIsoDob(day, month, year) {
+  if (!year || !month || !day) return null;
+  const y = String(year).padStart(4, '0');
+  const m = String(month).padStart(2, '0');
+  const d = String(day).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export default function UserFormModal({
   isEditing = false,
   isVisitorMode = false,
@@ -43,10 +64,33 @@ export default function UserFormModal({
   const [visitorStatus, setVisitorStatus] = useState({ type: '', msg: '' });
   const [nameError, setNameError] = useState('');
 
+  const initialDob = parseDobParts(formData.dob);
+  const [dobDay, setDobDay] = useState(initialDob.day);
+  const [dobMonth, setDobMonth] = useState(initialDob.month);
+  const [dobYear, setDobYear] = useState(initialDob.year);
+
   useEffect(() => {
     setVisitorStatus({ type: '', msg: '' });
     setNameError('');
   }, [isVisitorMode, isEditing]);
+
+  useEffect(() => {
+    const parsed = parseDobParts(formData.dob);
+    if (parsed.day !== dobDay) setDobDay(parsed.day);
+    if (parsed.month !== dobMonth) setDobMonth(parsed.month);
+    if (parsed.year !== dobYear) setDobYear(parsed.year);
+  }, [formData.dob]);
+
+  const handleDobPartChange = (nextDay, nextMonth, nextYear) => {
+    setDobDay(nextDay);
+    setDobMonth(nextMonth);
+    setDobYear(nextYear);
+    const iso = buildIsoDob(nextDay, nextMonth, nextYear);
+    setFormData(prev => ({
+      ...prev,
+      dob: iso || ''
+    }));
+  };
 
   const effectiveRole = formData.role || 'member';
   const isObserverVisitor = Boolean(formData.is_site_observer) || effectiveRole === 'site_visitor';
@@ -56,6 +100,14 @@ export default function UserFormModal({
   const isParentWithChildren =
     !isObserverVisitor &&
     (effectiveRole === 'parent' || (isMarried && Boolean(formData.is_parent_guardian)));
+
+  const engagementMode =
+    formData.engagement_mode ||
+    (isObserverVisitor || (formData.service_membership_status || 'in_service') === 'not_in_service'
+      ? 'not_in_service'
+      : (formData.role === 'parish' || formData.role === 'parent'
+          ? 'parish_only'
+          : (formData.detailed_stage === 'اجتماع الصالة' ? 'hall_meeting' : 'specific_service')));
 
   const safeParentsList = isVisitorMode ? [] : parentsWorkersList;
   const safePriestsList = isVisitorMode ? [] : priestsList;
@@ -92,11 +144,12 @@ export default function UserFormModal({
         'رابعة ابتدائي', 'خامسة ابتدائي', 'سادسة ابتدائي',
         'أولى إعدادي', 'ثانية إعدادي', 'ثالثة إعدادي',
         'أولى ثانوي', 'ثانية ثانوي', 'ثالثة ثانوي',
-        'جامعة وخريجين', 'خريجين وعاملين', 'اجتماع الشباب', 'اجتماع الأسرة', 'اجتماع عام'
+        'جامعة وخريجين', 'خريجين وعاملين', 'اجتماع الشباب', 'اجتماع الأسرة', 'اجتماع عام', 'اجتماع الصالة'
       ];
 
   const allGroupStagesFlat = [...new Set([
     ...effectiveStageOptions,
+    'اجتماع الصالة',
     ...(Array.isArray(effectiveGroups) ? effectiveGroups : []).map(g => g.group_name).filter(Boolean),
     ...(Array.isArray(effectiveGroups) ? effectiveGroups : []).flatMap(g => {
       const st = g?.stages;
@@ -150,24 +203,58 @@ export default function UserFormModal({
 
   const handleRoleChange = (nextRole) => {
     const isObserver = nextRole === 'site_visitor';
+    const isServant = SERVANT_ROLES.includes(nextRole);
     const nextGuardianType =
       nextRole === 'parent'
         ? (formData.guardian_type === 'mother' ? 'mother' : 'father')
         : '';
+
+    const nextEngagement = isObserver
+      ? 'not_in_service'
+      : (nextRole === 'parish' || nextRole === 'parent'
+          ? 'parish_only'
+          : (formData.engagement_mode === 'hall_meeting' ? 'hall_meeting' : 'specific_service'));
 
     setFormData({
       ...formData,
       role: nextRole,
       is_site_observer: isObserver,
       is_parish: nextRole === 'parish' || nextRole === 'parent' || Boolean(formData.is_parish),
+      is_parent_guardian: nextRole === 'parent' ? true : Boolean(formData.is_parent_guardian),
       guardian_type: nextGuardianType,
       family_role:
         nextRole === 'parent'
           ? (nextGuardianType === 'mother' ? 'الأم' : 'الأب')
           : (isObserver ? 'زائر موقع' : formData.family_role),
+      engagement_mode: nextEngagement,
       service_membership_status: isObserver ? 'not_in_service' : 'in_service',
-      detailed_stage: isObserver ? '' : formData.detailed_stage,
+      detailed_stage: isObserver
+        ? ''
+        : (nextEngagement === 'hall_meeting' && !isServant ? 'اجتماع الصالة' : formData.detailed_stage),
       assigned_class: isObserver ? '' : formData.assigned_class
+    });
+  };
+
+  const handleEngagementModeChange = (nextMode) => {
+    const isNotInService = nextMode === 'not_in_service';
+    const isHall = nextMode === 'hall_meeting';
+    const isParishOnly = nextMode === 'parish_only';
+
+    setFormData({
+      ...formData,
+      engagement_mode: nextMode,
+      service_membership_status: isNotInService ? 'not_in_service' : 'in_service',
+      is_site_observer: isNotInService ? true : (formData.role === 'site_visitor'),
+      is_parish: isParishOnly ? true : formData.is_parish,
+      role: isNotInService && !['servant', 'head_servant', 'vice_head_servant', 'meeting_servant', 'mercy_servant', 'member', 'parent', 'parish'].includes(formData.role)
+        ? 'site_visitor'
+        : formData.role,
+      detailed_stage: isNotInService
+        ? ''
+        : (isHall && !SERVANT_ROLES.includes(formData.role)
+            ? 'اجتماع الصالة'
+            : (isParishOnly && !SERVANT_ROLES.includes(formData.role) ? '' : formData.detailed_stage)),
+      assigned_class: isNotInService ? '' : formData.assigned_class
     });
   };
 
@@ -180,7 +267,13 @@ export default function UserFormModal({
     ].map(s => (s || '').trim()).filter(Boolean).join(' ');
 
     const cleanUser = (formData.username || '').trim().replace(/\s+/g, '');
-    const observer = Boolean(formData.is_site_observer) || formData.role === 'site_visitor';
+    const resolvedEngagement =
+      formData.engagement_mode ||
+      (Boolean(formData.is_site_observer) || formData.role === 'site_visitor' || (formData.service_membership_status || 'in_service') === 'not_in_service'
+        ? 'not_in_service'
+        : (formData.role === 'parish' || formData.role === 'parent' ? 'parish_only' : 'specific_service'));
+
+    const observer = resolvedEngagement === 'not_in_service';
     const resolvedRole = observer
       ? 'member'
       : (formData.role === 'parish' ? 'member' : (formData.role || 'member'));
@@ -191,15 +284,28 @@ export default function UserFormModal({
       ? (formData.guardian_type === 'mother' || formData.gender === 'أنثى' ? 'mother' : 'father')
       : '';
 
-    const inService = !observer && (formData.service_membership_status || 'in_service') === 'in_service';
-    const resolvedStage = inService ? (formData.detailed_stage || '') : 'خارج الخدمة / متفرج على الموقع';
+    const inService = !observer;
+    const resolvedStage = observer
+      ? 'خارج الخدمة / متفرج على الموقع'
+      : (resolvedEngagement === 'hall_meeting'
+          ? (SERVANT_ROLES.includes(resolvedRole)
+              ? (formData.detailed_stage ? `${formData.detailed_stage}, اجتماع الصالة` : 'اجتماع الصالة')
+              : 'اجتماع الصالة')
+          : (resolvedEngagement === 'parish_only'
+              ? (formData.detailed_stage || 'خدمة شعب')
+              : (formData.detailed_stage || '')));
+
     const resolvedClass = inService ? (formData.assigned_class || '') : '';
     const resolvedSector =
       observer
         ? 'زائر موقع (خارج الخدمة)'
-        : (formData.role === 'parish' || guardianActive
-            ? (formData.sector || 'شعب (رعية)')
-            : (formData.sector || ''));
+        : (resolvedEngagement === 'hall_meeting'
+            ? (formData.sector || 'اجتماع الصالة')
+            : (formData.role === 'parish' || guardianActive || resolvedEngagement === 'parish_only'
+                ? (formData.sector || 'شعب (رعية)')
+                : (formData.sector || '')));
+
+    const finalDob = buildIsoDob(dobDay, dobMonth, dobYear) || formData.dob || null;
 
     return {
       username: forVisitor ? cleanUser.toLowerCase() : cleanUser,
@@ -215,15 +321,15 @@ export default function UserFormModal({
       member_status: observer ? 'site_observer' : (formData.member_status || 'active'),
       marital_status: marriedFlag ? 'married' : 'single',
       is_parent_guardian: guardianActive,
-      is_parish: observer ? false : (formData.role === 'parish' || guardianActive || Boolean(formData.is_parish)),
+      is_parish: observer ? false : (formData.role === 'parish' || guardianActive || resolvedEngagement === 'parish_only' || Boolean(formData.is_parish)),
       is_site_observer: observer,
-      service_membership_status: observer ? 'not_in_service' : (formData.service_membership_status || 'in_service'),
+      service_membership_status: observer ? 'not_in_service' : 'in_service',
       gender: formData.gender || 'ذكر',
       guardian_type: resolvedGuardianType,
       family_role: guardianActive
         ? (resolvedGuardianType === 'mother' ? 'الأم' : 'الأب')
         : (marriedFlag ? 'متزوج' : (observer ? 'زائر موقع' : (formData.family_role || 'فرد'))),
-      dob: formData.dob || null,
+      dob: finalDob,
       is_deacon: Boolean(formData.is_deacon),
       deacon_rank: formData.is_deacon ? (formData.deacon_rank || effectiveDeaconRanks[0]?.value || '') : '',
       church_job: formData.church_job || '',
@@ -240,8 +346,9 @@ export default function UserFormModal({
       address: (formData.address || '').trim(),
       permissions: {
         ...(formData.permissions || {}),
+        engagement_mode: resolvedEngagement,
         is_site_observer: observer,
-        service_membership_status: observer ? 'not_in_service' : (formData.service_membership_status || 'in_service'),
+        service_membership_status: observer ? 'not_in_service' : 'in_service',
         after_accept_action: observer ? 'click_out_non_member' : 'standard_access',
         view_parent_panel: guardianActive,
         ...(resolvedGuardianType ? { guardian_type: resolvedGuardianType } : {})
@@ -305,13 +412,31 @@ export default function UserFormModal({
     }
   };
 
+  const daysList = Array.from({ length: 31 }, (_, i) => String(i + 1));
+  const monthsList = [
+    { v: '1', l: '01 - يناير' },
+    { v: '2', l: '02 - فبراير' },
+    { v: '3', l: '03 - مارس' },
+    { v: '4', l: '04 - أبريل' },
+    { v: '5', l: '05 - مايو' },
+    { v: '6', l: '06 - يونيو' },
+    { v: '7', l: '07 - يوليو' },
+    { v: '8', l: '08 - أغسطس' },
+    { v: '9', l: '09 - سبتمبر' },
+    { v: '10', l: '10 - أكتوبر' },
+    { v: '11', l: '11 - نوفمبر' },
+    { v: '12', l: '12 - ديسمبر' }
+  ];
+  const currentYear = new Date().getFullYear();
+  const yearsList = Array.from({ length: 110 }, (_, i) => String(currentYear - i));
+
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50" dir="rtl">
       <div className="bg-white rounded-3xl w-full max-w-xl p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto text-gray-900">
         <div className="flex items-center justify-between border-b pb-2.5">
           <h3 className="font-extrabold text-sm text-[#7a1c24]">
             {isEditing
-              ? 'تعديل بيانات الفرد بالاسم الرباعي'
+              ? 'مراجعة / تعديل بيانات الفرد بالاسم الرباعي'
               : 'إضافة فرد جديد بالاسم الرباعي'}
           </h3>
           {typeof onClose === 'function' && (
@@ -470,8 +595,8 @@ export default function UserFormModal({
             </div>
           </div>
 
-          {/* لو متزوج: يختار هل هو ولي أمر لإضافة الأولاد أم متزوج فقط بدون أولاد */}
-          {!isObserverVisitor && isMarried && (
+          {/* صفة مزدوجة: خادم وولي أمر معاً أو متزوج ولي أمر */}
+          {!isObserverVisitor && (isMarried || isServantRoleSelected || effectiveRole === 'parent') && (
             <div className="bg-amber-50 p-3 rounded-2xl border border-amber-200 space-y-2">
               <label className="flex items-center gap-2 cursor-pointer font-extrabold text-amber-950">
                 <input
@@ -488,11 +613,15 @@ export default function UserFormModal({
                         : '',
                       family_role: checked
                         ? ((formData.guardian_type || (formData.gender === 'أنثى' ? 'mother' : 'father')) === 'mother' ? 'الأم' : 'الأب')
-                        : 'متزوج'
+                        : (marriedFlag ? 'متزوج' : formData.family_role)
                     });
                   }}
                 />
-                <span>متزوج ولي أمر (لإضافة الأولاد وربط الأسرة — لو غير محدد يبقى متزوج فقط بدون أولاد)</span>
+                <span>
+                  {isServantRoleSelected
+                    ? 'ولي أمر أيضاً (خادم + ولي أمر لربط الأولاد)'
+                    : 'متزوج ولي أمر (لإضافة الأولاد وربط الأسرة — لو غير محدد يبقى متزوج فقط بدون أولاد)'}
+                </span>
               </label>
 
               {(effectiveRole === 'parent' || Boolean(formData.is_parent_guardian)) && (
@@ -520,59 +649,63 @@ export default function UserFormModal({
             </div>
           )}
 
-          {/* لو اختار ولي أمر مباشرة وهو أعزب أو لم يحدد متزوج */}
-          {!isObserverVisitor && !isMarried && effectiveRole === 'parent' && (
-            <div className="bg-amber-50 p-3 rounded-2xl border border-amber-200 space-y-1.5">
-              <label className="block text-[#7a1c24] font-extrabold">نوع ولي الأمر (الأب / الأم — شعب):</label>
+          {/* تاريخ الميلاد من الشمال: يوم / شهر / سنة */}
+          <div>
+            <label className="block mb-1 text-[#7a1c24]">
+              تاريخ الميلاد (من الشمال: يوم / شهر / سنة)
+            </label>
+            <div dir="ltr" className="grid grid-cols-3 gap-2">
               <select
-                className="w-full p-2.5 border border-amber-300 rounded-xl bg-white"
-                value={formData.guardian_type || (formData.gender === 'أنثى' ? 'mother' : 'father')}
-                onChange={e => {
-                  const nextG = e.target.value === 'mother' ? 'mother' : 'father';
-                  setFormData({
-                    ...formData,
-                    guardian_type: nextG,
-                    gender: nextG === 'mother' ? 'أنثى' : 'ذكر',
-                    family_role: nextG === 'mother' ? 'الأم' : 'الأب',
-                    is_parish: true
-                  });
-                }}
+                className="w-full p-2.5 border rounded-xl bg-white"
+                value={dobDay}
+                onChange={e => handleDobPartChange(e.target.value, dobMonth, dobYear)}
               >
-                <option value="father">👨 الأب (شعب / ولي أمر)</option>
-                <option value="mother">👩 الأم (شعب / ولي أمر)</option>
+                <option value="">اليوم (DD)</option>
+                {daysList.map(d => (
+                  <option key={d} value={d}>{d.padStart(2, '0')}</option>
+                ))}
+              </select>
+
+              <select
+                className="w-full p-2.5 border rounded-xl bg-white"
+                value={dobMonth}
+                onChange={e => handleDobPartChange(dobDay, e.target.value, dobYear)}
+              >
+                <option value="">الشهر (MM)</option>
+                {monthsList.map(m => (
+                  <option key={m.v} value={m.v}>{m.l}</option>
+                ))}
+              </select>
+
+              <select
+                className="w-full p-2.5 border rounded-xl bg-white"
+                value={dobYear}
+                onChange={e => handleDobPartChange(dobDay, dobMonth, e.target.value)}
+              >
+                <option value="">السنة (YYYY)</option>
+                {yearsList.map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {!isVisitorMode && (
+            <div>
+              <label className="block mb-1">حالة الفرد (افتقاد / متابعة / ترحيم)</label>
+              <select
+                className="w-full p-2.5 border rounded-xl bg-[#fbfaf7]"
+                value={formData.member_status || 'active'}
+                onChange={e => setFormData({ ...formData, member_status: e.target.value })}
+              >
+                <option value="active">نشط / موجود</option>
+                <option value="needs_visitation">محتاج افتقاد</option>
+                <option value="inactive">منقطع / غياب</option>
+                <option value="transferred">منتقل خارج الكنيسة</option>
+                <option value="departed">منتقل للسماء (ذكرى ترحيم)</option>
               </select>
             </div>
           )}
-
-          {/* تاريخ الميلاد وحالة الفرد */}
-          <div className={`grid grid-cols-1 ${!isVisitorMode ? 'sm:grid-cols-2' : ''} gap-2`}>
-            <div>
-              <label className="block mb-1">تاريخ الميلاد</label>
-              <input
-                type="date"
-                className="w-full p-2.5 border rounded-xl bg-white"
-                value={formData.dob || ''}
-                onChange={e => setFormData({ ...formData, dob: e.target.value })}
-              />
-            </div>
-
-            {!isVisitorMode && (
-              <div>
-                <label className="block mb-1">حالة الفرد (افتقاد / متابعة / ترحيم)</label>
-                <select
-                  className="w-full p-2.5 border rounded-xl bg-[#fbfaf7]"
-                  value={formData.member_status || 'active'}
-                  onChange={e => setFormData({ ...formData, member_status: e.target.value })}
-                >
-                  <option value="active">نشط / موجود</option>
-                  <option value="needs_visitation">محتاج افتقاد</option>
-                  <option value="inactive">منقطع / غياب</option>
-                  <option value="transferred">منتقل خارج الكنيسة</option>
-                  <option value="departed">منتقل للسماء (ذكرى ترحيم)</option>
-                </select>
-              </div>
-            )}
-          </div>
 
           {/* شماس + رتبة الشماسية من الجدول بدون كتابة يدوية */}
           <div className="bg-purple-50 p-3 rounded-2xl border border-purple-200 space-y-2">
@@ -613,37 +746,21 @@ export default function UserFormModal({
             )}
           </div>
 
-          {/* ربط الخدمة بعد القبول (Accepted) أو كونه متفرج / زائر للموقع فقط */}
+          {/* نوع الارتباط: خدمة معينة / خدمة شعب فقط / اجتماع الصالة / خارج الخدمة (Click Out) */}
           <div className="bg-cyan-50/60 p-3 rounded-2xl border border-cyan-200 space-y-2">
             <label className="block text-cyan-950 font-extrabold">
-              🔗 ارتباط الخدمة بعد القبول (Accepted) وحالة التواجد في الكنيسة:
+              🔗 نوع الارتباط بالخدمة أو الاجتماع بعد القبول (Accepted):
             </label>
             <select
               className="w-full p-2.5 border border-cyan-300 rounded-xl bg-white"
-              value={isObserverVisitor ? 'not_in_service' : (formData.service_membership_status || 'in_service')}
-              onChange={e => {
-                const statusVal = e.target.value;
-                const isNotInService = statusVal === 'not_in_service';
-                setFormData({
-                  ...formData,
-                  service_membership_status: statusVal,
-                  is_site_observer: isNotInService ? true : (formData.role === 'site_visitor'),
-                  role: isNotInService && !['servant', 'head_servant', 'vice_head_servant', 'meeting_servant', 'mercy_servant', 'member', 'parent', 'parish'].includes(formData.role)
-                    ? 'site_visitor'
-                    : formData.role,
-                  detailed_stage: isNotInService ? '' : formData.detailed_stage,
-                  assigned_class: isNotInService ? '' : formData.assigned_class
-                });
-              }}
+              value={engagementMode}
+              onChange={e => handleEngagementModeChange(e.target.value)}
             >
-              <option value="in_service">✅ نعم: تابع للخدمة / المرحلة (يظهر في الخدمة بعد القبول)</option>
-              <option value="not_in_service">🚪 لا / زائر موقع فقط: غير تابع للخدمة أو الكنيسة حالياً (Click Out / خروج بدون خدمة)</option>
+              <option value="specific_service">📌 مرتبط بخدمة / مرحلة محددة</option>
+              <option value="parish_only">⛪ خدمة شعب فقط (رعية / أسرة)</option>
+              <option value="hall_meeting">🏛️ اجتماع الصالة / اجتماع عام</option>
+              <option value="not_in_service">🚪 خارج الخدمة / زائر موقع فقط (Click Out — غير مرتبط بخدمة)</option>
             </select>
-            {(isObserverVisitor || (formData.service_membership_status || 'in_service') === 'not_in_service') && (
-              <p className="text-[11px] text-cyan-900 font-normal">
-                تم تحديده كزائر/متفرج على الموقع خارج الخدمة — عند قبوله (Accepted) يُسجل غير مرتبط بمرحلة أو خدمة (Click Out).
-              </p>
-            )}
           </div>
 
           {!isVisitorMode && !isObserverVisitor && formData.role === 'priest' && (
@@ -680,46 +797,48 @@ export default function UserFormModal({
             <div><label className="block mb-1">وظيفة العامل / الفراش</label><input className="w-full p-2.5 border rounded-xl" placeholder="فراش الكنيسة / أمن..." value={formData.church_job || ''} onChange={e => setFormData({ ...formData, church_job: e.target.value })} /></div>
           )}
 
-          {/* بيانات المخدوم / الشعب عند التواجد في الخدمة */}
-          {!isObserverVisitor && (formData.service_membership_status || 'in_service') === 'in_service' && (formData.role === 'member' || formData.role === 'parish' || isParishRole) && !isServantRoleSelected && (
+          {/* بيانات المخدوم / الشعب / اجتماع الصالة عند التواجد */}
+          {!isObserverVisitor && engagementMode !== 'not_in_service' && (formData.role === 'member' || formData.role === 'parish' || isParishRole) && !isServantRoleSelected && (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <div>
-                  <label className="block mb-1">① المرحلة / الخدمة</label>
-                  <select
-                    className="w-full p-2.5 border rounded-xl bg-amber-50/40"
-                    value={formData.detailed_stage || ''}
-                    onChange={e => {
-                      const nextStage = e.target.value;
-                      const nextStageClasses = getClassesForServiceHelper(nextStage, effectiveGroups, services);
-                      const keepCurrentClass = nextStageClasses.some(c => c.value === formData.assigned_class);
-                      setFormData({
-                        ...formData,
-                        detailed_stage: nextStage,
-                        assigned_class: keepCurrentClass ? formData.assigned_class : ''
-                      });
-                    }}
-                  >
-                    <option value="">-- اختر المرحلة أو الخدمة --</option>
-                    {allGroupStagesFlat.map((st, i) => <option key={i} value={st}>{st}</option>)}
-                  </select>
+              {engagementMode === 'specific_service' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block mb-1">① المرحلة / الخدمة</label>
+                    <select
+                      className="w-full p-2.5 border rounded-xl bg-amber-50/40"
+                      value={formData.detailed_stage || ''}
+                      onChange={e => {
+                        const nextStage = e.target.value;
+                        const nextStageClasses = getClassesForServiceHelper(nextStage, effectiveGroups, services);
+                        const keepCurrentClass = nextStageClasses.some(c => c.value === formData.assigned_class);
+                        setFormData({
+                          ...formData,
+                          detailed_stage: nextStage,
+                          assigned_class: keepCurrentClass ? formData.assigned_class : ''
+                        });
+                      }}
+                    >
+                      <option value="">-- اختر المرحلة أو الخدمة --</option>
+                      {allGroupStagesFlat.map((st, i) => <option key={i} value={st}>{st}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block mb-1">② السنة الدراسية / الفصل التابع للمرحلة</label>
+                    <select
+                      className="w-full p-2.5 border rounded-xl bg-white"
+                      value={formData.assigned_class || ''}
+                      onChange={e => setFormData({ ...formData, assigned_class: e.target.value })}
+                    >
+                      <option value="">-- اختر السنة أو الفصل --</option>
+                      {getClassesForServiceHelper(formData.detailed_stage, effectiveGroups, services).map((srv) => (
+                        <option key={srv.id || srv.value} value={srv.value}>
+                          {srv.yearName ? `${srv.yearName} ← ${srv.label}` : srv.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label className="block mb-1">② السنة الدراسية / الفصل التابع للمرحلة</label>
-                  <select
-                    className="w-full p-2.5 border rounded-xl bg-white"
-                    value={formData.assigned_class || ''}
-                    onChange={e => setFormData({ ...formData, assigned_class: e.target.value })}
-                  >
-                    <option value="">-- اختر السنة أو الفصل --</option>
-                    {getClassesForServiceHelper(formData.detailed_stage, effectiveGroups, services).map((srv) => (
-                      <option key={srv.id || srv.value} value={srv.value}>
-                        {srv.yearName ? `${srv.yearName} ← ${srv.label}` : srv.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+              )}
 
               {!isVisitorMode && (
                 <div>
@@ -845,7 +964,7 @@ export default function UserFormModal({
             </div>
           )}
 
-          {/* ربط ولي الأمر للأولاد / المخدومين — يظهر فقط للأدمن/الكاهن/أمين الخدمة من الداخل وليس للزائر من بره */}
+          {/* ربط ولي الأمر للأولاد / المخدومين — يظهر فقط من الداخل وليس للزائر من بره */}
           {!isVisitorMode && !isObserverVisitor && (formData.role === 'member' || isParentWithChildren) && (
             <div className="bg-blue-50/40 p-3 rounded-2xl border border-blue-200 space-y-2.5">
               <span className="block text-[#7a1c24] font-extrabold">
@@ -955,7 +1074,7 @@ export default function UserFormModal({
               {submittingVisitor
                 ? 'جاري الإرسال...'
                 : isEditing
-                  ? 'حفظ التعديلات'
+                  ? 'حفظ التعديلات / قبول'
                   : isVisitorMode
                     ? 'إرسال طلب التسجيل'
                     : 'إنشاء'}
