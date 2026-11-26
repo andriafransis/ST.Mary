@@ -1,10 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import PriestInvitationModal from '../components/PriestInvitationModal';
 import {
   CalendarCheck, MessageSquareHeart, ShieldCheck, Info, Calendar,
   MapPin, School, Search, UserCheck, Sparkles, X, Check, Unlink, RotateCcw, Bell,
-  Award, Gift, Link2, MailPlus
+  Award, Gift, Link2, MailPlus, Bus
 } from 'lucide-react';
 
 export const isArabicOnlyName = (value = '') => {
@@ -212,6 +212,21 @@ const getAutoMatchReason = (parent, candidate, isMother) => {
   return null;
 };
 
+const isGeneralChurchTrip = (tr) => {
+  const tgt = normalizeArabic(tr?.target_service || tr?.stage_name || tr?.service_name || '');
+  const sc = normalizeArabic(tr?.trip_scope || tr?.scope_type || '');
+  return (
+    Boolean(tr?.is_general_trip) ||
+    sc === 'general' ||
+    sc === 'trips_office' ||
+    !tgt ||
+    tgt === 'عام' ||
+    tgt === 'رحلات عام' ||
+    tgt === 'مكتب الرحلات' ||
+    tgt.includes('مكتب الرحلات')
+  );
+};
+
 export default function ParentDashboard({
   parent,
   childrenList = [],
@@ -242,6 +257,8 @@ export default function ParentDashboard({
   const [busyChildId, setBusyChildId] = useState(null);
   const [busyRequestId, setBusyRequestId] = useState(null);
   const [ackedNoteIds, setAckedNoteIds] = useState(() => new Set());
+  const [parentTrips, setParentTrips] = useState([]);
+  const [tripSubTab, setTripSubTab] = useState('children'); // 'children' | 'general'
   const [dismissedIds, setDismissedIds] = useState(() => {
     try {
       const saved = localStorage.getItem(dismissedStorageKey);
@@ -250,6 +267,27 @@ export default function ParentDashboard({
       return [];
     }
   });
+
+  useEffect(() => {
+    if (!supabase || typeof supabase.from !== 'function') return;
+    let active = true;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('church_trips')
+          .select('*')
+          .order('trip_date', { ascending: true });
+        if (active && !error && Array.isArray(data)) {
+          setParentTrips(data);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const effectiveChildrenList = useMemo(() => {
     const map = new Map();
@@ -264,6 +302,32 @@ export default function ParentDashboard({
 
   const linkedIds = useMemo(() => new Set(effectiveChildrenList.map(c => c.id)), [effectiveChildrenList]);
   const existingUserIds = useMemo(() => new Set(allUsers.map(u => u.id)), [allUsers]);
+
+  const { generalTripsForParent, childrenTripsForParent } = useMemo(() => {
+    const childTokens = effectiveChildrenList
+      .flatMap(ch => [ch.assigned_class, ch.detailed_stage, ch.service_stage, ch.sector])
+      .map(normalizeArabic)
+      .filter(Boolean);
+
+    const gen = [];
+    const chTrips = [];
+
+    for (const tr of parentTrips) {
+      if (isGeneralChurchTrip(tr)) {
+        gen.push(tr);
+        continue;
+      }
+      const tgt = normalizeArabic(tr.target_service || tr.stage_name || tr.service_name || tr.assigned_class || '');
+      const matchesChild = childTokens.some(tok => tgt === tok || tgt.includes(tok) || tok.includes(tgt));
+      if (matchesChild) {
+        chTrips.push(tr);
+      }
+    }
+
+    return { generalTripsForParent: gen, childrenTripsForParent: chTrips };
+  }, [parentTrips, effectiveChildrenList]);
+
+  const displayedParentTrips = tripSubTab === 'general' ? generalTripsForParent : childrenTripsForParent;
 
   const candidatePool = useMemo(
     () => allUsers.filter(u => u.id !== parent.id && !['admin', 'priest', 'parent'].includes(u.role)),
@@ -409,6 +473,7 @@ export default function ParentDashboard({
     ...(canManageLinks || linkRequests.length > 0
       ? [{ id: 'linking', label: '🔗 ربط الأبناء', badge: linkAlertCount }]
       : []),
+    { id: 'trips', label: '🚌 الرحلات', badge: childrenTripsForParent.length + generalTripsForParent.length },
     { id: 'campaigns', label: `🎁 العروض والرحلات (${rewardCampaigns.length})` },
     { id: 'masses', label: `⛪ القداسات والاجتماعات (${events.length})` },
     { id: 'services', label: `🏫 الفصول والخدمات (${services.length})` },
@@ -501,6 +566,81 @@ export default function ParentDashboard({
       )}
 
       <div className="max-h-[calc(100vh-265px)] overflow-y-auto pr-1 space-y-4">
+        {activeTab === 'trips' && (
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+              <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5">
+                <Bus size={17} /> الرحلات المتاحة (رحلات أبنائي ورحلات عام)
+              </h3>
+              <div className="flex items-center gap-1.5 bg-[#fbfaf7] p-1 rounded-2xl border">
+                <button
+                  type="button"
+                  onClick={() => setTripSubTab('children')}
+                  className={`px-3.5 py-1.5 rounded-xl font-black text-xs cursor-pointer transition ${
+                    tripSubTab === 'children' ? 'bg-[#7a1c24] text-white' : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  رحلات أبنائي ({childrenTripsForParent.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTripSubTab('general')}
+                  className={`px-3.5 py-1.5 rounded-xl font-black text-xs cursor-pointer transition ${
+                    tripSubTab === 'general' ? 'bg-[#7a1c24] text-white' : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  رحلات عام ({generalTripsForParent.length})
+                </button>
+              </div>
+            </div>
+
+            {displayedParentTrips.length === 0 ? (
+              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+                {tripSubTab === 'general'
+                  ? 'لا توجد رحلات عامة معلنة من مكتب الرحلات حالياً.'
+                  : 'لا توجد رحلات خاصة بفصول أو مراحل أبنائك حالياً.'}
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {displayedParentTrips.map(tr => {
+                  const isOvernight = Number(tr.days_count || 1) > 1 || (Array.isArray(tr.rooms) && tr.rooms.length > 0);
+                  return (
+                    <div key={tr.id} className="p-4 bg-purple-50/40 border border-purple-200 rounded-2xl space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="px-2 py-0.5 bg-purple-100 text-purple-950 rounded-lg text-[10px] font-black">
+                            {tripSubTab === 'general'
+                              ? '🌐 رحلات عام (مكتب الرحلات)'
+                              : `👨‍👩‍👦 رحلات أبنائي (${tr.target_service || 'فصل الابن'})`}
+                          </span>
+                          <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded-lg text-[10px] font-bold">
+                            {tr.trip_category || 'رحلة'}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${
+                            isOvernight ? 'bg-indigo-100 text-indigo-950' : 'bg-amber-100 text-amber-950'
+                          }`}>
+                            {isOvernight ? `🌙 ${tr.days_count} أيام` : '☀️ يوم واحد'}
+                          </span>
+                          <strong className="text-sm text-gray-900">{tr.title}</strong>
+                        </div>
+                        <span className="text-xs font-bold text-gray-600">📅 {tr.trip_date || 'قريباً'}</span>
+                      </div>
+                      {tr.monasteries && (
+                        <p className="text-gray-800">⛪ <strong>الأماكن:</strong> {tr.monasteries}</p>
+                      )}
+                      {tr.daily_program && (
+                        <div className="p-3 bg-white border border-purple-100 rounded-xl text-gray-700 whitespace-pre-line">
+                          {tr.daily_program}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'children' && (
           <>
             {effectiveChildrenList.length === 0 ? (
