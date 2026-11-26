@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../../lib/supabase';
 import { ScanLine, CheckCircle2, AlertTriangle, XCircle, Crown, Users, Search } from 'lucide-react';
 
 export default function InvitationScannerModal({ currentUser, onClose }) {

@@ -9,7 +9,6 @@ import {
   MessageCircle,
   Phone,
   CheckCircle2,
-  ScanLine,
   Copy,
   Check
 } from 'lucide-react';
@@ -42,7 +41,6 @@ export default function EventInvitationSender({
   currentUser,
   users = [],
   services = [],
-  onOpenScanner,
   onCreated
 }) {
   const canCreateInvites = ['admin', 'priest'].includes(currentUser?.role);
@@ -162,7 +160,9 @@ export default function EventInvitationSender({
         event_type: eventType,
         event_title: eventTitle.trim(),
         invite_tier: inviteTier,
-        seat_or_zone: seatOrZone.trim() || (inviteTier === 'vip' ? 'منطقة VIP' : 'صحن الكنيسة / القاعة'),
+        seat_or_zone:
+          seatOrZone.trim() ||
+          (inviteTier === 'vip' ? 'منطقة VIP' : 'صحن الكنيسة / القاعة'),
         event_date: eventDate.trim(),
         event_time: eventTime.trim(),
         location: location.trim(),
@@ -214,44 +214,24 @@ export default function EventInvitationSender({
 
   return (
     <div className="space-y-4 text-xs" dir="rtl">
-      <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-black text-[#7a1c24] flex items-center gap-2">
-            <Sparkles size={19} /> دعوات المناسبات (تدشين، مهرجان، احتفالية، يوبيل)
-          </h2>
-          <p className="text-gray-500 mt-0.5">
-            إرسال دعوات VIP أو عامة للشعب أو لفئة محددة مباشرة إلى النوتيفيكيشن مع QR Code وواتساب/موبايل
-          </p>
-        </div>
-
-        {onOpenScanner && (
-          <button
-            type="button"
-            onClick={onOpenScanner}
-            className="px-4 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-2xl font-black flex items-center gap-1.5 cursor-pointer shadow-2xs"
-          >
-            <ScanLine size={16} /> سكان QR للدعوات
-          </button>
-        )}
+      <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm">
+        <h2 className="text-base font-black text-[#7a1c24] flex items-center gap-2">
+          <Sparkles size={19} /> دعوات المناسبات (تدشين، مهرجان، احتفالية، يوبيل)
+        </h2>
+        <p className="text-gray-500 mt-0.5">
+          إرسال دعوات VIP أو عامة للشعب أو لفئة محددة مباشرة إلى النوتيفيكيشن مع QR Code وواتساب/موبايل
+        </p>
       </div>
 
       {!canCreateInvites ? (
-        <div className="bg-amber-50 border border-amber-300 text-amber-950 p-4 rounded-3xl font-bold flex items-center justify-between gap-3">
-          <span>
-            بند «دعوة» يظهر للكهنة والخدام، وإنشاء وإرسال الدعوات الرسمية/VIP مخصص للأب الكاهن؛ يمكنك استخدام سكان الـ QR لتنظيم الدخول.
-          </span>
-          {onOpenScanner && (
-            <button
-              type="button"
-              onClick={onOpenScanner}
-              className="px-3.5 py-2 bg-[#7a1c24] text-white rounded-xl font-black shrink-0 cursor-pointer"
-            >
-              فتح السكان
-            </button>
-          )}
+        <div className="bg-amber-50 border border-amber-300 text-amber-950 p-4 rounded-3xl font-bold">
+          إرسال الدعوات خاص بالأب الكاهن، ودور الكشافة والخدام هو مسح الـ QR Code وتنظيم دخول المدعوين.
         </div>
       ) : (
-        <form onSubmit={handleSendInvitations} className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-4">
+        <form
+          onSubmit={handleSendInvitations}
+          className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-4"
+        >
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div>
               <label className="block font-bold text-gray-700 mb-1">نوع المناسبة</label>
@@ -328,7 +308,11 @@ export default function EventInvitationSender({
             <div>
               <label className="block font-bold text-gray-700 mb-1">المكان / التسكين المخصص</label>
               <input
-                placeholder={inviteTier === 'vip' ? 'مثال: الصف الأول VIP / قاعة الضيوف' : 'مثال: صحن الكنيسة الرئيسي'}
+                placeholder={
+                  inviteTier === 'vip'
+                    ? 'مثال: الصف الأول VIP / قاعة الضيوف'
+                    : 'مثال: صحن الكنيسة الرئيسي'
+                }
                 className="w-full p-2.5 border rounded-xl bg-[#fbfaf7] font-bold outline-none focus:border-[#7a1c24]"
                 value={seatOrZone}
                 onChange={(e) => setSeatOrZone(e.target.value)}
@@ -354,7 +338,6 @@ export default function EventInvitationSender({
             </div>
           </div>
 
-          {/* اختيار المدعوين دفعة واحدة */}
           <div className="bg-[#fbfaf7] border border-gray-200 rounded-2xl p-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <strong className="text-gray-900">تحديد المدعوين ({targetRecipients.length} مدعو):</strong>
@@ -363,7 +346,9 @@ export default function EventInvitationSender({
                   type="button"
                   onClick={() => setAudienceMode('all_parish')}
                   className={`px-3 py-1.5 rounded-xl font-black cursor-pointer ${
-                    audienceMode === 'all_parish' ? 'bg-[#7a1c24] text-white' : 'bg-white border text-gray-700'
+                    audienceMode === 'all_parish'
+                      ? 'bg-[#7a1c24] text-white'
+                      : 'bg-white border text-gray-700'
                   }`}
                 >
                   شعب الكنيسة بالكامل
@@ -372,7 +357,9 @@ export default function EventInvitationSender({
                   type="button"
                   onClick={() => setAudienceMode('service')}
                   className={`px-3 py-1.5 rounded-xl font-black cursor-pointer ${
-                    audienceMode === 'service' ? 'bg-[#7a1c24] text-white' : 'bg-white border text-gray-700'
+                    audienceMode === 'service'
+                      ? 'bg-[#7a1c24] text-white'
+                      : 'bg-white border text-gray-700'
                   }`}
                 >
                   خدمة / فئة معينة
@@ -381,7 +368,9 @@ export default function EventInvitationSender({
                   type="button"
                   onClick={() => setAudienceMode('selected_users')}
                   className={`px-3 py-1.5 rounded-xl font-black cursor-pointer ${
-                    audienceMode === 'selected_users' ? 'bg-[#7a1c24] text-white' : 'bg-white border text-gray-700'
+                    audienceMode === 'selected_users'
+                      ? 'bg-[#7a1c24] text-white'
+                      : 'bg-white border text-gray-700'
                   }`}
                 >
                   أشخاص محددون
@@ -440,17 +429,20 @@ export default function EventInvitationSender({
             className="px-6 py-3 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-2xl font-black flex items-center gap-2 cursor-pointer shadow"
           >
             <Send size={16} />
-            {sending ? 'جاري الإرسال...' : `إرسال الدعوات للنوتيفيكيشن (${targetRecipients.length})`}
+            {sending
+              ? 'جاري الإرسال...'
+              : `إرسال الدعوات للنوتيفيكيشن (${targetRecipients.length})`}
           </button>
         </form>
       )}
 
-      {/* قائمة الدعوات المرسلة مع أزرار واتساب والموبايل */}
       {sentBatch.length > 0 && (
         <div className="bg-white p-4 sm:p-5 rounded-3xl border border-emerald-200 shadow-sm space-y-3">
           <div className="flex items-center gap-2 text-emerald-900 font-black text-sm">
             <CheckCircle2 size={18} className="text-emerald-700" />
-            <span>الدعوات المرسلة حالياً ({sentBatch.length}) — جاهزة للإرسال على واتساب أو الموبايل:</span>
+            <span>
+              الدعوات المرسلة حالياً ({sentBatch.length}) — جاهزة للإرسال على واتساب أو الموبايل:
+            </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-80 overflow-y-auto">
@@ -497,7 +489,11 @@ export default function EventInvitationSender({
                       onClick={() => handleCopyText(inv)}
                       className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl font-bold flex items-center gap-1 cursor-pointer"
                     >
-                      {isCopied ? <Check size={13} className="text-emerald-700" /> : <Copy size={13} />}
+                      {isCopied ? (
+                        <Check size={13} className="text-emerald-700" />
+                      ) : (
+                        <Copy size={13} />
+                      )}
                       {isCopied ? 'تم' : 'نسخ'}
                     </button>
                   </div>
