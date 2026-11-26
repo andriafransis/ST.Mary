@@ -190,6 +190,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   const [showForm, setShowForm] = useState(false);
   const [editingSavedId, setEditingSavedId] = useState(null);
   const [form, setForm] = useState(emptyFamilyForm);
+  const [memberFilterQ, setMemberFilterQ] = useState('');
   const [selectedMemberDbUserId, setSelectedMemberDbUserId] = useState('');
   const [memberRoleChoice, setMemberRoleChoice] = useState('الابن');
   const [saving, setSaving] = useState(false);
@@ -214,22 +215,30 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   }, [passedUsers]);
 
   const loadData = async () => {
-    if (!priest?.id) return;
     setLoading(true);
     try {
+      const famQuery = priest?.id
+        ? supabase
+            .from('priest_family_visitations')
+            .select('*')
+            .eq('priest_id', priest.id)
+            .order('updated_at', { ascending: false })
+        : supabase
+            .from('priest_family_visitations')
+            .select('*')
+            .order('updated_at', { ascending: false });
+
       const [famRes, usrRes] = await Promise.all([
-        supabase
-          .from('priest_family_visitations')
-          .select('*')
-          .eq('priest_id', priest.id)
-          .order('updated_at', { ascending: false }),
+        famQuery,
         supabase
           .from('church_users')
           .select('*')
           .order('full_name', { ascending: true })
       ]);
       if (!famRes.error && famRes.data) setSavedRecords(famRes.data);
-      if (!usrRes.error && usrRes.data) setChurchUsers(usrRes.data);
+      if (!usrRes.error && usrRes.data && usrRes.data.length > 0) {
+        setChurchUsers(usrRes.data);
+      }
     } finally {
       setLoading(false);
     }
@@ -239,7 +248,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     loadData();
   }, [priest?.id]);
 
-  // عرض الأسر التي أضافها المستخدم أو ربطها فعلياً فقط (بدون توليد تلقائي من الداتابيز)
   const familiesList = useMemo(() => {
     return (savedRecords || []).map(sr => {
       const husbandRelatives = Array.isArray(sr.husband?.relatives) ? sr.husband.relatives : [];
@@ -278,9 +286,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     });
   }, [savedRecords]);
 
-  // مسح كل الأسر والروابط الحالية ليبدأ المستخدم بإضافتها وربطها بنفسه
   const handleClearAllFamilies = async () => {
-    if (!priest?.id) return;
     const ok1 = confirm(
       '⚠️ سيتم مسح كل الأسر المعروضة حالياً من افتقاد الأسر لتبدأ أنت بإضافتها وربط صلاتها بنفسك (الأب، الابن، الزوج، إلخ). هل تريد المتابعة؟'
     );
@@ -291,16 +297,23 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
     setClearingAll(true);
     try {
-      await supabase
-        .from('priest_family_visitations')
-        .delete()
-        .eq('priest_id', priest.id);
+      if (priest?.id) {
+        await supabase
+          .from('priest_family_visitations')
+          .delete()
+          .eq('priest_id', priest.id);
+      } else {
+        await supabase
+          .from('priest_family_visitations')
+          .delete()
+          .neq('id', '00000000-0000-0000-0000-000000000000');
+      }
 
       logActivity({
         user: priest,
         actionType: 'مسح_أسر_الافتقاد_للبدء_اليدوي',
         targetTable: 'priest_family_visitations',
-        targetId: priest.id,
+        targetId: priest?.id || null,
         description: 'تم مسح الأسر الحالية ليقوم المستخدم بإضافتها وربط صلاتها يدوياً'
       });
 
@@ -314,13 +327,13 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
   };
 
   const upsertFamilyVisitationRecord = async (fam, extraPatch = {}) => {
-    if (!priest?.id || !fam) return null;
+    if (!fam) return null;
     const husbandPayload = {
       ...(fam.husband || emptyPerson('متزوج')),
       relatives: fam.relatives || []
     };
     const basePayload = {
-      priest_id: priest.id,
+      ...(priest?.id ? { priest_id: priest.id } : {}),
       family_title: fam.family_title || 'أسرة بدون عنوان',
       family_name: fam.family_title || 'أسرة بدون عنوان',
       address: fam.address || '',
@@ -357,7 +370,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     return data || null;
   };
 
-  // ربط فرد من الداتابيز بأسرة وتحديد صلته (أب، ابن، أخ، إلخ) وحفظه فوراً
   const handleLinkPersonToFamily = async (fam, targetUser, kinshipLabel = 'الابن') => {
     if (!fam || !targetUser) return;
     setLinkBusy(true);
@@ -485,6 +497,42 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     }));
   };
 
+  const handleAddMemberWithRole = () => {
+    if (!selectedMemberDbUserId) return;
+    const dbUser = (Array.isArray(churchUsers) ? churchUsers : []).find(
+      u => String(u.id) === String(selectedMemberDbUserId)
+    );
+    if (!dbUser) return;
+
+    const displayName = getDisplayQuadName(dbUser) || dbUser.full_name || 'بدون اسم';
+    const isDirectChildRole = ['الابن', 'الابنة', 'الحفيد', 'الحفيدة'].includes(memberRoleChoice);
+
+    if (isDirectChildRole) {
+      const childObj = {
+        ...toPersonObjectFromUser(dbUser, 'أعزب'),
+        full_name: displayName,
+        kinship_role: memberRoleChoice
+      };
+      setForm(prev => ({
+        ...prev,
+        children: [...(prev.children || []), childObj]
+      }));
+    } else {
+      const relObj = {
+        user_id: dbUser.id,
+        full_name: displayName,
+        kinship_role: memberRoleChoice,
+        phone: dbUser.phone || ''
+      };
+      setForm(prev => ({
+        ...prev,
+        relatives: [...(prev.relatives || []), relObj]
+      }));
+    }
+
+    setSelectedMemberDbUserId('');
+  };
+
   const handleSaveFamily = async (e) => {
     e.preventDefault();
     const derivedTitle =
@@ -505,7 +553,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
       };
 
       const payload = {
-        priest_id: priest.id,
+        ...(priest?.id ? { priest_id: priest.id } : {}),
         family_title: derivedTitle,
         family_name: derivedTitle,
         address: (form.address || '').trim(),
@@ -589,7 +637,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         id: `vis-${Date.now()}`,
         visit_date: visitDraft.visit_date || todayISO,
         method: visitDraft.method,
-        visitor_name: visitDraft.visitor_name.trim() || priest.full_name,
+        visitor_name: visitDraft.visitor_name.trim() || priest?.full_name || 'الأب الكاهن',
         summary: visitDraft.summary.trim(),
         needs: visitDraft.needs.trim()
       },
@@ -726,31 +774,50 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
     });
   }, [familiesList, statusFilter, searchQ]);
 
-  const dbMembersPool = useMemo(
-    () => churchUsers.filter(u => u.role !== 'admin' && u.role !== 'priest'),
+  const allUsersList = useMemo(
+    () => (Array.isArray(churchUsers) ? churchUsers : []),
     [churchUsers]
   );
+
+  const dbMembersPool = useMemo(() => {
+    const q = normalizeArabic(memberFilterQ);
+    if (!q) return allUsersList;
+    return allUsersList.filter(u => {
+      const searchable = [
+        getDisplayQuadName(u),
+        u.full_name,
+        u.first_name,
+        u.second_name,
+        u.third_name,
+        u.fourth_name,
+        u.phone
+      ]
+        .filter(Boolean)
+        .join(' ');
+      return normalizeArabic(searchable).includes(q);
+    });
+  }, [allUsersList, memberFilterQ]);
 
   const matchedLookupUsers = useMemo(() => {
     const q = normalizeArabic(userLookupQ);
     if (q.length < 2) return [];
-    return dbMembersPool
+    return allUsersList
       .filter(u => normalizeArabic((getDisplayQuadName(u) || '') + ' ' + (u.phone || '')).includes(q))
       .slice(0, 10);
-  }, [userLookupQ, dbMembersPool]);
+  }, [userLookupQ, allUsersList]);
 
   const linkModalCandidates = useMemo(() => {
     if (!linkModalFam) return [];
     const excludeIds = new Set(linkModalFam.linkedUserIds || []);
     const q = normalizeArabic(linkSearchQ);
-    return dbMembersPool
+    return allUsersList
       .filter(u => {
         if (excludeIds.has(u.id)) return false;
         if (!q) return true;
         return normalizeArabic((getDisplayQuadName(u) || '') + ' ' + (u.phone || '')).includes(q);
       })
       .slice(0, 15);
-  }, [linkModalFam, linkSearchQ, dbMembersPool]);
+  }, [linkModalFam, linkSearchQ, allUsersList]);
 
   const renderPersonSection = (title, roleKey, allowAliveToggle = false) => {
     const p = form[roleKey] || emptyPerson();
@@ -921,6 +988,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
             onClick={() => {
               setEditingSavedId(null);
               setForm(emptyFamilyForm);
+              setMemberFilterQ('');
               setSelectedMemberDbUserId('');
               setShowForm(true);
             }}
@@ -1205,7 +1273,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         )}
       </div>
 
-      {/* شيت الطباعة الأفقي */}
       <div className="hidden print:block w-full text-black" dir="rtl">
         <div className="text-center border-b-2 border-black pb-2 mb-3">
           <h2 className="text-base font-black">كشف افتقاد الأسر — {priest?.full_name || 'الأب الكاهن'}</h2>
@@ -1282,7 +1349,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         </table>
       </div>
 
-      {/* نافذة ربط شخص وتحديد صلته بأسرة */}
       {linkModalFam && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-55 print:hidden">
           <div className="bg-white rounded-3xl w-full max-w-xl p-5 sm:p-6 space-y-3 font-bold max-h-[90vh] overflow-y-auto">
@@ -1362,7 +1428,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         </div>
       )}
 
-      {/* نافذة إضافة / تعديل أسرة */}
       {showForm && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 print:hidden">
           <div className="bg-white rounded-3xl w-full max-w-4xl p-5 sm:p-6 space-y-4 font-bold max-h-[92vh] overflow-y-auto">
@@ -1457,73 +1522,102 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
               {renderPersonSection('④ بيانات الوالدة (الأم)', 'mother', true)}
 
               <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border border-gray-200 space-y-2.5">
-                <strong className="text-xs font-black text-[#7a1c24] block">⑤ إضافة فرد من الداتابيز وتحديد صلته (الابن، الأب، الأخ، الزوج...)</strong>
+                <div className="flex flex-wrap justify-between items-center gap-2">
+                  <strong className="text-xs font-black text-[#7a1c24]">
+                    ⑤ إضافة فرد من الداتابيز وتحديد صلته (الابن، الأب، الأخ، الزوج...)
+                  </strong>
+                  <span className="text-[11px] text-gray-500 font-bold">
+                    المتاح في الداتابيز: {dbMembersPool.length}
+                  </span>
+                </div>
+
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="ابحث بالاسم أو رقم الموبايل..."
+                    className="w-full p-2 pr-3 pl-8 border rounded-xl bg-white text-xs font-bold outline-none focus:border-[#7a1c24]"
+                    value={memberFilterQ}
+                    onChange={e => {
+                      setMemberFilterQ(e.target.value);
+                      setSelectedMemberDbUserId('');
+                    }}
+                  />
+                  {memberFilterQ && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMemberFilterQ('');
+                        setSelectedMemberDbUserId('');
+                      }}
+                      className="absolute left-2.5 top-2 text-gray-400 hover:text-gray-700 font-black cursor-pointer"
+                      title="مسح البحث"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <select
-                    className="sm:col-span-2 p-2 border rounded-xl bg-white font-bold"
+                    className="sm:col-span-2 p-2 border rounded-xl bg-white font-bold text-xs outline-none focus:border-[#7a1c24]"
                     value={selectedMemberDbUserId}
                     onChange={e => setSelectedMemberDbUserId(e.target.value)}
                   >
-                    <option value="">-- اختر شخصاً من قاعدة البيانات --</option>
-                    {dbMembersPool.map(u => (
-                      <option key={u.id} value={u.id}>
-                        {getDisplayQuadName(u)} {u.phone ? `(${u.phone})` : ''}
-                      </option>
-                    ))}
+                    <option value="">
+                      {dbMembersPool.length > 0
+                        ? '-- اختر شخصاً من قاعدة البيانات --'
+                        : '-- لا توجد نتائج مطابقة --'}
+                    </option>
+                    {dbMembersPool.map(u => {
+                      const name = getDisplayQuadName(u) || u.full_name || 'بدون اسم';
+                      return (
+                        <option key={u.id} value={u.id}>
+                          {name} {u.phone ? `(${u.phone})` : ''}
+                        </option>
+                      );
+                    })}
                   </select>
 
                   <select
-                    className="p-2 border rounded-xl bg-amber-50 text-amber-950 font-black"
+                    className="p-2 border rounded-xl bg-amber-50 text-amber-950 font-black text-xs outline-none focus:border-amber-500"
                     value={memberRoleChoice}
                     onChange={e => setMemberRoleChoice(e.target.value)}
                   >
-                    {KINSHIP_ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                    {KINSHIP_ROLE_OPTIONS.map(role => (
+                      <option key={role} value={role}>
+                        {role}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
                 <button
                   type="button"
-                  onClick={() => {
-                    if (!selectedMemberDbUserId) return;
-                    const dbUser = dbMembersPool.find(u => u.id === selectedMemberDbUserId);
-                    if (!dbUser) return;
-
-                    if (['الابن', 'الابنة', 'الحفيد', 'الحفيدة'].includes(memberRoleChoice)) {
-                      const childObj = {
-                        ...toPersonObjectFromUser(dbUser, 'أعزب'),
-                        kinship_role: memberRoleChoice
-                      };
-                      setForm(prev => ({ ...prev, children: [...(prev.children || []), childObj] }));
-                    } else {
-                      const relObj = {
-                        user_id: dbUser.id,
-                        full_name: getDisplayQuadName(dbUser),
-                        kinship_role: memberRoleChoice,
-                        phone: dbUser.phone || ''
-                      };
-                      setForm(prev => ({ ...prev, relatives: [...(prev.relatives || []), relObj] }));
-                    }
-                    setSelectedMemberDbUserId('');
-                  }}
-                  className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs inline-flex items-center gap-1 cursor-pointer"
+                  disabled={!selectedMemberDbUserId}
+                  onClick={handleAddMemberWithRole}
+                  className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black inline-flex items-center gap-1.5 cursor-pointer transition"
                 >
                   <UserPlus size={13} /> + إضافة بالصلة ({memberRoleChoice})
                 </button>
 
                 {(form.children || []).length > 0 && (
                   <div className="space-y-1.5 pt-1">
-                    {form.children.map((c, idx) => (
-                      <div key={idx} className="bg-white p-2 rounded-xl border flex justify-between items-center gap-2">
-                        <span>
-                          • <span className="px-1.5 py-0.5 bg-amber-100 text-amber-950 rounded text-[9px] font-black ml-1">{c.kinship_role || 'الابن'}</span>
-                          <strong>{c.full_name}</strong>
-                          {c.dob && ` • ميلاد: ${c.dob}`}
-                          {c.phone && ` • ت: ${c.phone}`}
-                        </span>
+                    {form.children.map((child, idx) => (
+                      <div
+                        key={`child-${child.user_id || idx}`}
+                        className="bg-white p-2 rounded-xl border flex justify-between items-center gap-2 text-xs"
+                      >
+                        <div>
+                          <span className="px-1.5 py-0.5 bg-amber-100 text-amber-950 rounded text-[10px] font-black ml-1.5">
+                            {child.kinship_role || 'الابن'}
+                          </span>
+                          <strong className="text-gray-900">{child.full_name}</strong>
+                          {child.phone && <span className="text-gray-500 mr-2">📞 {child.phone}</span>}
+                        </div>
                         <button
                           type="button"
                           onClick={() => handleRemoveChildFromForm(idx)}
-                          className="text-red-700 font-black cursor-pointer"
+                          className="text-rose-700 hover:text-rose-900 font-black cursor-pointer"
                         >
                           حذف
                         </button>
@@ -1534,17 +1628,22 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
                 {(form.relatives || []).length > 0 && (
                   <div className="space-y-1.5 pt-1">
-                    {form.relatives.map((r, idx) => (
-                      <div key={idx} className="bg-emerald-50/70 p-2 rounded-xl border border-emerald-200 flex justify-between items-center gap-2">
-                        <span>
-                          • <span className="px-1.5 py-0.5 bg-emerald-700 text-white rounded text-[9px] font-black ml-1">{r.kinship_role}</span>
-                          <strong>{r.full_name}</strong>
-                          {r.phone && ` • ت: ${r.phone}`}
-                        </span>
+                    {form.relatives.map((rel, idx) => (
+                      <div
+                        key={`rel-${rel.user_id || idx}`}
+                        className="bg-emerald-50/70 p-2 rounded-xl border border-emerald-200 flex justify-between items-center gap-2 text-xs"
+                      >
+                        <div>
+                          <span className="px-1.5 py-0.5 bg-emerald-700 text-white rounded text-[10px] font-black ml-1.5">
+                            {rel.kinship_role}
+                          </span>
+                          <strong className="text-gray-900">{rel.full_name}</strong>
+                          {rel.phone && <span className="text-gray-500 mr-2">📞 {rel.phone}</span>}
+                        </div>
                         <button
                           type="button"
                           onClick={() => handleRemoveRelativeFromForm(idx)}
-                          className="text-red-700 font-black cursor-pointer"
+                          className="text-rose-700 hover:text-rose-900 font-black cursor-pointer"
                         >
                           حذف
                         </button>
@@ -1579,7 +1678,6 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
         </div>
       )}
 
-      {/* نافذة سجل الزيارات */}
       {selectedFamily && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 print:hidden">
           <div className="bg-white rounded-3xl w-full max-w-3xl p-5 sm:p-6 space-y-4 font-bold max-h-[92vh] overflow-y-auto">
