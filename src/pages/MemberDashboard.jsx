@@ -5,7 +5,7 @@ import PriestInvitationModal from '../components/priest/PriestInvitationModal';
 import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
 import {
   Phone, AlertCircle, CheckCircle2, Calendar, BookOpen,
-  Clock, UserCheck, MessageCircle, Bus, MapPin, Layers, XCircle, MailPlus
+  Clock, UserCheck, MessageCircle, Bus, MapPin, Layers, XCircle, MailPlus, QrCode
 } from 'lucide-react';
 
 const normalizeText = (val = '') =>
@@ -35,7 +35,7 @@ export default function MemberDashboard({
   priests = [],
   onMemberUpdated
 }) {
-  const [activeTab, setActiveTab] = useState('services'); // 'services' | 'confessions' | 'masses' | 'trips' | 'invite'
+  const [activeTab, setActiveTab] = useState('services'); // 'services' | 'confessions' | 'masses' | 'trips' | 'my_invites' | 'invite'
   const [tripSubTab, setTripSubTab] = useState('my_service'); // 'my_service' | 'general'
   const [selectedPriestId, setSelectedPriestId] = useState(member?.confession_father_id || '');
   const [savingFather, setSavingFather] = useState(false);
@@ -47,6 +47,8 @@ export default function MemberDashboard({
   const [myTripRegs, setMyTripRegs] = useState([]);
   const [tripBusy, setTripBusy] = useState(null);
   const [confessionIntervalDays, setConfessionIntervalDays] = useState(45);
+  const [receivedInvitesCount, setReceivedInvitesCount] = useState(0);
+  const [liveInviteToast, setLiveInviteToast] = useState('');
 
   const todayISO = new Date().toLocaleDateString('en-CA');
 
@@ -107,6 +109,44 @@ export default function MemberDashboard({
       cancelled = true;
     };
   }, [member?.id]);
+
+  useEffect(() => {
+    if (!member?.id || !supabase || typeof supabase.channel !== 'function') return;
+
+    const channel = supabase
+      .channel(`member-invites-alert-${member.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'church_invitations'
+        },
+        (payload) => {
+          const row = payload.new || payload.old;
+          const matchesUser =
+            row?.recipient_user_id === member.id ||
+            (member.phone && row?.recipient_phone === member.phone);
+          if (!matchesUser) return;
+
+          if (payload.eventType === 'INSERT' && payload.new) {
+            const tierLabel = payload.new.invite_tier === 'vip' ? 'VIP' : 'عامة';
+            setLiveInviteToast(
+              `وصلتك دعوة ${tierLabel}: ${payload.new.event_title}${payload.new.seat_or_zone ? ` (${payload.new.seat_or_zone})` : ''} — كود: ${payload.new.qr_token}`
+            );
+          } else if (payload.eventType === 'UPDATE' && payload.new?.status === 'checked_in') {
+            setLiveInviteToast(`تم مسح QR الدعوة (${payload.new.event_title}) وتسجيل دخولك.`);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (typeof supabase.removeChannel === 'function') {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [member?.id, member?.phone]);
 
   const myServiceCards = useMemo(() => {
     if (!member) return [];
@@ -587,6 +627,28 @@ export default function MemberDashboard({
 
   return (
     <div className="space-y-3 text-xs" dir="rtl">
+      {liveInviteToast && (
+        <div className="bg-emerald-50 border-2 border-emerald-400 p-3 rounded-2xl flex items-center justify-between gap-2 text-emerald-950 font-black">
+          <span>{liveInviteToast}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setActiveTab('my_invites')}
+              className="px-3 py-1 bg-emerald-700 text-white rounded-xl cursor-pointer"
+            >
+              عرض الـ QR
+            </button>
+            <button
+              type="button"
+              onClick={() => setLiveInviteToast('')}
+              className="text-emerald-800 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-4">
         <div className="space-y-2">
           <h2 className="text-base sm:text-xl font-black text-amber-300">أهلاً بك، {member?.full_name}</h2>
@@ -665,6 +727,20 @@ export default function MemberDashboard({
         </button>
         <button
           type="button"
+          onClick={() => setActiveTab('my_invites')}
+          className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'my_invites' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+          }`}
+        >
+          <QrCode size={14} /> دعواتي QR
+          {receivedInvitesCount > 0 && (
+            <span className="px-1.5 py-0.5 bg-amber-400 text-[#4a0e13] rounded-full text-[10px] font-black">
+              {receivedInvitesCount}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveTab('confessions')}
           className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 ${
             activeTab === 'confessions' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
@@ -702,6 +778,13 @@ export default function MemberDashboard({
       </div>
 
       <div className="max-h-[calc(100vh-260px)] overflow-y-auto pr-1 space-y-3">
+        {activeTab === 'my_invites' && (
+          <ReceivedInvitationsSection
+            currentUser={member}
+            onCountChange={setReceivedInvitesCount}
+          />
+        )}
+
         {activeTab === 'services' && (
           <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3.5">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
