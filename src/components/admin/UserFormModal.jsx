@@ -50,12 +50,18 @@ function buildIsoDob(day, month, year) {
   return `${y}-${m}-${d}`;
 }
 
-function composeFullAddress({ streetObj, sector, buildingNo, floorNo, apartmentNo, addressNotes, rawAddress }) {
+function composeFullAddress({ streetName, sector, buildingNo, floorNo, apartmentNo, addressNotes, rawAddress }) {
   const manual = String(rawAddress || '').trim();
+  const cleanStreet = String(streetName || '').trim();
+  const cleanArea = String(sector || '').trim();
   const pieces = [];
-  if (streetObj?.street_name) pieces.push(`شارع ${String(streetObj.street_name).replace(/^شارع\s*/i, '').trim()}`);
-  const areaPart = streetObj?.area_name || String(sector || '').trim();
-  if (areaPart) pieces.push(`منطقة ${String(areaPart).replace(/^منطقة\s*/i, '').trim()}`);
+
+  if (cleanStreet) {
+    pieces.push(/^شارع\s/i.test(cleanStreet) ? cleanStreet : `شارع ${cleanStreet}`);
+  }
+  if (cleanArea) {
+    pieces.push(/^منطقة\s/i.test(cleanArea) ? cleanArea : `منطقة ${cleanArea}`);
+  }
   if (String(buildingNo || '').trim()) pieces.push(`عمارة ${String(buildingNo).trim()}`);
   if (String(floorNo || '').trim()) pieces.push(`دور ${String(floorNo).trim()}`);
   if (String(apartmentNo || '').trim()) pieces.push(`شقة ${String(apartmentNo).trim()}`);
@@ -65,6 +71,45 @@ function composeFullAddress({ streetObj, sector, buildingNo, floorNo, apartmentN
   if (!manual) return structured;
   if (!structured) return manual;
   return manual.includes(structured) ? manual : `${manual} (${structured})`;
+}
+
+async function resolveOrCreateStreetId({ streetName, sector }) {
+  const cleanStreet = String(streetName || '').trim();
+  const cleanArea = String(sector || '').trim();
+  if (!cleanStreet && !cleanArea) return null;
+  if (!supabase || typeof supabase.from !== 'function') return null;
+
+  try {
+    const targetStreet = cleanStreet || cleanArea;
+    const targetArea = cleanArea || 'عام';
+
+    const { data: existingRows } = await supabase
+      .from('visitation_streets')
+      .select('id, street_name, area_name')
+      .ilike('street_name', targetStreet)
+      .limit(5);
+
+    if (Array.isArray(existingRows) && existingRows.length > 0) {
+      const exactAreaMatch = existingRows.find(
+        r => String(r.area_name || '').trim().toLowerCase() === targetArea.toLowerCase()
+      );
+      return (exactAreaMatch || existingRows[0]).id;
+    }
+
+    const { data: inserted } = await supabase
+      .from('visitation_streets')
+      .insert([{
+        area_name: targetArea,
+        street_name: targetStreet,
+        sort_order: 0
+      }])
+      .select('id')
+      .single();
+
+    return inserted?.id || null;
+  } catch {
+    return null;
+  }
 }
 
 export default function UserFormModal({
@@ -78,7 +123,6 @@ export default function UserFormModal({
   effectiveGroups = [],
   services = [],
   deaconRanksTable = [],
-  streetsList: passedStreets = null,
   onClose,
   onSubmit,
   onVisitorSuccess
@@ -86,7 +130,6 @@ export default function UserFormModal({
   const [submittingVisitor, setSubmittingVisitor] = useState(false);
   const [visitorStatus, setVisitorStatus] = useState({ type: '', msg: '' });
   const [nameError, setNameError] = useState('');
-  const [streets, setStreets] = useState(Array.isArray(passedStreets) ? passedStreets : []);
 
   const initialDob = parseDobParts(formData.dob);
   const [dobDay, setDobDay] = useState(initialDob.day);
@@ -97,33 +140,6 @@ export default function UserFormModal({
     setVisitorStatus({ type: '', msg: '' });
     setNameError('');
   }, [isVisitorMode, isEditing]);
-
-  useEffect(() => {
-    if (Array.isArray(passedStreets) && passedStreets.length > 0) {
-      setStreets(passedStreets);
-      return;
-    }
-    let active = true;
-    (async () => {
-      try {
-        if (!supabase || typeof supabase.from !== 'function') return;
-        const { data, error } = await supabase
-          .from('visitation_streets')
-          .select('id, area_name, street_name, sort_order, assigned_priest_id, notes')
-          .order('sort_order', { ascending: true })
-          .order('area_name', { ascending: true })
-          .order('street_name', { ascending: true });
-        if (active && !error && Array.isArray(data)) {
-          setStreets(data);
-        }
-      } catch {
-        // ignore if table not created yet
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [passedStreets]);
 
   useEffect(() => {
     const parsed = parseDobParts(formData.dob);
@@ -319,7 +335,7 @@ export default function UserFormModal({
     });
   };
 
-  const buildStandardPayload = (forVisitor = false) => {
+  const buildStandardPayload = async (forVisitor = false) => {
     const f1 = sanitizeArabicNoSpace(formData.first_name || '');
     const f2 = sanitizeArabicNoSpace(formData.second_name || '');
     const f3 = sanitizeArabicNoSpace(formData.third_name || '');
@@ -356,24 +372,28 @@ export default function UserFormModal({
               : (formData.detailed_stage || '')));
 
     const resolvedClass = inService ? (formData.assigned_class || '') : '';
-    const selectedStreet = streets.find(st => String(st.id) === String(formData.street_id || '')) || null;
-    const effectiveSectorInput = (formData.sector || '').trim() || (selectedStreet?.area_name || '');
+    const cleanStreetInput = (formData.street_name || '').trim();
+    const cleanSectorInput = (formData.sector || '').trim();
 
     const resolvedSector =
       observer
-        ? (effectiveSectorInput || 'زائر موقع (خارج الخدمة)')
+        ? (cleanSectorInput || 'زائر موقع (خارج الخدمة)')
         : (resolvedEngagement === 'hall_meeting'
-            ? (effectiveSectorInput || 'اجتماع الصالة')
+            ? (cleanSectorInput || 'اجتماع الصالة')
             : (formData.role === 'parish' || guardianActive || resolvedEngagement === 'parish_only'
-                ? (effectiveSectorInput || 'شعب (رعية)')
-                : effectiveSectorInput));
+                ? (cleanSectorInput || 'شعب (رعية)')
+                : cleanSectorInput));
+
+    const resolvedStreetId =
+      formData.street_id ||
+      (await resolveOrCreateStreetId({ streetName: cleanStreetInput, sector: cleanSectorInput }));
 
     const cleanBuilding = (formData.building_no || '').trim();
     const cleanFloor = (formData.floor_no || '').trim();
     const cleanApartment = (formData.apartment_no || '').trim();
     const cleanAddressNotes = (formData.address_notes || '').trim();
     const resolvedAddress = composeFullAddress({
-      streetObj: selectedStreet,
+      streetName: cleanStreetInput,
       sector: resolvedSector,
       buildingNo: cleanBuilding,
       floorNo: cleanFloor,
@@ -420,7 +440,7 @@ export default function UserFormModal({
       phone: (formData.phone || '').trim(),
       job_title: formData.job_title || '',
       sector: resolvedSector,
-      street_id: formData.street_id || null,
+      street_id: resolvedStreetId,
       building_no: cleanBuilding || null,
       floor_no: cleanFloor || null,
       apartment_no: cleanApartment || null,
@@ -434,7 +454,8 @@ export default function UserFormModal({
         after_accept_action: observer ? 'click_out_non_member' : 'standard_access',
         view_parent_panel: guardianActive,
         ...(resolvedGuardianType ? { guardian_type: resolvedGuardianType } : {}),
-        ...(formData.street_id ? { street_id: formData.street_id } : {}),
+        ...(cleanStreetInput ? { street_name: cleanStreetInput } : {}),
+        ...(resolvedStreetId ? { street_id: resolvedStreetId } : {}),
         ...(cleanBuilding ? { building_no: cleanBuilding } : {}),
         ...(cleanFloor ? { floor_no: cleanFloor } : {}),
         ...(cleanApartment ? { apartment_no: cleanApartment } : {})
@@ -442,11 +463,12 @@ export default function UserFormModal({
     };
   };
 
-  const handleAdminFormSubmit = (e) => {
+  const handleAdminFormSubmit = async (e) => {
     e.preventDefault();
     if (!validateArabicQuadName()) return;
+    const payload = await buildStandardPayload(false);
     if (typeof onSubmit === 'function') {
-      onSubmit(e, buildStandardPayload(false));
+      onSubmit(e, payload);
     }
   };
 
@@ -467,9 +489,9 @@ export default function UserFormModal({
       return setVisitorStatus({ type: 'error', msg: 'يرجى إدخال رقم الهاتف.' });
     }
 
-    const builtPayload = buildStandardPayload(true);
+    const builtPayload = await buildStandardPayload(true);
     if (!(builtPayload.address || '').trim()) {
-      return setVisitorStatus({ type: 'error', msg: 'يرجى اختيار الشارع أو إدخال العنوان التفصيلي.' });
+      return setVisitorStatus({ type: 'error', msg: 'يرجى كتابة الشارع أو المنطقة أو العنوان التفصيلي.' });
     }
 
     setSubmittingVisitor(true);
@@ -1127,45 +1149,31 @@ export default function UserFormModal({
             </div>
           </div>
 
-          {/* بيانات السكن والربط بقاعدة بيانات الشوارع من أول تسجيل */}
+          {/* بيانات السكن والمنطقة والشارع (كتابة حرة مفتوحة للتخزين المباشر) */}
           <div className="bg-[#fbfaf7] p-3 rounded-2xl border border-amber-200 space-y-2.5">
             <div className="flex items-center justify-between gap-2">
               <strong className="text-[#7a1c24] font-extrabold">
-                🏠 بيانات السكن والشارع (مربوط بجدول الشوارع للفرز والافتقاد)
+                🏠 المنطقة والشارع وتفاصيل السكن (كتابة حرة مفتوحة وتخزين مباشر)
               </strong>
-              <span className="text-[10px] text-gray-500">اختياري تدريجياً لعدم تعطيل التسجيل</span>
+              <span className="text-[10px] text-gray-500">اكتب اسم الشارع أو المنطقة كما تريد تخزينه</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
-                <label className="block mb-1">الشارع (من جدول الشوارع)</label>
-                <select
+                <label className="block mb-1">اسم الشارع الأساسي (كتابة حرة)</label>
+                <input
+                  placeholder="مثال: أحمد جبر..."
                   className="w-full p-2.5 border rounded-xl bg-white"
-                  value={formData.street_id || ''}
-                  onChange={e => {
-                    const nextStreetId = e.target.value;
-                    const foundStreet = streets.find(st => String(st.id) === String(nextStreetId));
-                    setFormData(prev => ({
-                      ...prev,
-                      street_id: nextStreetId,
-                      sector: foundStreet?.area_name ? (prev.sector || foundStreet.area_name) : prev.sector
-                    }));
-                  }}
-                >
-                  <option value="">-- اختر الشارع / المنطقة --</option>
-                  {streets.map(st => (
-                    <option key={st.id} value={st.id}>
-                      {st.street_name} {st.area_name ? `(${st.area_name})` : ''} {st.sort_order ? `[ترتيب #${st.sort_order}]` : ''}
-                    </option>
-                  ))}
-                </select>
+                  value={formData.street_name || ''}
+                  onChange={e => setFormData({ ...formData, street_name: e.target.value, street_id: '' })}
+                />
               </div>
 
               <div>
-                <label className="block mb-1">القطاع / المنطقة</label>
+                <label className="block mb-1">المنطقة / القطاع الأساسي (كتابة حرة)</label>
                 <input
                   className="w-full p-2.5 border rounded-xl bg-white"
-                  placeholder="مثال: منطقة كذا..."
+                  placeholder="مثال: المنطقة الأساسية..."
                   value={formData.sector || ''}
                   onChange={e => setFormData({ ...formData, sector: e.target.value })}
                 />
