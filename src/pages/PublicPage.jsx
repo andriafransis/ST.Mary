@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { uploadChurchMedia } from '../lib/mediaUpload';
+import UserFormModal from './UserFormModal'; // أو المسار الصحيح حسب مكان الملف عندك
 import {
   Church, Radio, Calendar, MapPin, Bus, Layers,
   LogIn, UserPlus, X, ExternalLink, Newspaper, CheckCircle2,
