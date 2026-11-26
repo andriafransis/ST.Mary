@@ -1,10 +1,9 @@
-
 import { useState, useEffect, useRef } from 'react';
 import {
   Phone, Search, UserPlus, Calendar, MessageSquareText, Layers,
   MessageCircle, Users, MapPin, X, FileSpreadsheet,
   Plus, Pencil, LayoutGrid, List,
-  CheckCircle2, SlidersHorizontal, Camera, Cake, Award, MailPlus
+  CheckCircle2, SlidersHorizontal, Camera, Cake, Award, MailPlus, Bus
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import BirthdayBanner from '../components/BirthdayBanner';
@@ -160,6 +159,30 @@ const canManageOfficialSchedule = (user) => {
   );
 };
 
+const normalizeTripText = (val = '') =>
+  String(val || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/\s+/g, ' ');
+
+const isGeneralChurchTrip = (tr) => {
+  const tgt = normalizeTripText(tr?.target_service || tr?.stage_name || tr?.service_name || '');
+  const sc = normalizeTripText(tr?.trip_scope || tr?.scope_type || '');
+  return (
+    Boolean(tr?.is_general_trip) ||
+    sc === 'general' ||
+    sc === 'trips_office' ||
+    !tgt ||
+    tgt === 'عام' ||
+    tgt === 'رحلات عام' ||
+    tgt === 'مكتب الرحلات' ||
+    tgt.includes('مكتب الرحلات')
+  );
+};
+
 export default function ServantDashboard({
   servant, users = [], services = [], serviceGroups = [], activities = [], memberNotes = [], birthdays = [],
   onAddMember, onSaveActivity, onSaveMemberNote, onAcknowledgeNote, onRefresh, onUpdateServiceStructure
@@ -178,6 +201,9 @@ export default function ServantDashboard({
   const pendingPhotoMemberRef = useRef(null);
 
   const [birthdayTab, setBirthdayTab] = useState('members');
+
+  const [servantTrips, setServantTrips] = useState([]);
+  const [tripSubTab, setTripSubTab] = useState('my_service'); // 'my_service' | 'general'
 
   const [noteTags, setNoteTags] = useState(() => {
     try {
@@ -336,6 +362,27 @@ export default function ServantDashboard({
         }
         if (Number(data.value.rewardStreakThreshold) > 0) {
           setRewardStreakThreshold(Number(data.value.rewardStreakThreshold));
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!supabase || typeof supabase.from !== 'function') return;
+    let active = true;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('church_trips')
+          .select('*')
+          .order('trip_date', { ascending: true });
+        if (active && !error && Array.isArray(data)) {
+          setServantTrips(data);
         }
       } catch {
         // ignore
@@ -557,6 +604,9 @@ export default function ServantDashboard({
   const [editMode, setEditMode] = useState(false);
 
   const [newGroupName, setNewGroupName] = useState('');
+  const [newYearName, setNewYearName] = useState('');
+  const [newClassName, setNewClassName] = useState('');
+  const [newClassStage, setNewClassStage] = useState('');
 
   const defaultGenderScope = (() => {
     const saved = servant?.permissions?.service_gender_scope;
@@ -790,6 +840,93 @@ export default function ServantDashboard({
     setNewGroupName('');
   };
 
+  const handleAddYearToScope = () => {
+    const trimmed = newYearName.trim();
+    if (!trimmed || !selectedScope) return;
+
+    const existingGroup = localGroups.find(g => g.group_name === selectedScope);
+    let nextGroups;
+
+    if (existingGroup) {
+      const currentStages = normalizeGroupStages(existingGroup.stages);
+      if (currentStages.includes(trimmed)) {
+        setSelectedYearFilter(trimmed);
+        setNewYearName('');
+        return;
+      }
+      nextGroups = localGroups.map(g =>
+        g.group_name === selectedScope
+          ? { ...g, stages: [...currentStages, trimmed] }
+          : g
+      );
+    } else {
+      nextGroups = [
+        ...localGroups,
+        {
+          id: `grp-${Date.now()}`,
+          group_name: selectedScope,
+          icon: '📘',
+          stages: [trimmed]
+        }
+      ];
+    }
+
+    notifyStructureChange(nextGroups, localServices, {
+      type: 'add_year',
+      scope: selectedScope,
+      yearName: trimmed
+    });
+    setSelectedYearFilter(trimmed);
+    setNewClassStage(trimmed);
+    setNewYearName('');
+  };
+
+  const handleAddClassToScope = () => {
+    const trimmed = newClassName.trim();
+    if (!trimmed || !selectedScope) return;
+    const targetStage = (newClassStage || selectedYearFilter || selectedScope).trim();
+
+    if (localServices.some(s => s.class_name === trimmed && s.stage_name === targetStage)) {
+      setSelectedClassFilter(trimmed);
+      setNewClassName('');
+      return;
+    }
+
+    const createdService = {
+      id: `srv-${Date.now()}`,
+      class_name: trimmed,
+      stage_name: targetStage,
+      service_name: selectedScope
+    };
+
+    const nextServices = [...localServices, createdService];
+
+    let nextGroups = localGroups;
+    const grp = localGroups.find(g => g.group_name === selectedScope);
+    if (grp && targetStage && targetStage !== selectedScope) {
+      const currentStages = normalizeGroupStages(grp.stages);
+      if (!currentStages.includes(targetStage)) {
+        nextGroups = localGroups.map(g =>
+          g.group_name === selectedScope
+            ? { ...g, stages: [...currentStages, targetStage] }
+            : g
+        );
+      }
+    }
+
+    notifyStructureChange(nextGroups, nextServices, {
+      type: 'add_class',
+      scope: selectedScope,
+      yearName: targetStage,
+      classObj: createdService
+    });
+    if (targetStage && targetStage !== selectedScope) {
+      setSelectedYearFilter(targetStage);
+    }
+    setSelectedClassFilter(trimmed);
+    setNewClassName('');
+  };
+
   const displayedServiceTabs = showAllChurchServices
     ? availableServicesList
     : (servantBoundMainGroups.length > 0 ? servantBoundMainGroups : availableServicesList);
@@ -850,6 +987,36 @@ export default function ServantDashboard({
   const scopeMembers = allMembers.filter(m =>
     memberMatchesScope(m, selectedScope, selectedGenderFilter, selectedYearFilter, selectedClassFilter)
   );
+
+  // تقسيم الرحلات للخادم إلى: رحلات خدمتي ورحلات عام
+  const { generalTripsForServant, myServiceTripsForServant } = (() => {
+    const scopeTokens = [
+      selectedScope,
+      selectedYearFilter,
+      selectedClassFilter,
+      ...rawBoundTargets,
+      ...servantBoundMainGroups
+    ]
+      .map(normalizeTripText)
+      .filter(Boolean);
+
+    const gen = [];
+    const mine = [];
+
+    for (const tr of servantTrips) {
+      if (isGeneralChurchTrip(tr)) {
+        gen.push(tr);
+        continue;
+      }
+      const tgt = normalizeTripText(tr.target_service || tr.stage_name || tr.service_name || tr.assigned_class || '');
+      const matchesMine = scopeTokens.some(tok => tgt === tok || tgt.includes(tok) || tok.includes(tgt));
+      if (matchesMine) {
+        mine.push(tr);
+      }
+    }
+
+    return { generalTripsForServant: gen, myServiceTripsForServant: mine };
+  })();
 
   const currentScopeStructure = getScopeStructure(selectedScope);
   const currentYearObj = currentScopeStructure.years.find(y => y.yearName === selectedYearFilter) || null;
@@ -1279,12 +1446,14 @@ export default function ServantDashboard({
   }
 
   const activeBirthdayList = birthdayTab === 'members' ? currentMonthMemberBirthdays : currentMonthServantBirthdays;
+  const displayedServantTrips = tripSubTab === 'general' ? generalTripsForServant : myServiceTripsForServant;
 
   const tabsList = [
     { id: 'search', label: '🔍 كشف وبحث المخدومين', badge: scopeMembers.length },
     { id: 'attendance', label: '📋 تسجيل الحضور الفوري', badge: scopeMembers.length },
     { id: 'followup', label: '⚠️ افتقاد وغياب', badge: followUpMembers.length },
     { id: 'cases', label: '🤝 المتابعة وملاحظات الحالة', badge: caseTrackingMembers.length },
+    { id: 'trips', label: '🚌 الرحلات', badge: myServiceTripsForServant.length + generalTripsForServant.length },
     { id: 'analytics', label: '📊 تحليلات ومكافآت الشهر' },
     { id: 'birthdays', label: `🎂 أعياد الميلاد (${activeBirthdayList.length})` },
     { id: 'invite', label: '💌 دعوة لأبونا لمناسبة' }
@@ -1491,22 +1660,70 @@ export default function ServantDashboard({
         </div>
 
         {editMode && canManageStructure && (
-          <div className="bg-amber-50/70 p-3 rounded-2xl border border-amber-200 flex flex-wrap items-center gap-2 text-xs">
-            <span className="font-black text-amber-950">إضافة خدمة رئيسية:</span>
-            <input
-              type="text"
-              placeholder="مثال: خدمة إعدادي / خدمة ثانوي..."
-              className="px-3 py-1.5 bg-white border rounded-xl text-xs font-bold flex-1 min-w-[180px]"
-              value={newGroupName}
-              onChange={e => setNewGroupName(e.target.value)}
-            />
-            <button
-              type="button"
-              onClick={handleAddMainService}
-              className="px-3.5 py-1.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center gap-1 cursor-pointer"
-            >
-              <Plus size={14} /> إضافة
-            </button>
+          <div className="bg-amber-50/70 p-3 rounded-2xl border border-amber-200 space-y-2.5 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-black text-amber-950">إضافة خدمة رئيسية:</span>
+              <input
+                type="text"
+                placeholder="مثال: خدمة إعدادي / خدمة ثانوي..."
+                className="px-3 py-1.5 bg-white border rounded-xl text-xs font-bold flex-1 min-w-[180px]"
+                value={newGroupName}
+                onChange={e => setNewGroupName(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={handleAddMainService}
+                className="px-3.5 py-1.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center gap-1 cursor-pointer"
+              >
+                <Plus size={14} /> إضافة
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-amber-200/70">
+              <span className="font-black text-amber-950">إضافة سنة/مرحلة داخل ({selectedScope}):</span>
+              <input
+                type="text"
+                placeholder="مثال: أولى إعدادي / ثانية ثانوي..."
+                className="px-3 py-1.5 bg-white border rounded-xl text-xs font-bold flex-1 min-w-[160px]"
+                value={newYearName}
+                onChange={e => setNewYearName(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={handleAddYearToScope}
+                className="px-3 py-1.5 bg-amber-800 hover:bg-amber-900 text-white rounded-xl font-black flex items-center gap-1 cursor-pointer"
+              >
+                <Plus size={14} /> إضافة سنة
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-amber-200/70">
+              <span className="font-black text-blue-950">إضافة فصل داخل ({selectedScope}):</span>
+              <select
+                className="px-2.5 py-1.5 bg-white border rounded-xl text-xs font-bold"
+                value={newClassStage || selectedYearFilter || selectedScope}
+                onChange={e => setNewClassStage(e.target.value)}
+              >
+                <option value={selectedScope}>{selectedScope} (عام)</option>
+                {currentScopeStructure.years.map(yr => (
+                  <option key={yr.yearName} value={yr.yearName}>{yr.yearName}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                placeholder="اسم الفصل الجديد..."
+                className="px-3 py-1.5 bg-white border rounded-xl text-xs font-bold flex-1 min-w-[160px]"
+                value={newClassName}
+                onChange={e => setNewClassName(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={handleAddClassToScope}
+                className="px-3.5 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-xl font-black flex items-center gap-1 cursor-pointer"
+              >
+                <Plus size={14} /> إضافة فصل
+              </button>
+            </div>
           </div>
         )}
 
@@ -1715,6 +1932,81 @@ export default function ServantDashboard({
       )}
 
       <div ref={scrollBoxRef} className="max-h-[calc(100vh-270px)] overflow-y-auto pr-1 space-y-3">
+        {activeTab === 'trips' && (
+          <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+              <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5">
+                <Bus size={17} /> الرحلات المتاحة (رحلات خدمتي ورحلات عام)
+              </h3>
+              <div className="flex items-center gap-1.5 bg-[#fbfaf7] p-1 rounded-2xl border">
+                <button
+                  type="button"
+                  onClick={() => setTripSubTab('my_service')}
+                  className={`px-3.5 py-1.5 rounded-xl font-black text-xs cursor-pointer transition ${
+                    tripSubTab === 'my_service' ? 'bg-[#7a1c24] text-white' : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  رحلات خدمتي ({myServiceTripsForServant.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTripSubTab('general')}
+                  className={`px-3.5 py-1.5 rounded-xl font-black text-xs cursor-pointer transition ${
+                    tripSubTab === 'general' ? 'bg-[#7a1c24] text-white' : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  رحلات عام ({generalTripsForServant.length})
+                </button>
+              </div>
+            </div>
+
+            {displayedServantTrips.length === 0 ? (
+              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+                {tripSubTab === 'general'
+                  ? 'لا توجد رحلات عامة معلنة من مكتب الرحلات حالياً.'
+                  : 'لا توجد رحلات خاصة بخدمتك أو فصلك حالياً.'}
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {displayedServantTrips.map(tr => {
+                  const isOvernight = Number(tr.days_count || 1) > 1 || (Array.isArray(tr.rooms) && tr.rooms.length > 0);
+                  return (
+                    <div key={tr.id} className="p-4 bg-purple-50/40 border border-purple-200 rounded-2xl space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="px-2 py-0.5 bg-purple-100 text-purple-950 rounded-lg text-[10px] font-black">
+                            {tripSubTab === 'general'
+                              ? '🌐 رحلات عام (مكتب الرحلات)'
+                              : `🏫 رحلات خدمتي (${tr.target_service || selectedScope || 'خدمتي'})`}
+                          </span>
+                          <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded-lg text-[10px] font-bold">
+                            {tr.trip_category || 'رحلة'}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${
+                            isOvernight ? 'bg-indigo-100 text-indigo-950' : 'bg-amber-100 text-amber-950'
+                          }`}>
+                            {isOvernight ? `🌙 ${tr.days_count} أيام` : '☀️ يوم واحد'}
+                          </span>
+                          <strong className="text-sm text-gray-900">{tr.title}</strong>
+                        </div>
+                        <span className="text-xs font-bold text-gray-600">📅 {tr.trip_date || 'قريباً'}</span>
+                      </div>
+                      {tr.monasteries && (
+                        <p className="text-gray-800">⛪ <strong>الأماكن:</strong> {tr.monasteries}</p>
+                      )}
+                      {tr.daily_program && (
+                        <div className="p-3 bg-white border border-purple-100 rounded-xl text-gray-700 whitespace-pre-line">
+                          {tr.daily_program}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'analytics' && (
           <MonthlyAnalyticsAndRewards
             servant={servant}
@@ -1932,7 +2224,6 @@ export default function ServantDashboard({
                             )}
                           </div>
 
-                          {/* توضيح اسم ولي أمر المخدوم */}
                           <div className="bg-blue-50/70 border border-blue-200 px-2.5 py-1.5 rounded-xl flex flex-wrap items-center justify-between gap-2 text-[11px]">
                             <span className="font-black text-blue-950">
                               👤 {guardian.relationLabel}: <strong className="text-[#7a1c24]">{guardian.name}</strong>
