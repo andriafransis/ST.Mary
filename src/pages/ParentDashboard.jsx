@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
+import BellNotificationsPanel from '../components/priest/BellNotificationsPanel';
 import {
   CalendarCheck, MessageSquareHeart, ShieldCheck, Info, Calendar,
   MapPin, School, Search, UserCheck, Sparkles, X, Check, Unlink, RotateCcw, Bell,
@@ -518,6 +519,20 @@ export default function ParentDashboard({
 
   const linkAlertCount = linkRequests.length + (canManageLinks ? autoSuggestions.length : 0);
 
+  const bellNoteItems = visibleMemberNotes
+    .filter(n =>
+      linkedIds.has(n.member_id) &&
+      n.visible_to_parent !== false &&
+      !n.acknowledged &&
+      !ackedNoteIds.has(n.id)
+    )
+    .map(n => ({
+      id: n.id,
+      note_text: n.note_text,
+      behavior_tag: n.behavior_tag,
+      child_name: allUsers.find(u => String(u.id) === String(n.member_id))?.full_name || ''
+    }));
+
   const tabsList = [
     { id: 'children', label: `👨‍👩‍👦 الأبناء والمتابعة (${effectiveChildrenList.length})` },
     { id: 'my_invites', label: 'دعواتي QR', badge: receivedInvitesCount },
@@ -568,6 +583,19 @@ export default function ParentDashboard({
         </div>
 
         <div className="grid grid-cols-2 sm:flex items-center gap-2 shrink-0">
+          <div className="col-span-2 sm:col-span-1 flex justify-center">
+            <BellNotificationsPanel
+              role="parent"
+              currentUser={parent}
+              allUsers={allUsers}
+              linkRequests={linkRequests}
+              noteItems={bellNoteItems}
+              birthdayItems={effectiveChildrenList}
+              trips={[...childrenTripsForParent, ...generalTripsForParent]}
+              todayISO={new Date().toLocaleDateString('en-CA')}
+              onNavigateCard={(cardId) => setActiveTab(cardId)}
+            />
+          </div>
           <div className="bg-white/15 border border-white/15 px-3.5 py-2 rounded-2xl text-center">
             <span className="text-[10px] opacity-85 font-bold block">الأبناء المربوطون</span>
             <strong className="text-sm sm:text-base text-amber-200 font-black">{effectiveChildrenList.length}</strong>

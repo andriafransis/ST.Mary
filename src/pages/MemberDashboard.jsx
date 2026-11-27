@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLogger';
 import PriestInvitationModal from '../components/priest/PriestInvitationModal';
 import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
+import BellNotificationsPanel from '../components/priest/BellNotificationsPanel';
 import {
   Phone, AlertCircle, CheckCircle2, Calendar, BookOpen,
   Clock, UserCheck, MessageCircle, Bus, MapPin, Layers, XCircle, MailPlus, QrCode, X, RefreshCw, Download, ShieldCheck, User
@@ -838,6 +839,19 @@ export default function MemberDashboard({
         </div>
 
         <div className="grid grid-cols-2 sm:flex items-center gap-2.5 shrink-0">
+          <div className="col-span-2 sm:col-span-1 flex justify-center">
+            <BellNotificationsPanel
+              role="member"
+              currentUser={member}
+              confessionBookings={myBookings}
+              masses={priestMasses}
+              trips={[...myServiceTrips, ...generalTrips]}
+              registeredTripIds={myTripRegs.map(r => r.trip_id)}
+              needsConfessionFather={!member?.confession_father_id}
+              todayISO={todayISO}
+              onNavigateCard={(cardId) => setActiveTab(cardId)}
+            />
+          </div>
           <div className="bg-white/15 border border-white/15 px-3.5 py-2 rounded-2xl text-center">
             <span className="text-[10px] opacity-85 font-bold block">حجوزات الاعتراف</span>
             <strong className="text-sm sm:text-base text-white font-black">{activeBookingsCount}</strong>

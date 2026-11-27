@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase';
 import { canScanChurchInvitations, canSendChurchInvitations } from '../lib/permissions';
 import { isScoutServant } from '../utils/scoutAccess';
 import BirthdayBanner from '../components/BirthdayBanner';
+import BellNotificationsPanel from '../components/priest/BellNotificationsPanel';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
 import { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/ServiceGroupFeed';
 import MonthlyAnalyticsAndRewards from '../components/MonthlyAnalyticsAndRewards';
@@ -1563,6 +1564,15 @@ export default function ServantDashboard({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <BellNotificationsPanel
+            role="servant"
+            currentUser={servant}
+            followUpItems={followUpMembers}
+            birthdayItems={scopeMembers}
+            trips={[...myServiceTripsForServant, ...generalTripsForServant]}
+            todayISO={new Date().toLocaleDateString('en-CA')}
+            onNavigateCard={(cardId) => setActiveTab(cardId)}
+          />
           {canScanInvitations && (
             <button
               type="button"
