@@ -18,7 +18,8 @@ import {
   VolumeX,
   LogIn,
   LogOut,
-  Ticket
+  Ticket,
+  ImagePlus
 } from 'lucide-react';
 
 const ROLE_AR_LABELS = {
@@ -29,6 +30,7 @@ const ROLE_AR_LABELS = {
   servant: 'خادم مرحلة',
   meeting_servant: 'خادم اجتماع',
   mercy_servant: 'خادم إخوة رب',
+  deacon: 'شماس',
   member: 'مخدوم',
   parent: 'ولي أمر',
   worker: 'عامل / فراش'
@@ -61,7 +63,7 @@ function playFeedbackTone(kind = 'success', enabled = true) {
     const gain = ctx.createGain();
     osc.type = kind === 'success' ? 'sine' : 'triangle';
     osc.frequency.value = kind === 'success' ? 880 : 320;
-    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.setValueAtTime(0.14, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
     osc.connect(gain);
     gain.connect(ctx.destination);
@@ -95,7 +97,7 @@ export function parseQrContent(rawText = '') {
         };
       }
 
-      const token = String(parsed.token || parsed.qr_token || parsed.code || '').trim();
+      const token = String(parsed.token || parsed.qr_token || parsed.code || parsed.id || '').trim();
       return {
         kind: 'invitation',
         token,
@@ -134,10 +136,15 @@ export function parseQrContent(rawText = '') {
   };
 }
 
-export default function InvitationScannerModal({ currentUser, onClose, initialTab = 'invitations' }) {
+export default function InvitationScannerModal({
+  currentUser,
+  onClose,
+  initialTab = 'invitations'
+}) {
   const scannerRef = useRef(null);
   const isProcessingRef = useRef(false);
   const isStartingRef = useRef(false);
+  const lastRawRef = useRef({ text: '', at: 0 });
   const soundEnabledRef = useRef(true);
   const activeTabRef = useRef(initialTab);
   const attendanceModeRef = useRef('auto');
@@ -191,9 +198,8 @@ export default function InvitationScannerModal({ currentUser, onClose, initialTa
       if (Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
         advanced.push({ focusMode: 'continuous' });
       }
-      if (caps.zoom && typeof caps.zoom.min === 'number') {
-        const targetZoom = Math.min(caps.zoom.max || 1, Math.max(caps.zoom.min, 1));
-        if (targetZoom > 1) advanced.push({ zoom: targetZoom });
+      if (Array.isArray(caps.exposureMode) && caps.exposureMode.includes('continuous')) {
+        advanced.push({ exposureMode: 'continuous' });
       }
       if (advanced.length > 0 && typeof track.applyConstraints === 'function') {
         await track.applyConstraints({ advanced }).catch(() => {});
@@ -235,24 +241,37 @@ export default function InvitationScannerModal({ currentUser, onClose, initialTa
         if (!containerEl) return;
         containerEl.innerHTML = '';
 
-        const html5QrCode = new Html5Qrcode(readerId, { verbose: false });
+        const html5QrCode = new Html5Qrcode(readerId, {
+          verbose: false,
+          experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true
+          }
+        });
         scannerRef.current = html5QrCode;
 
-        const boxSize = Math.min(
-          270,
-          Math.max(190, Math.floor((containerEl.clientWidth || 320) * 0.72))
-        );
+        const containerW = containerEl.clientWidth || 340;
+        const boxSize = Math.min(310, Math.max(220, Math.floor(containerW * 0.82)));
 
         await html5QrCode.start(
-          { facingMode: targetFacing },
           {
-            fps: 15,
+            facingMode: { ideal: targetFacing },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          {
+            fps: 22,
             qrbox: { width: boxSize, height: boxSize },
-            aspectRatio: 1.333333,
             disableFlip: false
           },
           (decodedText) => {
-            processAnyScan(decodedText);
+            const cleaned = String(decodedText || '').trim();
+            if (!cleaned) return;
+            const now = Date.now();
+            if (lastRawRef.current.text === cleaned && now - lastRawRef.current.at < 1200) {
+              return;
+            }
+            lastRawRef.current = { text: cleaned, at: now };
+            processAnyScan(cleaned);
           },
           () => {}
         );
@@ -260,12 +279,12 @@ export default function InvitationScannerModal({ currentUser, onClose, initialTa
         setCameraStatus('active');
         setTimeout(() => {
           applyContinuousFocusIfSupported(html5QrCode);
-        }, 400);
+        }, 300);
       } catch (err) {
         setCameraStatus('error');
         setCameraErrorMsg(
           err?.message ||
-            'تعذر تشغيل الكاميرا أو لم يتم السماح بالوصول إليها. يمكنك استخدام الإدخال اليدوي بالأسفل.'
+            'تعذر تشغيل الكاميرا أو لم يتم السماح بالوصول إليها. يمكنك استخدام قراءة صورة أو الإدخال اليدوي.'
         );
       } finally {
         isStartingRef.current = false;
@@ -282,11 +301,31 @@ export default function InvitationScannerModal({ currentUser, onClose, initialTa
     };
   }, [facingMode, startScanner, stopScannerSafe]);
 
+  const handleScanImageFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !scannerRef.current) return;
+
+    try {
+      const decodedText = await scannerRef.current.scanFile(file, true);
+      if (decodedText) {
+        await processAnyScan(decodedText);
+      }
+    } catch {
+      playFeedbackTone('error', soundEnabledRef.current);
+      setScanResult({
+        kind: 'error',
+        title: 'تعذر قراءة كود QR من الصورة',
+        message: 'حاول التقاط صورة أوضح للـ QR بدون انعكاس إضاءة قوي على الشاشة.'
+      });
+    }
+  };
+
   const handleInvitationScan = async (token, embedded) => {
     const { data: invite, error } = await supabase
       .from('church_invitations')
       .select('*')
-      .eq('qr_token', token)
+      .or(`qr_token.eq.${token},id.eq.${token}`)
       .maybeSingle();
 
     if (error || !invite) {
@@ -457,7 +496,8 @@ export default function InvitationScannerModal({ currentUser, onClose, initialTa
       return;
     }
 
-    const memberName = member.full_name || member.name || member.username || memberInfo?.full_name || 'عضو';
+    const memberName =
+      member.full_name || member.name || member.username || memberInfo?.full_name || 'عضو';
     const memberRoleLabel =
       member.permissions?.custom_role_label ||
       ROLE_AR_LABELS[member.role] ||
@@ -621,7 +661,7 @@ export default function InvitationScannerModal({ currentUser, onClose, initialTa
     } finally {
       setTimeout(() => {
         isProcessingRef.current = false;
-      }, 1100);
+      }, 900);
     }
   };
 
@@ -647,14 +687,15 @@ export default function InvitationScannerModal({ currentUser, onClose, initialTa
       dir="rtl"
     >
       <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl p-4 sm:p-5 space-y-4 text-xs max-h-[94vh] overflow-y-auto">
-        {/* الهيدر وبيانات القائم بالمسح */}
         <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
           <div className="flex items-center gap-2.5 text-[#7a1c24]">
             <div className="p-2.5 rounded-2xl bg-[#f9ecee]">
               <ScanLine size={20} />
             </div>
             <div>
-              <h3 className="text-sm sm:text-base font-black">سكان QR للدعوات والحضور والانصراف</h3>
+              <h3 className="text-sm sm:text-base font-black">
+                سكان QR للدعوات والحضور والانصراف
+              </h3>
               <p className="text-[11px] text-gray-500 flex items-center gap-1 flex-wrap mt-0.5">
                 <UserCheck size={12} className="text-emerald-700" />
                 <span>القائم بالمسح:</span>
@@ -685,7 +726,6 @@ export default function InvitationScannerModal({ currentUser, onClose, initialTa
           </div>
         </div>
 
-        {/* التبديل بين مسح الدعوات وحضور/انصراف الخدام والمخدومين */}
         <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-2xl">
           <button
             type="button"
@@ -711,7 +751,6 @@ export default function InvitationScannerModal({ currentUser, onClose, initialTa
           </button>
         </div>
 
-        {/* خيارات وضع الحضور والانصراف عند اختيار تبويب الحضور */}
         {activeTab === 'attendance' && (
           <div className="flex flex-wrap items-center justify-between gap-2 bg-amber-50/80 border border-amber-200 px-3 py-2 rounded-2xl">
             <span className="text-[11px] font-bold text-amber-950">وضع التسجيل:</span>
@@ -753,51 +792,63 @@ export default function InvitationScannerModal({ currentUser, onClose, initialTa
           </div>
         )}
 
-        {/* أزرار التحكم في الكاميرا والفوكس */}
         <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-3 py-2 rounded-2xl border">
           <span className="text-[11px] font-bold text-slate-700">
             الكاميرا الحالية:{' '}
             <strong className="text-[#7a1c24]">
               {facingMode === 'environment' ? 'الخلفية' : 'الأمامية'}
             </strong>
+            <span className="text-gray-500 font-normal">
+              {' '}
+              • أبعِد الموبايل قليلاً عن شاشة الهاتف لتجنب انعكاس الضوء
+            </span>
           </span>
           <div className="flex items-center gap-1.5">
+            <label className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-xl font-bold text-[11px] flex items-center gap-1 cursor-pointer">
+              <ImagePlus size={13} /> قراءة صورة
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleScanImageFile}
+                className="hidden"
+              />
+            </label>
             <button
               type="button"
               onClick={handleSwitchCamera}
               className="px-2.5 py-1.5 bg-white hover:bg-gray-100 border rounded-xl font-bold text-[11px] flex items-center gap-1 cursor-pointer"
             >
-              <SwitchCamera size={13} /> تبديل الكاميرا
+              <SwitchCamera size={13} /> تبديل
             </button>
             <button
               type="button"
               onClick={() => startScanner(facingMode)}
               className="px-2.5 py-1.5 bg-white hover:bg-gray-100 border rounded-xl font-bold text-[11px] flex items-center gap-1 cursor-pointer"
             >
-              <RefreshCw size={13} /> إعادة ضبط / فوكس
+              <RefreshCw size={13} /> فوكس
             </button>
           </div>
         </div>
 
-        {/* منطقة الكاميرا */}
         <div className="bg-slate-950 rounded-2xl overflow-hidden relative border border-slate-800">
           <div
             id="church-qr-scanner-box"
-            className="w-full [&>video]:w-full [&>video]:h-[270px] [&>video]:object-cover [&>canvas]:hidden"
+            className="w-full [&>video]:w-full [&>video]:h-[290px] [&>video]:object-cover [&>canvas]:hidden"
           />
 
           {cameraStatus === 'active' && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="w-52 h-52 border-2 border-emerald-400/90 rounded-2xl shadow-[0_0_0_9999px_rgba(2,6,23,0.35)] relative">
+              <div className="w-60 h-60 border-2 border-emerald-400/90 rounded-2xl shadow-[0_0_0_9999px_rgba(2,6,23,0.3)] relative">
                 <span className="absolute -bottom-7 inset-x-0 text-center text-[11px] font-bold text-white drop-shadow">
-                  ضع رمز الـ QR داخل الإطار
+                  وجّه الكاميرا نحو شاشة الـ QR
                 </span>
               </div>
             </div>
           )}
 
           {cameraStatus !== 'active' && (
-            <div className="min-h-[250px] flex flex-col items-center justify-center p-5 text-center space-y-2">
+            <div className="min-h-[260px] flex flex-col items-center justify-center p-5 text-center space-y-2">
               <span className="text-slate-200 text-xs font-bold">
                 {cameraStatus === 'starting'
                   ? 'جاري تشغيل الكاميرا وضبط التركيز...'
@@ -816,7 +867,6 @@ export default function InvitationScannerModal({ currentUser, onClose, initialTa
           )}
         </div>
 
-        {/* إدخال يدوي احتياطي */}
         <form onSubmit={handleManualSubmit} className="flex gap-2">
           <div className="relative flex-1">
             <Search size={14} className="absolute right-3 top-3 text-gray-400" />
@@ -840,7 +890,6 @@ export default function InvitationScannerModal({ currentUser, onClose, initialTa
           </button>
         </form>
 
-        {/* نتيجة المسح */}
         {scanResult && (
           <div
             className={`p-4 rounded-2xl border-2 space-y-2.5 ${
@@ -852,8 +901,12 @@ export default function InvitationScannerModal({ currentUser, onClose, initialTa
             }`}
           >
             <div className="flex items-center gap-2 font-black text-sm">
-              {scanResult.kind === 'success' && <CheckCircle2 size={18} className="text-emerald-700" />}
-              {scanResult.kind === 'warning' && <AlertTriangle size={18} className="text-amber-700" />}
+              {scanResult.kind === 'success' && (
+                <CheckCircle2 size={18} className="text-emerald-700" />
+              )}
+              {scanResult.kind === 'warning' && (
+                <AlertTriangle size={18} className="text-amber-700" />
+              )}
               {scanResult.kind === 'error' && <XCircle size={18} className="text-red-700" />}
               <span>{scanResult.title}</span>
             </div>
@@ -868,25 +921,28 @@ export default function InvitationScannerModal({ currentUser, onClose, initialTa
                       {scanResult.invite?.recipient_name || scanResult.embedded?.recipient_name}
                     </strong>
                     <span className="text-gray-600 block">
-                      {(scanResult.invite?.recipient_role || scanResult.embedded?.recipient_role)
+                      {scanResult.invite?.recipient_role || scanResult.embedded?.recipient_role
                         ? `${scanResult.invite?.recipient_role || scanResult.embedded?.recipient_role} • `
                         : ''}
                       {scanResult.invite?.event_title || scanResult.embedded?.event_title || ''}
                     </span>
                     {(scanResult.invite?.seat_or_zone || scanResult.embedded?.seat_or_zone) && (
                       <span className="text-[11px] font-bold text-[#7a1c24] block mt-0.5">
-                        المكان / المقعد: {scanResult.invite?.seat_or_zone || scanResult.embedded?.seat_or_zone}
+                        المكان / المقعد:{' '}
+                        {scanResult.invite?.seat_or_zone || scanResult.embedded?.seat_or_zone}
                       </span>
                     )}
                   </div>
                   <span
                     className={`px-3 py-1 rounded-xl font-black flex items-center gap-1 ${
-                      (scanResult.invite?.invite_tier || scanResult.embedded?.invite_tier) === 'vip'
+                      (scanResult.invite?.invite_tier || scanResult.embedded?.invite_tier) ===
+                      'vip'
                         ? 'bg-amber-400 text-[#4a0e13]'
                         : 'bg-slate-200 text-slate-800'
                     }`}
                   >
-                    {(scanResult.invite?.invite_tier || scanResult.embedded?.invite_tier) === 'vip' ? (
+                    {(scanResult.invite?.invite_tier || scanResult.embedded?.invite_tier) ===
+                    'vip' ? (
                       <Crown size={13} />
                     ) : (
                       <Users size={13} />
@@ -922,7 +978,6 @@ export default function InvitationScannerModal({ currentUser, onClose, initialTa
           </div>
         )}
 
-        {/* سجل العمليات في الجلسة */}
         {recentLogs.length > 0 && (
           <div className="space-y-1.5 pt-1">
             <strong className="text-gray-800 block">
