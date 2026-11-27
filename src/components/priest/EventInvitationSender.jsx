@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { logActivity } from '../../lib/activityLogger';
+import { showMobileNotification } from '../../lib/mobileNotifications';
 import {
   Send,
   Crown,
@@ -136,6 +137,54 @@ export default function EventInvitationSender({
       .join('\n');
   };
 
+  const pushLinkedNotifications = async (createdList) => {
+    if (!supabase || typeof supabase.from !== 'function' || createdList.length === 0) return;
+
+    const nowIso = new Date().toISOString();
+    const isGeneralAll = audienceMode === 'all_parish';
+
+    const notifRows = isGeneralAll
+      ? [
+          {
+            title: `${eventType}: ${eventTitle.trim()}`,
+            message: `${inviteTier === 'vip' ? 'دعوة VIP • ' : ''}${
+              eventDate ? `التاريخ: ${eventDate} ` : ''
+            }${eventTime ? `• الموعد: ${eventTime} ` : ''}${
+              location ? `• المكان: ${location}` : ''
+            }`.trim(),
+            type: 'general',
+            category: eventType,
+            is_general: true,
+            target_card: 'invitations',
+            created_at: nowIso
+          }
+        ]
+      : createdList.map((inv) => ({
+          title: `دعوة ${inv.event_type || 'مناسبة'}: ${inv.event_title}`,
+          message: `مدعو: ${inv.recipient_name}${
+            inv.seat_or_zone ? ` • ${inv.seat_or_zone}` : ''
+          }${inv.event_date ? ` • ${inv.event_date}` : ''}`,
+          type: 'invitation',
+          category: inv.invite_tier === 'vip' ? 'دعوة VIP' : 'دعوة مناسبة',
+          is_general: false,
+          target_user_id: inv.recipient_user_id || null,
+          target_service: audienceMode === 'service' ? selectedServiceToken : null,
+          target_card: 'invitations',
+          created_at: nowIso
+        }));
+
+    await supabase
+      .from('church_notifications')
+      .insert(notifRows)
+      .then(() => null, () => null);
+
+    await showMobileNotification({
+      title: `تم إرسال دعوات ${eventTitle.trim()}`,
+      body: `تم إرسال (${createdList.length}) دعوة وتسجيل الإشعارات بنجاح.`,
+      tag: 'church-invitations-sent'
+    });
+  };
+
   const handleSendInvitations = async (e) => {
     e.preventDefault();
 
@@ -187,6 +236,7 @@ export default function EventInvitationSender({
 
       const createdList = Array.isArray(data) && data.length > 0 ? data : payloadRows;
       setSentBatch(createdList);
+      await pushLinkedNotifications(createdList);
 
       logActivity({
         user: currentUser,
