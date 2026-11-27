@@ -3,9 +3,26 @@ import { supabase } from '../lib/supabase';
 import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
 import BellNotificationsPanel from '../components/priest/BellNotificationsPanel';
 import {
-  CalendarCheck, MessageSquareHeart, ShieldCheck, Info, Calendar,
-  MapPin, School, Search, UserCheck, Sparkles, X, Check, Unlink, RotateCcw, Bell,
-  Award, Gift, Link2, MailPlus, Bus, QrCode
+  CalendarCheck,
+  MessageSquareHeart,
+  ShieldCheck,
+  Info,
+  Calendar,
+  MapPin,
+  School,
+  Search,
+  UserCheck,
+  Sparkles,
+  X,
+  Check,
+  Unlink,
+  RotateCcw,
+  Bell,
+  Award,
+  Gift,
+  Link2,
+  Bus,
+  QrCode
 } from 'lucide-react';
 
 export const isArabicOnlyName = (value = '') => {
@@ -22,7 +39,9 @@ export const validateQuadArabicName = ({
   fourth_name = '',
   full_name = ''
 }) => {
-  const parts = [first_name, second_name, third_name, fourth_name].map(p => String(p || '').trim());
+  const parts = [first_name, second_name, third_name, fourth_name].map((p) =>
+    String(p || '').trim()
+  );
   const hasPartInput = parts.some(Boolean);
 
   if (hasPartInput) {
@@ -32,7 +51,10 @@ export const validateQuadArabicName = ({
         return { valid: false, error: `يرجى كتابة ${labels[i]} باللغة العربية.` };
       }
       if (!isArabicOnlyName(parts[i])) {
-        return { valid: false, error: `${labels[i]} يجب أن يكون باللغة العربية فقط (ممنوع الإنجليزي).` };
+        return {
+          valid: false,
+          error: `${labels[i]} يجب أن يكون باللغة العربية فقط (ممنوع الإنجليزي).`
+        };
       }
     }
     return { valid: true, fullName: parts.join(' ') };
@@ -41,10 +63,16 @@ export const validateQuadArabicName = ({
   const normalizedFull = String(full_name || '').trim().replace(/\s+/g, ' ');
   const words = normalizedFull.split(' ').filter(Boolean);
   if (words.length < 4) {
-    return { valid: false, error: 'يرجى كتابة الاسم الرباعي كاملاً (4 أسماء) باللغة العربية.' };
+    return {
+      valid: false,
+      error: 'يرجى كتابة الاسم الرباعي كاملاً (4 أسماء) باللغة العربية.'
+    };
   }
   if (!isArabicOnlyName(normalizedFull)) {
-    return { valid: false, error: 'الاسم الرباعي يجب أن يكون باللغة العربية فقط (ممنوع الإنجليزي).' };
+    return {
+      valid: false,
+      error: 'الاسم الرباعي يجب أن يكون باللغة العربية فقط (ممنوع الإنجليزي).'
+    };
   }
 
   return { valid: true, fullName: normalizedFull };
@@ -63,6 +91,8 @@ const normalizeArabic = (str = '') =>
 
 const normalizePhone = (phone = '') => {
   const digits = String(phone).replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('0020') && digits.length >= 13) return '0' + digits.slice(4);
   if (digits.startsWith('20') && digits.length === 12) return '0' + digits.slice(2);
   if (digits.length === 10 && digits.startsWith('1')) return '0' + digits;
   return digits;
@@ -71,7 +101,7 @@ const normalizePhone = (phone = '') => {
 const getNameTokens = (user) => {
   if (!user) return [];
   const combinedSplit = [user.first_name, user.second_name, user.third_name, user.fourth_name]
-    .map(s => (s || '').trim())
+    .map((s) => (s || '').trim())
     .filter(Boolean)
     .join(' ');
   const source = (user.full_name || '').trim() || combinedSplit;
@@ -96,11 +126,31 @@ const detectParentIsMother = (parent) => {
   ) {
     return false;
   }
-  if (parent.family_role === 'أم' || parent.family_role === 'الأم' || parent.family_role === 'والدة') {
+  if (
+    parent.family_role === 'أم' ||
+    parent.family_role === 'الأم' ||
+    parent.family_role === 'والدة'
+  ) {
     return true;
   }
   const firstToken = normalizeArabic(parent.first_name || getNameTokens(parent)[0] || '');
-  return ['مدام', 'ام', 'مريم', 'ماري', 'ايريني', 'ايزيس', 'هناء', 'سوزان', 'ناهد', 'نجلاء', 'داليا', 'مونيكا', 'كريستين', 'فيفيان', 'نادية'].includes(firstToken);
+  return [
+    'مدام',
+    'ام',
+    'مريم',
+    'ماري',
+    'ايريني',
+    'ايزيس',
+    'هناء',
+    'سوزان',
+    'ناهد',
+    'نجلاء',
+    'داليا',
+    'مونيكا',
+    'كريستين',
+    'فيفيان',
+    'نادية'
+  ].includes(firstToken);
 };
 
 const isCandidateLinkedToCurrentParent = (parent, candidate) => {
@@ -121,17 +171,34 @@ const isCandidateBlockedByOtherParent = (parent, candidate, isMother, existingUs
   const cMother = normalizeArabic(candidate.mother_full_name);
 
   if (isMother) {
-    if (cMother && pName && (cMother === pName || cMother.startsWith(pName) || pName.startsWith(cMother))) {
-      return false;
-    }
-    return Boolean(candidate.mother_id && candidate.mother_id !== parent.id && existingUserIds.has(candidate.mother_id));
-  } else {
-    if (cFather && pName && (cFather === pName || cFather.startsWith(pName) || pName.startsWith(cFather))) {
+    if (
+      cMother &&
+      pName &&
+      (cMother === pName || cMother.startsWith(pName) || pName.startsWith(cMother))
+    ) {
       return false;
     }
     return Boolean(
-      (candidate.father_id && candidate.father_id !== parent.id && existingUserIds.has(candidate.father_id)) ||
-      (!candidate.mother_id && candidate.parent_id && candidate.parent_id !== parent.id && existingUserIds.has(candidate.parent_id))
+      candidate.mother_id &&
+        candidate.mother_id !== parent.id &&
+        existingUserIds.has(candidate.mother_id)
+    );
+  } else {
+    if (
+      cFather &&
+      pName &&
+      (cFather === pName || cFather.startsWith(pName) || pName.startsWith(cFather))
+    ) {
+      return false;
+    }
+    return Boolean(
+      (candidate.father_id &&
+        candidate.father_id !== parent.id &&
+        existingUserIds.has(candidate.father_id)) ||
+        (!candidate.mother_id &&
+          candidate.parent_id &&
+          candidate.parent_id !== parent.id &&
+          existingUserIds.has(candidate.parent_id))
     );
   }
 };
@@ -153,8 +220,8 @@ const getAutoMatchReason = (parent, candidate, isMother) => {
     if (pSpousePhone && cMotherPhone && pSpousePhone === cMotherPhone) return 'تطابق رقم تليفون الأم';
   }
 
-  const allParentPhones = [pOwnPhone, pSpousePhone].filter(p => p.length >= 8);
-  if (allParentPhones.some(p => cOwnPhone && p === cOwnPhone)) {
+  const allParentPhones = [pOwnPhone, pSpousePhone].filter((p) => p.length >= 8);
+  if (allParentPhones.some((p) => cOwnPhone && p === cOwnPhone)) {
     return 'تطابق رقم التليفون المسجل';
   }
 
@@ -172,7 +239,13 @@ const getAutoMatchReason = (parent, candidate, isMother) => {
   const cMother = normalizeArabic(candidate.mother_full_name);
 
   if (isMother) {
-    if (cMother && (cMother === pName || pName.startsWith(cMother) || cMother.startsWith(pName) || (pTokens.length >= 2 && cMother.startsWith(pTokens.slice(0, 2).join(' '))))) {
+    if (
+      cMother &&
+      (cMother === pName ||
+        pName.startsWith(cMother) ||
+        cMother.startsWith(pName) ||
+        (pTokens.length >= 2 && cMother.startsWith(pTokens.slice(0, 2).join(' '))))
+    ) {
       return 'تطابق اسم الأم المسجل للابن';
     }
     const spouseNorm = normalizeArabic(parent.spouse_name);
@@ -180,21 +253,32 @@ const getAutoMatchReason = (parent, candidate, isMother) => {
       return 'تطابق اسم الأب/الزوج المسجل';
     }
   } else {
-    if (cFather && (cFather === pName || (pTokens.length >= 2 && cFather.startsWith(pTokens.slice(0, 2).join(' '))))) {
+    if (
+      cFather &&
+      (cFather === pName || (pTokens.length >= 2 && cFather.startsWith(pTokens.slice(0, 2).join(' '))))
+    ) {
       return 'تطابق اسم الأب بالكامل';
     }
 
-    const cLineageTokens = cTokens.length > 1
-      ? cTokens.slice(1)
-      : [cSecond, cThird, cFourth].filter(Boolean);
+    const cLineageTokens =
+      cTokens.length > 1 ? cTokens.slice(1) : [cSecond, cThird, cFourth].filter(Boolean);
     const cLineageStr = cLineageTokens.join(' ');
 
     if (pTokens.length >= 2) {
       const pFirstTwo = pTokens.slice(0, 2).join(' ');
-      if (cLineageTokens.length >= 2 && cLineageTokens[0] === pTokens[0] && cLineageTokens[1] === pTokens[1]) {
+      if (
+        cLineageTokens.length >= 2 &&
+        cLineageTokens[0] === pTokens[0] &&
+        cLineageTokens[1] === pTokens[1]
+      ) {
         return `تطابق نسب الابن (${cFirst} ← ${pTokens[0]} ${pTokens[1]})`;
       }
-      if (cLineageStr && (cLineageStr === pName || pName.startsWith(cLineageStr) || cLineageStr.startsWith(pFirstTwo))) {
+      if (
+        cLineageStr &&
+        (cLineageStr === pName ||
+          pName.startsWith(cLineageStr) ||
+          cLineageStr.startsWith(pFirstTwo))
+      ) {
         return 'تطابق الاسم الرباعي تحت اسم الأب';
       }
     } else if (pTokens.length === 1 && pTokens[0].length >= 3) {
@@ -305,6 +389,8 @@ export default function ParentDashboard({
   useEffect(() => {
     if (!parent?.id || !supabase || typeof supabase.channel !== 'function') return;
 
+    const normParentPhone = normalizePhone(parent.phone);
+
     const channel = supabase
       .channel(`parent-invites-alert-${parent.id}`)
       .on(
@@ -318,16 +404,20 @@ export default function ParentDashboard({
           const row = payload.new || payload.old;
           const matchesParent =
             row?.recipient_user_id === parent.id ||
-            (parent.phone && row?.recipient_phone === parent.phone);
+            (normParentPhone && normalizePhone(row?.recipient_phone) === normParentPhone);
           if (!matchesParent) return;
 
           if (payload.eventType === 'INSERT' && payload.new) {
             const tierLabel = payload.new.invite_tier === 'vip' ? 'VIP' : 'عامة';
             setLiveInviteToast(
-              `وصلتك دعوة ${tierLabel}: ${payload.new.event_title}${payload.new.seat_or_zone ? ` (${payload.new.seat_or_zone})` : ''} — كود: ${payload.new.qr_token}`
+              `وصلتك دعوة ${tierLabel}: ${payload.new.event_title}${
+                payload.new.seat_or_zone ? ` (${payload.new.seat_or_zone})` : ''
+              } — كود: ${payload.new.qr_token}`
             );
           } else if (payload.eventType === 'UPDATE' && payload.new?.status === 'checked_in') {
-            setLiveInviteToast(`تم مسح QR الدعوة (${payload.new.event_title}) وتسجيل الدخول.`);
+            setLiveInviteToast(
+              `تم مسح QR الدعوة (${payload.new.event_title}) وتسجيل الدخول.`
+            );
           }
         }
       )
@@ -342,8 +432,8 @@ export default function ParentDashboard({
 
   const effectiveChildrenList = useMemo(() => {
     const map = new Map();
-    childrenList.forEach(c => map.set(c.id, c));
-    allUsers.forEach(u => {
+    childrenList.forEach((c) => map.set(c.id, c));
+    allUsers.forEach((u) => {
       if (isCandidateLinkedToCurrentParent(parent, u)) {
         map.set(u.id, u);
       }
@@ -351,14 +441,17 @@ export default function ParentDashboard({
     return Array.from(map.values());
   }, [childrenList, allUsers, parent]);
 
-  const linkedIds = useMemo(() => new Set(effectiveChildrenList.map(c => c.id)), [effectiveChildrenList]);
-  const existingUserIds = useMemo(() => new Set(allUsers.map(u => u.id)), [allUsers]);
+  const linkedIds = useMemo(
+    () => new Set(effectiveChildrenList.map((c) => c.id)),
+    [effectiveChildrenList]
+  );
+  const existingUserIds = useMemo(() => new Set(allUsers.map((u) => u.id)), [allUsers]);
 
   const { generalTripsForParent, childrenTripsForParent } = useMemo(() => {
     const childTokens = effectiveChildrenList
-      .flatMap(ch => [ch.assigned_class, ch.detailed_stage, ch.service_stage, ch.sector])
+      .flatMap((ch) => [ch.assigned_class, ch.detailed_stage, ch.service_stage, ch.sector])
       .map(normalizeArabic)
-      .filter(Boolean);
+      .filter((t) => t.length >= 2);
 
     const gen = [];
     const chTrips = [];
@@ -368,8 +461,15 @@ export default function ParentDashboard({
         gen.push(tr);
         continue;
       }
-      const tgt = normalizeArabic(tr.target_service || tr.stage_name || tr.service_name || tr.assigned_class || '');
-      const matchesChild = childTokens.some(tok => tgt === tok || tgt.includes(tok) || tok.includes(tgt));
+      const tgt = normalizeArabic(
+        tr.target_service || tr.stage_name || tr.service_name || tr.assigned_class || ''
+      );
+      const matchesChild = childTokens.some(
+        (tok) =>
+          tgt === tok ||
+          (tgt.length >= 3 && tok.includes(tgt)) ||
+          (tok.length >= 3 && tgt.includes(tok))
+      );
       if (matchesChild) {
         chTrips.push(tr);
       }
@@ -378,21 +478,25 @@ export default function ParentDashboard({
     return { generalTripsForParent: gen, childrenTripsForParent: chTrips };
   }, [parentTrips, effectiveChildrenList]);
 
-  const displayedParentTrips = tripSubTab === 'general' ? generalTripsForParent : childrenTripsForParent;
+  const displayedParentTrips =
+    tripSubTab === 'general' ? generalTripsForParent : childrenTripsForParent;
 
   const candidatePool = useMemo(
-    () => allUsers.filter(u => u.id !== parent?.id && !['admin', 'priest', 'parent'].includes(u.role)),
+    () =>
+      allUsers.filter(
+        (u) => u.id !== parent?.id && !['admin', 'priest', 'parent'].includes(u.role)
+      ),
     [allUsers, parent?.id]
   );
 
   const autoSuggestions = useMemo(() => {
     return candidatePool
-      .filter(u => {
+      .filter((u) => {
         const blocked = isCandidateBlockedByOtherParent(parent, u, isMother, existingUserIds);
         return !linkedIds.has(u.id) && !blocked && !dismissedIds.includes(u.id);
       })
-      .map(u => ({ user: u, reason: getAutoMatchReason(parent, u, isMother) }))
-      .filter(item => Boolean(item.reason));
+      .map((u) => ({ user: u, reason: getAutoMatchReason(parent, u, isMother) }))
+      .filter((item) => Boolean(item.reason));
   }, [candidatePool, linkedIds, existingUserIds, dismissedIds, parent, isMother]);
 
   const phoneLookupResults = useMemo(() => {
@@ -400,12 +504,18 @@ export default function ParentDashboard({
     if (qPhone.length < 7) return [];
 
     return candidatePool
-      .filter(u => !linkedIds.has(u.id))
-      .map(u => {
+      .filter((u) => !linkedIds.has(u.id))
+      .map((u) => {
         const fatherPhone = normalizePhone(u.father_phone);
         const motherPhone = normalizePhone(u.mother_phone);
-        const matchedFather = Boolean(fatherPhone && (fatherPhone === qPhone || fatherPhone.includes(qPhone) || qPhone.includes(fatherPhone)));
-        const matchedMother = Boolean(motherPhone && (motherPhone === qPhone || motherPhone.includes(qPhone) || qPhone.includes(motherPhone)));
+        const matchedFather = Boolean(
+          fatherPhone &&
+            (fatherPhone === qPhone || fatherPhone.includes(qPhone) || qPhone.includes(fatherPhone))
+        );
+        const matchedMother = Boolean(
+          motherPhone &&
+            (motherPhone === qPhone || motherPhone.includes(qPhone) || qPhone.includes(motherPhone))
+        );
 
         if (!matchedFather && !matchedMother) return null;
 
@@ -490,7 +600,7 @@ export default function ParentDashboard({
 
   const handleAcknowledge = async (noteId) => {
     if (!noteId) return;
-    setAckedNoteIds(prev => new Set([...prev, noteId]));
+    setAckedNoteIds((prev) => new Set([...prev, noteId]));
 
     if (onAcknowledgeNote) {
       try {
@@ -508,12 +618,15 @@ export default function ParentDashboard({
         .select('id');
 
       if (error || !Array.isArray(data) || data.length === 0) {
-        setAckedNoteIds(prev => {
+        setAckedNoteIds((prev) => {
           const next = new Set(prev);
           next.delete(noteId);
           return next;
         });
-        console.error('فشل حفظ تأكيد الاطلاع:', error?.message || 'لم يتم تحديث أي صف (غالباً صلاحيات RLS)');
+        console.error(
+          'فشل حفظ تأكيد الاطلاع:',
+          error?.message || 'لم يتم تحديث أي صف (غالباً صلاحيات RLS)'
+        );
         alert('تعذر حفظ تأكيد الاطلاع، حاول مرة أخرى.');
         return;
       }
@@ -538,13 +651,18 @@ export default function ParentDashboard({
   const renderNameBreakdown = (child) => {
     const tokens = getNameTokens(child);
     const first = child.first_name || tokens[0] || '';
-    const rest = [child.second_name, child.third_name, child.fourth_name].filter(Boolean).join(' ') || tokens.slice(1).join(' ');
+    const rest =
+      [child.second_name, child.third_name, child.fourth_name].filter(Boolean).join(' ') ||
+      tokens.slice(1).join(' ');
     return (
       <div className="space-y-0.5">
-        <strong className="text-sm text-[#7a1c24] block">{child.full_name || `${first} ${rest}`.trim()}</strong>
+        <strong className="text-sm text-[#7a1c24] block">
+          {child.full_name || `${first} ${rest}`.trim()}
+        </strong>
         {first && rest && (
           <p className="text-[11px] text-gray-600">
-            الاسم الأول: <strong className="text-gray-900">{first}</strong> • اسم الأب/النسب: <strong className="text-gray-900">{rest}</strong>
+            الاسم الأول: <strong className="text-gray-900">{first}</strong> • اسم الأب/النسب:{' '}
+            <strong className="text-gray-900">{rest}</strong>
           </p>
         )}
       </div>
@@ -554,17 +672,18 @@ export default function ParentDashboard({
   const linkAlertCount = linkRequests.length + (canManageLinks ? autoSuggestions.length : 0);
 
   const bellNoteItems = visibleMemberNotes
-    .filter(n =>
-      linkedIds.has(n.member_id) &&
-      n.visible_to_parent !== false &&
-      !n.acknowledged &&
-      !ackedNoteIds.has(n.id)
+    .filter(
+      (n) =>
+        linkedIds.has(n.member_id) &&
+        n.visible_to_parent !== false &&
+        !n.acknowledged &&
+        !ackedNoteIds.has(n.id)
     )
-    .map(n => ({
+    .map((n) => ({
       id: n.id,
       note_text: n.note_text,
       behavior_tag: n.behavior_tag,
-      child_name: allUsers.find(u => String(u.id) === String(n.member_id))?.full_name || ''
+      child_name: allUsers.find((u) => String(u.id) === String(n.member_id))?.full_name || ''
     }));
 
   const tabsList = [
@@ -573,7 +692,11 @@ export default function ParentDashboard({
     ...(canManageLinks || linkRequests.length > 0
       ? [{ id: 'linking', label: '🔗 ربط الأبناء', badge: linkAlertCount }]
       : []),
-    { id: 'trips', label: '🚌 الرحلات', badge: childrenTripsForParent.length + generalTripsForParent.length },
+    {
+      id: 'trips',
+      label: '🚌 الرحلات',
+      badge: childrenTripsForParent.length + generalTripsForParent.length
+    },
     { id: 'campaigns', label: `🎁 العروض والرحلات (${rewardCampaigns.length})` },
     { id: 'masses', label: `⛪ القداسات والاجتماعات (${events.length})` },
     { id: 'services', label: `🏫 الفصول والخدمات (${services.length})` }
@@ -606,7 +729,9 @@ export default function ParentDashboard({
       <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-base sm:text-xl font-black text-amber-200">أهلاً بحضرتك، {parent?.full_name}</h2>
+            <h2 className="text-base sm:text-xl font-black text-amber-200">
+              أهلاً بحضرتك، {parent?.full_name}
+            </h2>
             <span className="px-2.5 py-0.5 rounded-full bg-white/15 text-amber-100 text-[11px] font-black">
               {isMother ? '👩 حساب ولي الأمر: الأم' : '👨 حساب ولي الأمر: الأب'}
             </span>
@@ -634,7 +759,9 @@ export default function ParentDashboard({
           </div>
           <div className="bg-white/15 border border-white/15 px-3.5 py-2 rounded-2xl text-center">
             <span className="text-[10px] opacity-85 font-bold block">الأبناء المربوطون</span>
-            <strong className="text-sm sm:text-base text-amber-200 font-black">{effectiveChildrenList.length}</strong>
+            <strong className="text-sm sm:text-base text-amber-200 font-black">
+              {effectiveChildrenList.length}
+            </strong>
           </div>
           <button
             type="button"
@@ -644,7 +771,9 @@ export default function ParentDashboard({
             <span className="text-[10px] opacity-85 font-bold block flex items-center justify-center gap-1">
               <QrCode size={11} /> دعواتي QR
             </span>
-            <strong className="text-sm sm:text-base text-amber-200 font-black">{receivedInvitesCount}</strong>
+            <strong className="text-sm sm:text-base text-amber-200 font-black">
+              {receivedInvitesCount}
+            </strong>
           </button>
           {linkAlertCount > 0 && (
             <button
@@ -676,7 +805,7 @@ export default function ParentDashboard({
       )}
 
       <div className="bg-white p-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto font-black">
-        {tabsList.map(tab => (
+        {tabsList.map((tab) => (
           <button
             key={tab.id}
             type="button"
@@ -700,7 +829,13 @@ export default function ParentDashboard({
       {validationError && (
         <div className="bg-red-50 border border-red-300 text-red-900 p-3 rounded-2xl font-bold flex items-center justify-between gap-2">
           <span>⚠️ {validationError}</span>
-          <button type="button" onClick={() => setValidationError('')} className="text-red-700 font-black cursor-pointer">✕</button>
+          <button
+            type="button"
+            onClick={() => setValidationError('')}
+            className="text-red-700 font-black cursor-pointer"
+          >
+            ✕
+          </button>
         </div>
       )}
 
@@ -723,7 +858,9 @@ export default function ParentDashboard({
                   type="button"
                   onClick={() => setTripSubTab('children')}
                   className={`px-3.5 py-1.5 rounded-xl font-black text-xs cursor-pointer transition ${
-                    tripSubTab === 'children' ? 'bg-[#7a1c24] text-white' : 'text-gray-700 hover:bg-gray-100'
+                    tripSubTab === 'children'
+                      ? 'bg-[#7a1c24] text-white'
+                      : 'text-gray-700 hover:bg-gray-100'
                   }`}
                 >
                   رحلات أبنائي ({childrenTripsForParent.length})
@@ -732,7 +869,9 @@ export default function ParentDashboard({
                   type="button"
                   onClick={() => setTripSubTab('general')}
                   className={`px-3.5 py-1.5 rounded-xl font-black text-xs cursor-pointer transition ${
-                    tripSubTab === 'general' ? 'bg-[#7a1c24] text-white' : 'text-gray-700 hover:bg-gray-100'
+                    tripSubTab === 'general'
+                      ? 'bg-[#7a1c24] text-white'
+                      : 'text-gray-700 hover:bg-gray-100'
                   }`}
                 >
                   رحلات عام ({generalTripsForParent.length})
@@ -748,10 +887,15 @@ export default function ParentDashboard({
               </div>
             ) : (
               <div className="grid gap-3">
-                {displayedParentTrips.map(tr => {
-                  const isOvernight = Number(tr.days_count || 1) > 1 || (Array.isArray(tr.rooms) && tr.rooms.length > 0);
+                {displayedParentTrips.map((tr) => {
+                  const isOvernight =
+                    Number(tr.days_count || 1) > 1 ||
+                    (Array.isArray(tr.rooms) && tr.rooms.length > 0);
                   return (
-                    <div key={tr.id} className="p-4 bg-purple-50/40 border border-purple-200 rounded-2xl space-y-2">
+                    <div
+                      key={tr.id}
+                      className="p-4 bg-purple-50/40 border border-purple-200 rounded-2xl space-y-2"
+                    >
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="px-2 py-0.5 bg-purple-100 text-purple-950 rounded-lg text-[10px] font-black">
@@ -762,17 +906,25 @@ export default function ParentDashboard({
                           <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded-lg text-[10px] font-bold">
                             {tr.trip_category || 'رحلة'}
                           </span>
-                          <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${
-                            isOvernight ? 'bg-indigo-100 text-indigo-950' : 'bg-amber-100 text-amber-950'
-                          }`}>
+                          <span
+                            className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${
+                              isOvernight
+                                ? 'bg-indigo-100 text-indigo-950'
+                                : 'bg-amber-100 text-amber-950'
+                            }`}
+                          >
                             {isOvernight ? `🌙 ${tr.days_count} أيام` : '☀️ يوم واحد'}
                           </span>
                           <strong className="text-sm text-gray-900">{tr.title}</strong>
                         </div>
-                        <span className="text-xs font-bold text-gray-600">📅 {tr.trip_date || 'قريباً'}</span>
+                        <span className="text-xs font-bold text-gray-600">
+                          📅 {tr.trip_date || 'قريباً'}
+                        </span>
                       </div>
                       {tr.monasteries && (
-                        <p className="text-gray-800">⛪ <strong>الأماكن:</strong> {tr.monasteries}</p>
+                        <p className="text-gray-800">
+                          ⛪ <strong>الأماكن:</strong> {tr.monasteries}
+                        </p>
                       )}
                       {tr.daily_program && (
                         <div className="p-3 bg-white border border-purple-100 rounded-xl text-gray-700 whitespace-pre-line">
@@ -796,7 +948,9 @@ export default function ParentDashboard({
                     <Info size={22} />
                   </div>
                   <div>
-                    <strong className="text-sm text-amber-950 block">لا يوجد أبناء مربوطون بحسابك حتى الآن</strong>
+                    <strong className="text-sm text-amber-950 block">
+                      لا يوجد أبناء مربوطون بحسابك حتى الآن
+                    </strong>
                     <p className="text-amber-900/80 mt-0.5">
                       يمكنك ربط أبنائك من تاب «ربط الأبناء» عبر الاقتراحات التلقائية أو البحث برقم تليفون الأب أو الأم.
                     </p>
@@ -814,21 +968,30 @@ export default function ParentDashboard({
               </div>
             ) : (
               <div className="grid gap-4">
-                {effectiveChildrenList.map(child => {
-                  const childAtt = attendance.filter(a => a.member_id === child.id && a.event_date?.startsWith(String(curYear)));
-                  const presentCount = childAtt.filter(a => a.present).length;
+                {effectiveChildrenList.map((child) => {
+                  const childAtt = attendance.filter(
+                    (a) => a.member_id === child.id && a.event_date?.startsWith(String(curYear))
+                  );
+                  const presentCount = childAtt.filter((a) => a.present).length;
                   const totalCount = childAtt.length;
                   const rate = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
 
-                  const commStat = commitmentStats.find(c => String(c.member_id) === String(child.id));
-                  const noteObj = spiritualNotes.find(n => n.member_id === child.id);
-                  const childVisibleNotes = visibleMemberNotes.filter(
-                    n => String(n.member_id) === String(child.id) && n.visible_to_parent !== false
+                  const commStat = commitmentStats.find(
+                    (c) => String(c.member_id) === String(child.id)
                   );
-                  const childRewardsList = memberRewards.filter(r => String(r.member_id) === String(child.id));
+                  const noteObj = spiritualNotes.find((n) => n.member_id === child.id);
+                  const childVisibleNotes = visibleMemberNotes.filter(
+                    (n) => String(n.member_id) === String(child.id) && n.visible_to_parent !== false
+                  );
+                  const childRewardsList = memberRewards.filter(
+                    (r) => String(r.member_id) === String(child.id)
+                  );
 
                   return (
-                    <div key={child.id} className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-4">
+                    <div
+                      key={child.id}
+                      className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-4"
+                    >
                       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 border-b border-gray-100 pb-3">
                         <div>
                           <h3 className="text-base font-black text-[#7a1c24]">{child.full_name}</h3>
@@ -867,11 +1030,14 @@ export default function ParentDashboard({
                             <CalendarCheck size={16} className="text-green-700" /> الحضور والالتزام خلال سنة {curYear}
                           </div>
                           <p className="text-gray-600">
-                            حضر <strong className="text-green-700 text-sm">{presentCount}</strong> مرة من أصل <strong>{totalCount}</strong> لقاء مسجل.
+                            حضر <strong className="text-green-700 text-sm">{presentCount}</strong> مرة من أصل{' '}
+                            <strong>{totalCount}</strong> لقاء مسجل.
                           </p>
                           {commStat && (
                             <p className="text-[11px] text-gray-500">
-                              الغياب: <strong>{commStat.absent_count ?? 0}</strong> • التأخير: <strong>{commStat.late_count ?? 0}</strong> • الانصراف المبكر: <strong>{commStat.early_leave_count ?? 0}</strong>
+                              الغياب: <strong>{commStat.absent_count ?? 0}</strong> • التأخير:{' '}
+                              <strong>{commStat.late_count ?? 0}</strong> • الانصراف المبكر:{' '}
+                              <strong>{commStat.early_leave_count ?? 0}</strong>
                             </p>
                           )}
                         </div>
@@ -885,10 +1051,14 @@ export default function ParentDashboard({
                               <p className="text-gray-700">
                                 الحالة: <strong className="text-[#7a1c24]">{noteObj.confession_status}</strong>
                               </p>
-                              <p className="text-gray-500">آخر اعتراف مسجل: {noteObj.last_confession_date || 'غير مسجل'}</p>
+                              <p className="text-gray-500">
+                                آخر اعتراف مسجل: {noteObj.last_confession_date || 'غير مسجل'}
+                              </p>
                             </>
                           ) : (
-                            <p className="text-gray-400">لم يقم الأب الكاهن بتسجيل متابعة اعتراف بعد.</p>
+                            <p className="text-gray-400">
+                              لم يقم الأب الكاهن بتسجيل متابعة اعتراف بعد.
+                            </p>
                           )}
                         </div>
                       </div>
@@ -899,16 +1069,21 @@ export default function ParentDashboard({
                         </div>
                         {(noteObj?.priest_note || childVisibleNotes.length === 0) && (
                           <p className="text-[#4a0e13] leading-relaxed">
-                            {noteObj?.priest_note ? noteObj.priest_note : 'لا توجد ملاحظات مسجلة من الأب الكاهن حالياً.'}
+                            {noteObj?.priest_note
+                              ? noteObj.priest_note
+                              : 'لا توجد ملاحظات مسجلة من الأب الكاهن حالياً.'}
                           </p>
                         )}
 
                         {childVisibleNotes.length > 0 && (
                           <div className="space-y-1.5 pt-1">
-                            {childVisibleNotes.map(mn => {
+                            {childVisibleNotes.map((mn) => {
                               const isAcked = mn.acknowledged || ackedNoteIds.has(mn.id);
                               return (
-                                <div key={mn.id} className="bg-white/90 p-2.5 rounded-xl border border-[#e3c2c7] flex flex-wrap justify-between items-center gap-2">
+                                <div
+                                  key={mn.id}
+                                  className="bg-white/90 p-2.5 rounded-xl border border-[#e3c2c7] flex flex-wrap justify-between items-center gap-2"
+                                >
                                   <div>
                                     <span className="px-2 py-0.5 bg-amber-100 text-amber-950 rounded-lg text-[10px] font-black ml-1.5">
                                       {mn.behavior_tag || 'ملاحظة متابعة'}
@@ -919,7 +1094,9 @@ export default function ParentDashboard({
                                     type="button"
                                     onClick={() => handleAcknowledge(mn.id)}
                                     className={`px-2.5 py-1 rounded-lg text-[10px] font-black cursor-pointer ${
-                                      isAcked ? 'bg-emerald-100 text-emerald-900' : 'bg-[#7a1c24] text-white'
+                                      isAcked
+                                        ? 'bg-emerald-100 text-emerald-900'
+                                        : 'bg-[#7a1c24] text-white'
                                     }`}
                                   >
                                     {isAcked ? 'تم الاطلاع ✓' : 'تأكيد الاطلاع'}
@@ -937,11 +1114,16 @@ export default function ParentDashboard({
                             <Gift size={16} className="text-emerald-700" /> مكافآت وعروض وخصومات مستحقة
                           </div>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {childRewardsList.map(rw => (
-                              <div key={rw.id} className="bg-white p-2.5 rounded-xl border border-emerald-200 flex justify-between items-center gap-2">
+                            {childRewardsList.map((rw) => (
+                              <div
+                                key={rw.id}
+                                className="bg-white p-2.5 rounded-xl border border-emerald-200 flex justify-between items-center gap-2"
+                              >
                                 <div>
                                   <strong className="text-gray-900 block">{rw.reward_title}</strong>
-                                  <span className="text-[11px] text-gray-500">{rw.reward_type} {rw.granted_date ? `• ${rw.granted_date}` : ''}</span>
+                                  <span className="text-[11px] text-gray-500">
+                                    {rw.reward_type} {rw.granted_date ? `• ${rw.granted_date}` : ''}
+                                  </span>
                                 </div>
                                 {Number(rw.discount_percent || 0) > 0 && (
                                   <span className="px-2 py-1 bg-emerald-100 text-emerald-900 rounded-lg font-black text-[11px] shrink-0">
@@ -968,7 +1150,9 @@ export default function ParentDashboard({
                 <div className="flex items-center gap-2 text-emerald-950">
                   <Bell size={18} className="text-emerald-700 shrink-0" />
                   <div>
-                    <h3 className="text-sm font-black">طلبات ربط أبناء تنتظر موافقتك ({linkRequests.length})</h3>
+                    <h3 className="text-sm font-black">
+                      طلبات ربط أبناء تنتظر موافقتك ({linkRequests.length})
+                    </h3>
                     <p className="text-[11px] text-emerald-900/80">
                       راجع بيانات الابن واضغط «قبول الربط» لتأكيد صلته بك أو «رفض» لتجاهل الطلب.
                     </p>
@@ -976,13 +1160,16 @@ export default function ParentDashboard({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                  {linkRequests.map(req => {
-                    const childUser = allUsers.find(u => u.id === req.child_id);
+                  {linkRequests.map((req) => {
+                    const childUser = allUsers.find((u) => u.id === req.child_id);
                     const displayName = childUser?.full_name || req.child_name || 'حساب ابن';
                     const guardianLabel = req.guardian_type === 'mother' ? 'الأم' : 'الأب';
 
                     return (
-                      <div key={req.id} className="bg-white p-3.5 rounded-2xl border border-emerald-200 flex flex-col justify-between gap-3">
+                      <div
+                        key={req.id}
+                        className="bg-white p-3.5 rounded-2xl border border-emerald-200 flex flex-col justify-between gap-3"
+                      >
                         <div className="space-y-1">
                           <div className="flex items-center justify-between gap-2">
                             <strong className="text-sm text-[#7a1c24]">{displayName}</strong>
@@ -1012,7 +1199,8 @@ export default function ParentDashboard({
                             onClick={() => handleApproveReq(req)}
                             className="py-2 px-3 bg-green-700 hover:bg-green-800 text-white rounded-xl font-black flex items-center justify-center gap-1 cursor-pointer transition"
                           >
-                            <Check size={14} /> {busyRequestId === req.id ? 'جاري القبول...' : 'قبول الربط'}
+                            <Check size={14} />{' '}
+                            {busyRequestId === req.id ? 'جاري القبول...' : 'قبول الربط'}
                           </button>
                           <button
                             type="button"
@@ -1035,7 +1223,9 @@ export default function ParentDashboard({
                 <div className="flex items-center gap-2 text-amber-950">
                   <Sparkles size={18} className="text-[#7a1c24] shrink-0" />
                   <div>
-                    <h3 className="text-sm font-black">تم العثور على أبناء مطابقين لبياناتك تلقائياً — هل هم أبناؤك؟</h3>
+                    <h3 className="text-sm font-black">
+                      تم العثور على أبناء مطابقين لبياناتك تلقائياً — هل هم أبناؤك؟
+                    </h3>
                     <p className="text-[11px] text-amber-900/80">
                       اضغط «نعم، ده ابني» لربط الحساب القائم بحسابك مباشرة (الطفل الأول والثاني وكل ابن) دون إنشاء حسابات مكررة.
                     </p>
@@ -1044,7 +1234,10 @@ export default function ParentDashboard({
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                   {autoSuggestions.map(({ user: child, reason }) => (
-                    <div key={child.id} className="bg-white p-3.5 rounded-2xl border border-amber-200 flex flex-col justify-between gap-3">
+                    <div
+                      key={child.id}
+                      className="bg-white p-3.5 rounded-2xl border border-amber-200 flex flex-col justify-between gap-3"
+                    >
                       <div className="space-y-1">
                         <div className="flex flex-wrap items-start justify-between gap-1.5">
                           {renderNameBreakdown(child)}
@@ -1072,7 +1265,8 @@ export default function ParentDashboard({
                           onClick={() => handleConfirmLink(child)}
                           className="py-2 px-3 bg-green-700 hover:bg-green-800 text-white rounded-xl font-black flex items-center justify-center gap-1 cursor-pointer transition"
                         >
-                          <Check size={14} /> {busyChildId === child.id ? 'جاري الربط...' : 'نعم، ده ابني'}
+                          <Check size={14} />{' '}
+                          {busyChildId === child.id ? 'جاري الربط...' : 'نعم، ده ابني'}
                         </button>
                         <button
                           type="button"
@@ -1094,7 +1288,9 @@ export default function ParentDashboard({
                   <div className="flex items-center gap-2">
                     <UserCheck size={17} className="text-[#7a1c24] shrink-0" />
                     <div>
-                      <h3 className="font-black text-sm text-[#7a1c24]">إظهار تفاصيل الأبناء وربطهم برقم تليفون الأب أو الأم</h3>
+                      <h3 className="font-black text-sm text-[#7a1c24]">
+                        إظهار تفاصيل الأبناء وربطهم برقم تليفون الأب أو الأم
+                      </h3>
                       <p className="text-[11px] text-gray-500">
                         اكتب رقم تليفون الأب أو الأم (7 أرقام فأكثر) لإظهار تفاصيل الابن المطابق وربطه على الحساب.
                       </p>
@@ -1120,7 +1316,7 @@ export default function ParentDashboard({
                     placeholder="اكتب رقم تليفون الأب أو الأم لإظهار التفاصيل..."
                     className="w-full pr-10 pl-9 py-2.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl text-xs outline-none focus:border-[#7a1c24] focus:bg-white transition"
                     value={phoneQuery}
-                    onChange={e => setPhoneQuery(e.target.value)}
+                    onChange={(e) => setPhoneQuery(e.target.value)}
                   />
                   {phoneQuery && (
                     <button
@@ -1148,9 +1344,17 @@ export default function ParentDashboard({
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                         {phoneLookupResults.map(({ user: child, matchLabel }) => {
-                          const linkedToOther = isCandidateBlockedByOtherParent(parent, child, isMother, existingUserIds);
+                          const linkedToOther = isCandidateBlockedByOtherParent(
+                            parent,
+                            child,
+                            isMother,
+                            existingUserIds
+                          );
                           return (
-                            <div key={child.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col justify-between gap-2.5">
+                            <div
+                              key={child.id}
+                              className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col justify-between gap-2.5"
+                            >
                               <div className="space-y-1">
                                 <div className="flex items-start justify-between gap-1.5">
                                   {renderNameBreakdown(child)}
@@ -1189,7 +1393,10 @@ export default function ParentDashboard({
                                   onClick={() => handleConfirmLink(child)}
                                   className="w-full py-2 px-3 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black flex items-center justify-center gap-1.5 cursor-pointer transition"
                                 >
-                                  <Check size={14} /> {busyChildId === child.id ? 'جاري الربط...' : 'نعم، ربط هذا الابن بحسابي'}
+                                  <Check size={14} />{' '}
+                                  {busyChildId === child.id
+                                    ? 'جاري الربط...'
+                                    : 'نعم، ربط هذا الابن بحسابي'}
                                 </button>
                               )}
                             </div>
@@ -1215,8 +1422,11 @@ export default function ParentDashboard({
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {rewardCampaigns.map(camp => (
-                  <div key={camp.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl space-y-1">
+                {rewardCampaigns.map((camp) => (
+                  <div
+                    key={camp.id}
+                    className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl space-y-1"
+                  >
                     <div className="flex items-center justify-between gap-2">
                       <strong className="text-sm text-gray-900">{camp.title}</strong>
                       <span className="px-2 py-0.5 bg-amber-100 text-amber-950 rounded-lg font-bold text-[10px]">
@@ -1242,11 +1452,16 @@ export default function ParentDashboard({
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {events.map(ev => (
-                  <div key={ev.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                {events.map((ev) => (
+                  <div
+                    key={ev.id}
+                    className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-2"
+                  >
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900 font-bold text-[10px]">{ev.event_type || 'قداس'}</span>
+                        <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900 font-bold text-[10px]">
+                          {ev.event_type || 'قداس'}
+                        </span>
                         <strong className="text-sm text-gray-900">{ev.title}</strong>
                       </div>
                       <span className="text-gray-500 flex items-center gap-1">
@@ -1274,17 +1489,23 @@ export default function ParentDashboard({
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {services.map(srv => {
-                  const grp = serviceGroups.find(g => g.id === srv.group_id);
+                {services.map((srv) => {
+                  const grp = serviceGroups.find((g) => g.id === srv.group_id);
                   return (
-                    <div key={srv.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl space-y-1">
+                    <div
+                      key={srv.id}
+                      className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl space-y-1"
+                    >
                       <div className="flex items-center justify-between gap-2">
                         <strong className="text-sm text-gray-900">{srv.class_name}</strong>
                         <span className="px-2 py-0.5 bg-blue-50 text-blue-800 rounded-lg font-bold text-[10px]">
-                          {grp?.group_name ? `${grp.group_name} • ` : ''}{srv.stage_name}
+                          {grp?.group_name ? `${grp.group_name} • ` : ''}
+                          {srv.stage_name}
                         </span>
                       </div>
-                      <span className="text-gray-500 block">⏰ {srv.meeting_time} {srv.room_name ? `• 📍 ${srv.room_name}` : ''}</span>
+                      <span className="text-gray-500 block">
+                        ⏰ {srv.meeting_time} {srv.room_name ? `• 📍 ${srv.room_name}` : ''}
+                      </span>
                     </div>
                   );
                 })}
