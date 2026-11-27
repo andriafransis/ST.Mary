@@ -11,7 +11,8 @@ import {
   RotateCcw,
   RefreshCw,
   Clock,
-  Sparkles
+  Sparkles,
+  Trash2
 } from 'lucide-react';
 
 export function playTingTingChime() {
@@ -58,6 +59,10 @@ function formatDateTimeAr(val) {
   });
 }
 
+function normalizeStr(v) {
+  return String(v || '').trim().toLowerCase();
+}
+
 export default function BellNotificationsPanel({
   priestId = null,
   currentUser = null,
@@ -72,6 +77,15 @@ export default function BellNotificationsPanel({
   onNavigateCard
 }) {
   const effectiveActorId = priestId || currentUser?.id || null;
+  const userRole = normalizeStr(currentUser?.role);
+  const userService = normalizeStr(
+    currentUser?.service_name ||
+      currentUser?.service ||
+      currentUser?.meeting_name ||
+      currentUser?.department ||
+      currentUser?.permissions?.service_name
+  );
+
   const storageScope =
     effectiveActorId ||
     myConfessors?.[0]?.confession_father_id ||
@@ -80,6 +94,7 @@ export default function BellNotificationsPanel({
     'default';
 
   const READ_STORAGE_KEY = `priest_read_alerts_${storageScope}`;
+  const CLEARED_SINCE_KEY = `bell_cleared_since_${storageScope}`;
   const SOUND_STORAGE_KEY = `priest_bell_sound_${storageScope}`;
 
   const [open, setOpen] = useState(false);
@@ -100,6 +115,14 @@ export default function BellNotificationsPanel({
     }
   });
 
+  const [clearedSince, setClearedSince] = useState(() => {
+    try {
+      return localStorage.getItem(CLEARED_SINCE_KEY) || '';
+    } catch {
+      return '';
+    }
+  });
+
   const [soundEnabled, setSoundEnabled] = useState(() => {
     try {
       const saved = localStorage.getItem(SOUND_STORAGE_KEY);
@@ -111,6 +134,21 @@ export default function BellNotificationsPanel({
 
   const playedOnceRef = useRef(false);
   const prevUnreadCountRef = useRef(0);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(READ_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      setReadIds(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      setReadIds([]);
+    }
+    try {
+      setClearedSince(localStorage.getItem(CLEARED_SINCE_KEY) || '');
+    } catch {
+      setClearedSince('');
+    }
+  }, [READ_STORAGE_KEY, CLEARED_SINCE_KEY]);
 
   const fetchLiveDatabaseNotifications = useCallback(async () => {
     if (!supabase || typeof supabase.from !== 'function') return;
@@ -136,7 +174,7 @@ export default function BellNotificationsPanel({
           .from('church_notifications')
           .select('*')
           .order('created_at', { ascending: false })
-          .limit(20)
+          .limit(30)
       ]);
 
       if (!bkRes.error && Array.isArray(bkRes.data)) {
@@ -231,6 +269,60 @@ export default function BellNotificationsPanel({
     persistReadIds(readIds.filter((id) => id !== alertId));
   };
 
+  const clearAllNotifications = () => {
+    const nowIso = new Date().toISOString();
+    setClearedSince(nowIso);
+    try {
+      localStorage.setItem(CLEARED_SINCE_KEY, nowIso);
+    } catch {
+      // ignore
+    }
+    persistReadIds([...readIds, ...alerts.map((a) => a.id)]);
+  };
+
+  const isClearedByTime = (timestampVal) => {
+    if (!clearedSince || !timestampVal) return false;
+    const clearedMs = new Date(clearedSince).getTime();
+    const itemMs = new Date(timestampVal).getTime();
+    if (Number.isNaN(clearedMs) || Number.isNaN(itemMs)) return false;
+    return itemMs <= clearedMs;
+  };
+
+  const isTargetedToCurrentUser = (record) => {
+    if (!record || typeof record !== 'object') return true;
+
+    const targetUserId = record.target_user_id || record.recipient_user_id || record.user_id || null;
+    const targetRole = normalizeStr(record.target_role || record.audience_role || record.role);
+    const targetService = normalizeStr(
+      record.target_service || record.service_name || record.service || record.audience_service
+    );
+    const isGeneral =
+      Boolean(record.is_general) ||
+      normalizeStr(record.audience) === 'all' ||
+      normalizeStr(record.audience) === 'general' ||
+      (!targetUserId && !targetRole && !targetService);
+
+    if (isGeneral) return true;
+
+    if (targetUserId && effectiveActorId) {
+      if (String(targetUserId) === String(effectiveActorId)) return true;
+      return false;
+    }
+
+    if (targetRole && userRole) {
+      const roleMatches =
+        targetRole === userRole ||
+        (targetRole === 'all' || targetRole === 'general' || targetRole === 'everyone');
+      if (!roleMatches) return false;
+    }
+
+    if (targetService && userService) {
+      if (targetService !== userService) return false;
+    }
+
+    return true;
+  };
+
   const baseToday = todayISO || new Date().toISOString().split('T')[0];
   const tomorrowDate = new Date(`${baseToday}T00:00:00`);
   tomorrowDate.setDate(tomorrowDate.getDate() + 1);
@@ -257,13 +349,15 @@ export default function BellNotificationsPanel({
 
   const pushAlert = (al) => {
     if (!al?.id || seenAlertKeys.has(al.id)) return;
+    if (al.timestamp && isClearedByTime(al.timestamp)) return;
     seenAlertKeys.add(al.id);
     alerts.push(al);
   };
 
-  // 1. مناسبات الجدول الخاص
+  // 1. مناسبات وإعلانات الجدول الخاص / العامة التلقائية (اجتماع، رحلة، مناسبة، تدشين...)
   personalItems.forEach((p) => {
-    if (!p.event_date) return;
+    if (!p.event_date || !isTargetedToCurrentUser(p)) return;
+    const ts = p.created_at || `${p.event_date}T08:00:00`;
     if (p.event_date === baseToday) {
       pushAlert({
         id: `pers_today_${p.id}_${baseToday}`,
@@ -272,6 +366,7 @@ export default function BellNotificationsPanel({
         icon: '📅',
         title: `اليوم: ${p.event_type || 'مناسبة'} — ${p.title || ''}`,
         sub: `${p.event_time ? `⏰ الساعة ${p.event_time}` : ''} ${p.location ? `• 📍 ${p.location}` : ''}`,
+        timestamp: ts,
         action: () => {
           setOpen(false);
           onNavigateCard?.('personal');
@@ -285,6 +380,7 @@ export default function BellNotificationsPanel({
         icon: '👑',
         title: `تذكير: عندك بكرة ${p.event_type || 'مناسبة'} — ${p.title || ''}`,
         sub: `📅 ${p.event_date} ${p.event_time ? `• ⏰ الساعة ${p.event_time}` : ''} ${p.location ? `• 📍 ${p.location}` : ''}`,
+        timestamp: ts,
         action: () => {
           setOpen(false);
           onNavigateCard?.('personal');
@@ -298,6 +394,7 @@ export default function BellNotificationsPanel({
         icon: '📅',
         title: `${p.event_type || 'مناسبة'}: ${p.title || ''}`,
         sub: `📅 ${p.event_date} ${p.event_time ? `• ⏰ الساعة ${p.event_time}` : ''}`,
+        timestamp: ts,
         action: () => {
           setOpen(false);
           onNavigateCard?.('personal');
@@ -306,9 +403,10 @@ export default function BellNotificationsPanel({
     }
   });
 
-  // 2. جدول القداسات
+  // 2. جدول القداسات التلقائي
   masses.forEach((m) => {
-    if (!m.mass_date || m.is_available === false) return;
+    if (!m.mass_date || m.is_available === false || !isTargetedToCurrentUser(m)) return;
+    const ts = m.created_at || `${m.mass_date}T06:00:00`;
     if (m.mass_date === baseToday) {
       pushAlert({
         id: `mass_today_${m.id}_${baseToday}`,
@@ -317,6 +415,7 @@ export default function BellNotificationsPanel({
         icon: '⛪',
         title: `اليوم قداس: ${m.mass_name} (${m.church_name})`,
         sub: `⏰ ${m.mass_time || ''} ${m.priest_role ? `• ${m.priest_role}` : ''}`,
+        timestamp: ts,
         action: () => {
           setOpen(false);
           onNavigateCard?.('masses');
@@ -330,6 +429,7 @@ export default function BellNotificationsPanel({
         icon: '⛪',
         title: `تذكير: قداس بكرة (${m.mass_name})`,
         sub: `📅 ${m.mass_date} • ⏰ ${m.mass_time || ''} • 📍 ${m.church_name || ''}`,
+        timestamp: ts,
         action: () => {
           setOpen(false);
           onNavigateCard?.('masses');
@@ -341,8 +441,9 @@ export default function BellNotificationsPanel({
         urgency: 'week',
         badge: 'قداس الأسبوع 📆',
         icon: '⛪',
-        title: `لديك قداس يوم ${m.mass_date}: ${m.mass_name}`,
+        title: `قداس يوم ${m.mass_date}: ${m.mass_name}`,
         sub: `⏰ ${m.mass_time || ''} • 📍 ${m.church_name || ''} ${m.priest_role ? `(${m.priest_role})` : ''}`,
+        timestamp: ts,
         action: () => {
           setOpen(false);
           onNavigateCard?.('masses');
@@ -351,14 +452,23 @@ export default function BellNotificationsPanel({
     }
   });
 
-  // 3. حجوزات المعترفين (من الـ props + التحديثات اللحظية)
+  // 3. حجوزات الاعتراف الخاصة بالمستخدم/الكاهن
   const combinedBookings = [
     ...confessionBookings,
     ...liveBookings.filter((lb) => !confessionBookings.some((cb) => cb.id === lb.id))
   ];
 
   combinedBookings
-    .filter((b) => b.status === 'محجوز' && b.booking_date >= baseToday && b.booking_date <= weekLimitISO)
+    .filter(
+      (b) =>
+        b.status === 'محجوز' &&
+        b.booking_date >= baseToday &&
+        b.booking_date <= weekLimitISO &&
+        (!effectiveActorId ||
+          !b.confession_father_id ||
+          String(b.confession_father_id) === String(effectiveActorId) ||
+          String(b.member_id) === String(effectiveActorId))
+    )
     .forEach((b) => {
       const memberObj = allUsers.find((u) => u.id === b.member_id);
       const isUrgent = b.booking_date === baseToday || b.booking_date === tomorrowISO;
@@ -373,9 +483,14 @@ export default function BellNotificationsPanel({
               : 'حجز اعتراف قادم',
         icon: '🙏',
         title: `${b.member_name || memberObj?.full_name || 'معترف'} حاجز اعتراف ${
-          b.booking_date === baseToday ? 'اليوم' : b.booking_date === tomorrowISO ? 'بكرة' : `يوم ${b.booking_date}`
+          b.booking_date === baseToday
+            ? 'اليوم'
+            : b.booking_date === tomorrowISO
+              ? 'بكرة'
+              : `يوم ${b.booking_date}`
         }`,
         sub: `${b.booking_time ? `⏰ ${b.booking_time} • ` : ''}اضغط لفتح الملف الروحي والقانون السابق`,
+        timestamp: b.created_at || `${b.booking_date}T09:00:00`,
         action: () => {
           setOpen(false);
           if (memberObj && onOpenConfessor) onOpenConfessor(memberObj);
@@ -396,6 +511,7 @@ export default function BellNotificationsPanel({
       icon: '🎂',
       title: `عيد ميلاد: ${m.full_name}`,
       sub: `📅 ${m.dob} • اضغط لفتح تهنئة واتساب`,
+      timestamp: `${currentYear}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}T08:00:00`,
       action: () => {
         setOpen(false);
         onOpenWhatsApp?.({
@@ -408,26 +524,27 @@ export default function BellNotificationsPanel({
     });
   });
 
-  // 5. تنبيهات خاصة من قاعدة البيانات (church_notifications) ببياناتها الكاملة
+  // 5. إشعارات قاعدة البيانات (church_notifications): عامة، أو حسب الدور، أو حسب الخدمة، أو ترحيب/شخصي
   specialAlertsFromDb.forEach((sp) => {
-    const targetMatches =
-      !sp.target_user_id ||
-      !effectiveActorId ||
-      String(sp.target_user_id) === String(effectiveActorId);
-    if (!targetMatches) return;
+    if (!isTargetedToCurrentUser(sp)) return;
+
+    const categoryLabel =
+      sp.category ||
+      (sp.type === 'welcome' ? 'ترحيب 👋' : sp.type === 'general' ? 'إشعار عام 📢' : 'تنبيه خاص ✨');
 
     pushAlert({
       id: `special_db_${sp.id}`,
       urgency: sp.is_urgent ? 'urgent' : 'special',
-      badge: sp.category || 'تنبيه خاص ✨',
-      icon: '✨',
-      title: sp.title || 'تنبيه خاص',
+      badge: categoryLabel,
+      icon: sp.type === 'welcome' ? '👋' : '✨',
+      title: sp.title || 'إشعار جديد',
       sub: [
         sp.message || sp.body || sp.description || '',
         sp.created_at ? `🕒 ${formatDateTimeAr(sp.created_at)}` : ''
       ]
         .filter(Boolean)
         .join(' • '),
+      timestamp: sp.created_at,
       action: () => {
         setOpen(false);
         if (sp.target_card) onNavigateCard?.(sp.target_card);
@@ -435,55 +552,72 @@ export default function BellNotificationsPanel({
     });
   });
 
-  // 6. مستجدات الدعوات وحضور وانصراف QR اللحظية مع تفاصيلها الكاملة
-  liveInvitations.slice(0, 6).forEach((inv) => {
-    const isChecked = inv.status === 'checked_in';
-    pushAlert({
-      id: `inv_live_${inv.id}_${inv.status}`,
-      urgency: isChecked ? 'special' : 'week',
-      badge: isChecked ? 'تم Scan دعوة ✅' : 'دعوة جديدة 🎟️',
-      icon: '🎟️',
-      title: `${inv.event_title || 'دعوة'} — ${inv.recipient_name || ''}`,
-      sub: [
-        inv.seat_or_zone ? `📍 ${inv.seat_or_zone}` : '',
-        inv.checked_in_by ? `بواسطة: ${inv.checked_in_by}` : '',
-        `🕒 ${formatDateTimeAr(inv.checked_in_at || inv.created_at)}`
-      ]
-        .filter(Boolean)
-        .join(' • '),
-      action: () => {
-        setOpen(false);
-        onNavigateCard?.('invitations');
-      }
+  // 6. مستجدات الدعوات وحضور وانصراف QR الخاصة بالمستخدم الحالي
+  liveInvitations
+    .filter(
+      (inv) =>
+        !effectiveActorId ||
+        String(inv.recipient_user_id) === String(effectiveActorId) ||
+        String(inv.created_by_user_id) === String(effectiveActorId)
+    )
+    .slice(0, 6)
+    .forEach((inv) => {
+      const isChecked = inv.status === 'checked_in';
+      const ts = inv.checked_in_at || inv.created_at;
+      pushAlert({
+        id: `inv_live_${inv.id}_${inv.status}`,
+        urgency: isChecked ? 'special' : 'week',
+        badge: isChecked ? 'تم Scan دعوة ✅' : 'دعوة جديدة 🎟️',
+        icon: '🎟️',
+        title: `${inv.event_title || 'دعوة'} — ${inv.recipient_name || ''}`,
+        sub: [
+          inv.seat_or_zone ? `📍 ${inv.seat_or_zone}` : '',
+          inv.checked_in_by ? `بواسطة: ${inv.checked_in_by}` : '',
+          `🕒 ${formatDateTimeAr(ts)}`
+        ]
+          .filter(Boolean)
+          .join(' • '),
+        timestamp: ts,
+        action: () => {
+          setOpen(false);
+          onNavigateCard?.('invitations');
+        }
+      });
     });
-  });
 
-  liveAttendanceLogs.slice(0, 6).forEach((log) => {
-    const isOut = Boolean(log.checked_out_at);
-    pushAlert({
-      id: `att_live_${log.id}_${isOut ? 'out' : 'in'}`,
-      urgency: 'special',
-      badge: isOut ? 'انصراف QR 👋' : 'حضور QR ✅',
-      icon: isOut ? '👋' : '✅',
-      title: `${log.full_name} — ${isOut ? 'تسجيل انصراف' : 'تسجيل حضور'}`,
-      sub: [
-        `🕒 ${formatDateTimeAr(isOut ? log.checked_out_at : log.checked_in_at)}`,
-        isOut
-          ? log.checked_out_by
-            ? `بواسطة: ${log.checked_out_by}`
-            : ''
-          : log.checked_in_by
-            ? `بواسطة: ${log.checked_in_by}`
-            : ''
-      ]
-        .filter(Boolean)
-        .join(' • '),
-      action: () => {
-        setOpen(false);
-        onNavigateCard?.('attendance');
-      }
+  liveAttendanceLogs
+    .filter(
+      (log) => !effectiveActorId || String(log.user_id) === String(effectiveActorId)
+    )
+    .slice(0, 6)
+    .forEach((log) => {
+      const isOut = Boolean(log.checked_out_at);
+      const ts = isOut ? log.checked_out_at : log.checked_in_at;
+      pushAlert({
+        id: `att_live_${log.id}_${isOut ? 'out' : 'in'}`,
+        urgency: 'special',
+        badge: isOut ? 'انصراف QR 👋' : 'حضور QR ✅',
+        icon: isOut ? '👋' : '✅',
+        title: `${log.full_name} — ${isOut ? 'تسجيل انصراف' : 'تسجيل حضور'}`,
+        sub: [
+          `🕒 ${formatDateTimeAr(ts)}`,
+          isOut
+            ? log.checked_out_by
+              ? `بواسطة: ${log.checked_out_by}`
+              : ''
+            : log.checked_in_by
+              ? `بواسطة: ${log.checked_in_by}`
+              : ''
+        ]
+          .filter(Boolean)
+          .join(' • '),
+        timestamp: ts,
+        action: () => {
+          setOpen(false);
+          onNavigateCard?.('attendance');
+        }
+      });
     });
-  });
 
   const markAllAsRead = () => {
     persistReadIds([...readIds, ...alerts.map((a) => a.id)]);
@@ -538,9 +672,7 @@ export default function BellNotificationsPanel({
           {al.icon} {al.title}
         </strong>
         {al.sub && (
-          <span className="text-xs text-gray-700 block leading-relaxed">
-            {al.sub}
-          </span>
+          <span className="text-xs text-gray-700 block leading-relaxed">{al.sub}</span>
         )}
       </button>
       <button
@@ -625,6 +757,16 @@ export default function BellNotificationsPanel({
                     <CheckCheck size={14} /> تعليم الكل كمقروء
                   </button>
                 )}
+                {alerts.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearAllNotifications}
+                    className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-xl text-xs font-black flex items-center gap-1 cursor-pointer"
+                    title="مسح كل الإشعارات الحالية"
+                  >
+                    <Trash2 size={13} /> مسح الكل
+                  </button>
+                )}
                 {readAlertsList.length > 0 && (
                   <button
                     type="button"
@@ -654,8 +796,10 @@ export default function BellNotificationsPanel({
 
             {unreadAlerts.length === 0 ? (
               <div className="p-6 text-center text-sm text-gray-500 space-y-1">
-                <strong className="block text-emerald-800">✅ لا توجد تنبيهات غير مقروءة حالياً</strong>
-                <span className="text-xs">كل التنبيهات تمت قراءتها.</span>
+                <strong className="block text-emerald-800">
+                  ✅ لا توجد تنبيهات غير مقروءة حالياً
+                </strong>
+                <span className="text-xs">كل التنبيهات تمت قراءتها أو مسحها.</span>
               </div>
             ) : (
               <div className="space-y-4">
