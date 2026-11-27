@@ -270,7 +270,20 @@ export default function BellNotificationsPanel({
         );
       }
       if (!invRes.error && Array.isArray(invRes.data)) {
-        setLiveInvitations(invRes.data);
+        // دعوات الكاهن ده بس: اللي هو أرسلها، أو اتسجل دخولها بواسطته، أو وصلته هو
+        const me = dbReaderId ? String(dbReaderId) : '';
+        const myName = String(senderName || currentUser?.full_name || '').trim();
+        setLiveInvitations(
+          me
+            ? invRes.data.filter(
+                (inv) =>
+                  String(inv.created_by || '') === me ||
+                  (myName && String(inv.created_by || '').trim() === myName) ||
+                  String(inv.checked_in_by_id || '') === me ||
+                  String(inv.recipient_user_id || '') === me
+              )
+            : invRes.data
+        );
       }
       if (!attRes.error && Array.isArray(attRes.data)) {
         setLiveAttendanceLogs(attRes.data);
