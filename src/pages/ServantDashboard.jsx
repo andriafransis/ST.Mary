@@ -523,13 +523,18 @@ export default function ServantDashboard({
   const handleAcknowledgeNote = async (note) => {
     if (!note?.id) return;
 
+    const persistHidden = (map) => {
+      try {
+        localStorage.setItem(acknowledgedStorageKey, JSON.stringify(map));
+      } catch {
+        // ignore
+      }
+    };
+
+    // إخفاء فوري (تفاؤلي) — ويتراجع لو الحفظ في الداتابيز فشل
     const updatedMap = { ...hiddenNotes, [note.id]: true };
     setHiddenNotes(updatedMap);
-    try {
-      localStorage.setItem(acknowledgedStorageKey, JSON.stringify(updatedMap));
-    } catch {
-      // ignore
-    }
+    persistHidden(updatedMap);
 
     if (typeof onAcknowledgeNote === 'function') {
       try {
@@ -539,26 +544,43 @@ export default function ServantDashboard({
       }
     }
 
-    if (supabase && typeof supabase.from === 'function') {
+    if (!supabase || typeof supabase.from !== 'function') return;
+
+    try {
+      // 1) الأعمدة الأساسية فقط، مع التأكد إن الصف اتحدّث فعلاً
+      const { data, error } = await supabase
+        .from('member_notes')
+        .update({ is_read: true, acknowledged: true })
+        .eq('id', note.id)
+        .select('id');
+
+      if (error || !Array.isArray(data) || data.length === 0) {
+        const rolledBack = { ...updatedMap };
+        delete rolledBack[note.id];
+        setHiddenNotes(rolledBack);
+        persistHidden(rolledBack);
+        console.error('فشل حفظ تأكيد الملاحظة:', error?.message || 'لم يتم تحديث أي صف (غالباً صلاحيات RLS)');
+        alert('تعذر حفظ "علمت" في قاعدة البيانات، حاول مرة أخرى أو راجع الصلاحيات.');
+        return;
+      }
+
+      // 2) بيانات من علّم ومتى (محاولة منفصلة، لو الأعمدة مش موجودة ما توقفش الباقي)
       try {
-        const { error } = await supabase
+        await supabase
           .from('member_notes')
           .update({
-            is_read: true,
-            acknowledged: true,
             acknowledged_at: new Date().toISOString(),
-            acknowledged_by: servant?.full_name || servant?.username || servant?.id || 'servant'
+            acknowledged_by: servant?.full_name || servant?.username || String(servant?.id || 'servant'),
+            acknowledged_by_role: 'servant'
           })
           .eq('id', note.id);
-
-        if (error) {
-          console.error('خطأ في حفظ تأكيد الملاحظة في قاعدة البيانات:', error.message);
-        } else if (typeof onRefresh === 'function') {
-          onRefresh();
-        }
-      } catch (err) {
-        console.error('تعذر تحديث الملاحظة في قاعدة البيانات:', err);
+      } catch {
+        // ignore
       }
+
+      if (typeof onRefresh === 'function') onRefresh();
+    } catch (err) {
+      console.error('تعذر تحديث الملاحظة في قاعدة البيانات:', err);
     }
   };
 
@@ -1567,7 +1589,21 @@ export default function ServantDashboard({
           <BellNotificationsPanel
             role="servant"
             currentUser={servant}
+            readerId={servant?.id}
+            canSend
             followUpItems={followUpMembers}
+            noteItems={scopeMembers.flatMap(m =>
+              getMemberActiveNotes(m.id).map(n => ({
+                id: n.id,
+                note_text: n.note_text,
+                behavior_tag: n.behavior_tag,
+                child_name: m.full_name
+              }))
+            )}
+            onAckNote={(noteId) => {
+              const n = memberNotes.find(x => String(x.id) === String(noteId));
+              if (n) handleAcknowledgeNote(n);
+            }}
             birthdayItems={scopeMembers}
             trips={[...myServiceTripsForServant, ...generalTripsForServant]}
             todayISO={new Date().toLocaleDateString('en-CA')}

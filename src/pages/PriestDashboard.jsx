@@ -763,6 +763,21 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     }
   };
 
+  useEffect(() => {
+    if (!supabase || typeof supabase.channel !== 'function') return;
+    const noteChannel = supabase
+      .channel('priest-member-notes-sync')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'member_notes' }, (payload) => {
+        const row = payload.new;
+        if (!row?.id) return;
+        setMemberNotes(prev => prev.map(n => (n.id === row.id ? { ...n, ...row } : n)));
+      })
+      .subscribe();
+    return () => {
+      if (typeof supabase.removeChannel === 'function') supabase.removeChannel(noteChannel);
+    };
+  }, []);
+
   const handleAddMemberNote = async (e) => {
     e.preventDefault();
     if (!noteForm.member_id || !noteForm.note_text.trim()) {
@@ -854,6 +869,9 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
         onOpenConfessor={(memberObj) => setSelectedConfessor(memberObj)}
         onOpenWhatsApp={openWhatsAppComposer}
         onNavigateCard={handleNavigateFromBell}
+        readerId={priest?.id}
+        senderName={priest?.full_name}
+        canSend
       />
 
       {totalJosephAlerts > 0 && (
@@ -1717,6 +1735,13 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                       <strong className="text-gray-900 block">{mem?.full_name || n.member_id}</strong>
                       <span className="text-[11px] text-[#7a1c24] font-bold">{n.behavior_tag || 'ملاحظة'}</span>
                       <p className="text-gray-700 mt-0.5">{n.note_text}</p>
+                      <span className={`inline-block mt-1 px-2 py-0.5 rounded-lg text-[10px] font-black ${
+                        n.acknowledged || n.is_read ? 'bg-emerald-100 text-emerald-900' : 'bg-amber-100 text-amber-900'
+                      }`}>
+                        {n.acknowledged || n.is_read
+                          ? `✓ علّم عليها${n.acknowledged_by ? ` — ${n.acknowledged_by}` : ''}`
+                          : '⏳ لسه ما اتقراتش'}
+                      </span>
                     </div>
                     <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black shrink-0 ${n.visible_to_parent ? 'bg-emerald-100 text-emerald-900' : 'bg-gray-200 text-gray-700'}`}>
                       {n.visible_to_parent ? 'ظاهر لولي الأمر' : 'داخلي فقط'}

@@ -60,6 +60,10 @@ function formatDateTimeAr(val) {
 
 export default function BellNotificationsPanel({
   role = 'priest', // 'priest' | 'servant' | 'member' | 'parent'
+  readerId = null, // معرّف المستخدم لتسجيل (اتقرت) في الداتابيز
+  senderName = '',
+  canSend = false, // يظهر زر إرسال تنبيه لباقي الأدوار
+  onAckNote = null, // لما يتعلّم تنبيه ملاحظة كمقروء يتم حفظه في الداتابيز عن طريق الصفحة
   priestId = null,
   currentUser = null,
   trips = [],
@@ -97,6 +101,7 @@ export default function BellNotificationsPanel({
     .map((p) => String(p || '').trim())
     .filter(Boolean);
   const actorPhonesKey = actorPhones.join('|');
+  const dbReaderId = readerId || effectiveActorId || null;
 
   const [open, setOpen] = useState(false);
   const [showReadAlerts, setShowReadAlerts] = useState(false);
@@ -105,6 +110,11 @@ export default function BellNotificationsPanel({
   const [liveAttendanceLogs, setLiveAttendanceLogs] = useState([]);
   const [specialAlertsFromDb, setSpecialAlertsFromDb] = useState([]);
   const [refreshingLive, setRefreshingLive] = useState(false);
+  const [dbReadIds, setDbReadIds] = useState([]);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [composeMsg, setComposeMsg] = useState('');
+  const [composeForm, setComposeForm] = useState({ title: '', message: '', target: '', urgent: false });
 
   const [readIds, setReadIds] = useState(() => {
     try {
@@ -130,6 +140,19 @@ export default function BellNotificationsPanel({
 
   const fetchLiveDatabaseNotifications = useCallback(async () => {
     if (!supabase || typeof supabase.from !== 'function') return;
+
+    // الإشعارات اللي قراها المستخدم ده (محفوظة في الداتابيز ومتزامنة بين الأجهزة)
+    if (dbReaderId) {
+      try {
+        const { data: rd, error: rdErr } = await supabase
+          .from('church_notification_reads')
+          .select('notification_id')
+          .eq('user_id', String(dbReaderId));
+        if (!rdErr && Array.isArray(rd)) setDbReadIds(rd.map((r) => String(r.notification_id)));
+      } catch {
+        // تجاهل
+      }
+    }
 
     // ===== غير الكاهن: كل واحد يشوف بياناته هو بس =====
     if (!isPriest) {
@@ -177,7 +200,7 @@ export default function BellNotificationsPanel({
             supabase
               .from('church_notifications')
               .select('*')
-              .eq('target_role', role)
+              .in('target_role', [role, 'all'])
               .order('created_at', { ascending: false })
               .limit(20)
           ),
@@ -255,7 +278,7 @@ export default function BellNotificationsPanel({
     } finally {
       setRefreshingLive(false);
     }
-  }, [isPriest, role, currentUser?.id, actorPhonesKey]);
+  }, [isPriest, role, currentUser?.id, actorPhonesKey, dbReaderId]);
 
   useEffect(() => {
     fetchLiveDatabaseNotifications();
@@ -267,10 +290,10 @@ export default function BellNotificationsPanel({
     // الكاهن: نفس القنوات القديمة. غيره: دعوات + إشعارات (+ حجوزات اعتراف للمخدوم)
     let builder = supabase.channel(`bell-live-sync-${role}-${storageScope}`);
     const watchTables = isPriest
-      ? ['confession_bookings', 'church_invitations', 'church_attendance_logs', 'church_notifications']
+      ? ['confession_bookings', 'church_invitations', 'church_attendance_logs', 'church_notifications', 'church_notification_reads']
       : role === 'member'
-        ? ['confession_bookings', 'church_invitations', 'church_notifications']
-        : ['church_invitations', 'church_notifications'];
+        ? ['confession_bookings', 'church_invitations', 'church_notifications', 'church_notification_reads']
+        : ['church_invitations', 'church_notifications', 'church_notification_reads'];
     watchTables.forEach((table) => {
       builder = builder.on(
         'postgres_changes',
@@ -313,12 +336,53 @@ export default function BellNotificationsPanel({
     }
   };
 
-  const markAsRead = (alertId) => {
-    if (!alertId || readIds.includes(alertId)) return;
+  const DB_PREFIX = 'special_db_';
+  const isDbAlertId = (id) => String(id || '').startsWith(DB_PREFIX);
+  const isAlertRead = (id) =>
+    readIds.includes(id) || (isDbAlertId(id) && dbReadIds.includes(String(id).slice(DB_PREFIX.length)));
+
+  const setDbRead = async (alertId, read) => {
+    const nid = String(alertId).slice(DB_PREFIX.length);
+    setDbReadIds((prev) => (read ? Array.from(new Set([...prev, nid])) : prev.filter((x) => x !== nid)));
+    try {
+      if (read) {
+        await supabase.from('church_notification_reads').upsert(
+          {
+            notification_id: nid,
+            user_id: String(dbReaderId),
+            reader_name: senderName || currentUser?.full_name || '',
+            reader_role: role,
+            read_at: new Date().toISOString()
+          },
+          { onConflict: 'notification_id,user_id' }
+        );
+      } else {
+        await supabase
+          .from('church_notification_reads')
+          .delete()
+          .eq('notification_id', nid)
+          .eq('user_id', String(dbReaderId));
+      }
+    } catch {
+      // تجاهل: الحالة المحلية اتحدثت
+    }
+  };
+
+  const markAsRead = (alertId, alertObj) => {
+    if (!alertId || isAlertRead(alertId)) return;
+    if (alertObj?.onRead) alertObj.onRead();
+    if (isDbAlertId(alertId) && dbReaderId) {
+      setDbRead(alertId, true);
+      return;
+    }
     persistReadIds([...readIds, alertId]);
   };
 
   const restoreAlert = (alertId) => {
+    if (isDbAlertId(alertId) && dbReaderId) {
+      setDbRead(alertId, false);
+      return;
+    }
     persistReadIds(readIds.filter((id) => id !== alertId));
   };
 
@@ -524,7 +588,8 @@ export default function BellNotificationsPanel({
       !sp.target_user_id ||
       !effectiveActorId ||
       String(sp.target_user_id) === String(effectiveActorId);
-    if (!targetMatches) return;
+    const roleMatches = !sp.target_role || sp.target_role === 'all' || sp.target_role === role;
+    if (!targetMatches || !roleMatches) return;
 
     pushAlert({
       id: `special_db_${sp.id}`,
@@ -534,6 +599,7 @@ export default function BellNotificationsPanel({
       title: sp.title || 'تنبيه خاص',
       sub: [
         sp.message || sp.body || sp.description || '',
+        sp.created_by_name ? `✍️ ${sp.created_by_name}` : '',
         sp.created_at ? `🕒 ${formatDateTimeAr(sp.created_at)}` : ''
       ]
         .filter(Boolean)
@@ -717,17 +783,25 @@ export default function BellNotificationsPanel({
         });
       });
 
+    }
+
+    // ملاحظات الكاهن: الخادم عن مخدوميه — ولي الأمر عن أبنائه
+    if (role === 'servant' || role === 'parent') {
       noteItems.forEach((n) => {
         pushAlert({
-          id: `pnote_${n.id}`,
+          id: `${role === 'servant' ? 'snote' : 'pnote'}_${n.id}`,
           urgency: 'special',
           badge: n.behavior_tag || 'ملاحظة متابعة 📝',
           icon: '📝',
-          title: `ملاحظة جديدة عن ${n.child_name || 'ابنك'}`,
+          title:
+            role === 'servant'
+              ? `ملاحظة جديدة عن ${n.child_name || 'مخدوم'}`
+              : `ملاحظة جديدة عن ${n.child_name || 'ابنك'}`,
           sub: n.note_text || '',
+          onRead: () => onAckNote?.(n.id),
           action: () => {
             setOpen(false);
-            onNavigateCard?.('children');
+            onNavigateCard?.(role === 'servant' ? 'cases' : 'children');
           }
         });
       });
@@ -735,11 +809,72 @@ export default function BellNotificationsPanel({
   }
 
   const markAllAsRead = () => {
-    persistReadIds([...readIds, ...alerts.map((a) => a.id)]);
+    const unread = alerts.filter((a) => !isAlertRead(a.id));
+    unread.forEach((a) => a.onRead?.());
+    const dbOnes = dbReaderId ? unread.filter((a) => isDbAlertId(a.id)) : [];
+    const localOnes = unread.filter((a) => !dbOnes.includes(a));
+    if (localOnes.length > 0) persistReadIds([...readIds, ...localOnes.map((a) => a.id)]);
+    dbOnes.forEach((a) => setDbRead(a.id, true));
   };
 
-  const unreadAlerts = alerts.filter((a) => !readIds.includes(a.id));
-  const readAlertsList = alerts.filter((a) => readIds.includes(a.id));
+  const unreadAlerts = alerts.filter((a) => !isAlertRead(a.id));
+  const readAlertsList = alerts.filter((a) => isAlertRead(a.id));
+
+  // ===== إرسال تنبيه لباقي الأدوار =====
+  const targetOptions =
+    role === 'priest'
+      ? [
+          { v: 'all', l: 'الجميع' },
+          { v: 'servant', l: 'الخدام' },
+          { v: 'member', l: 'المخدومين' },
+          { v: 'parent', l: 'أولياء الأمور' }
+        ]
+      : [
+          { v: 'priest', l: 'الآباء الكهنة' },
+          { v: 'servant', l: 'الخدام' }
+        ];
+
+  const sendNotification = async () => {
+    const title = composeForm.title.trim();
+    const target = composeForm.target || targetOptions[0].v;
+    if (!title) {
+      setComposeMsg('اكتب عنوان التنبيه');
+      return;
+    }
+    if (!dbReaderId) {
+      setComposeMsg('تعذر تحديد المرسل');
+      return;
+    }
+    setSending(true);
+    setComposeMsg('');
+    try {
+      const { error } = await supabase.from('church_notifications').insert([
+        {
+          type: 'broadcast',
+          title,
+          message: composeForm.message.trim(),
+          category: 'إعلان 📢',
+          is_urgent: composeForm.urgent,
+          target_role: target,
+          created_by: String(dbReaderId),
+          created_by_name: senderName || currentUser?.full_name || '',
+          created_by_role: role
+        }
+      ]);
+      if (error) {
+        setComposeMsg('تعذر الإرسال: ' + error.message);
+      } else {
+        setComposeMsg('✅ تم الإرسال');
+        setComposeForm({ title: '', message: '', target: '', urgent: false });
+        setTimeout(() => {
+          setComposeOpen(false);
+          setComposeMsg('');
+        }, 900);
+      }
+    } finally {
+      setSending(false);
+    }
+  };
 
   const urgentAlerts = unreadAlerts.filter((a) => a.urgency === 'urgent');
   const specialAlerts = unreadAlerts.filter((a) => a.urgency === 'special');
@@ -766,7 +901,7 @@ export default function BellNotificationsPanel({
   }, [unreadAlerts.length, soundEnabled]);
 
   const handleAlertClick = (al) => {
-    markAsRead(al.id);
+    markAsRead(al.id, al);
     al.action?.();
   };
 
@@ -794,7 +929,7 @@ export default function BellNotificationsPanel({
       </button>
       <button
         type="button"
-        onClick={() => markAsRead(al.id)}
+        onClick={() => markAsRead(al.id, al)}
         className="px-2.5 py-1.5 bg-white hover:bg-emerald-100 text-emerald-800 border border-gray-200 rounded-xl text-[11px] font-black flex items-center gap-1 shrink-0 cursor-pointer"
         title="تمت القراءة / إزالة التنبيه"
       >
@@ -882,6 +1017,15 @@ export default function BellNotificationsPanel({
                   >
                     <Eye size={13} />{' '}
                     {showReadAlerts ? 'إخفاء المقروءة' : `المقروءة (${readAlertsList.length})`}
+                  </button>
+                )}
+                {canSend && (
+                  <button
+                    type="button"
+                    onClick={() => setComposeOpen(true)}
+                    className="px-2.5 py-1.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl text-xs font-black cursor-pointer"
+                  >
+                    ✉️ إرسال تنبيه
                   </button>
                 )}
                 <button
@@ -987,6 +1131,64 @@ export default function BellNotificationsPanel({
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+      {composeOpen && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-90">
+          <div className="bg-white text-gray-900 rounded-3xl w-full max-w-md p-5 space-y-3 shadow-2xl">
+            <div className="flex justify-between items-center border-b pb-2">
+              <h3 className="text-base font-black text-[#7a1c24]">✉️ إرسال تنبيه</h3>
+              <button type="button" onClick={() => setComposeOpen(false)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer">
+                <X size={18} />
+              </button>
+            </div>
+            <label className="block text-xs font-bold">
+              إلى:
+              <select
+                className="w-full mt-1 p-2.5 border rounded-xl bg-white"
+                value={composeForm.target || targetOptions[0].v}
+                onChange={(e) => setComposeForm({ ...composeForm, target: e.target.value })}
+              >
+                {targetOptions.map((o) => (
+                  <option key={o.v} value={o.v}>{o.l}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-xs font-bold">
+              العنوان:
+              <input
+                className="w-full mt-1 p-2.5 border rounded-xl"
+                value={composeForm.title}
+                onChange={(e) => setComposeForm({ ...composeForm, title: e.target.value })}
+              />
+            </label>
+            <label className="block text-xs font-bold">
+              التفاصيل:
+              <textarea
+                rows={3}
+                className="w-full mt-1 p-2.5 border rounded-xl"
+                value={composeForm.message}
+                onChange={(e) => setComposeForm({ ...composeForm, message: e.target.value })}
+              />
+            </label>
+            <label className="flex items-center gap-2 text-xs font-bold">
+              <input
+                type="checkbox"
+                checked={composeForm.urgent}
+                onChange={(e) => setComposeForm({ ...composeForm, urgent: e.target.checked })}
+              />
+              تنبيه عاجل 🔴
+            </label>
+            {composeMsg && <p className="text-xs font-black text-[#7a1c24]">{composeMsg}</p>}
+            <button
+              type="button"
+              disabled={sending}
+              onClick={sendNotification}
+              className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white rounded-xl font-black cursor-pointer"
+            >
+              {sending ? 'جاري الإرسال...' : 'إرسال'}
+            </button>
           </div>
         </div>
       )}

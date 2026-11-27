@@ -491,14 +491,48 @@ export default function ParentDashboard({
   const handleAcknowledge = async (noteId) => {
     if (!noteId) return;
     setAckedNoteIds(prev => new Set([...prev, noteId]));
+
     if (onAcknowledgeNote) {
-      await onAcknowledgeNote(noteId);
-      return;
+      try {
+        await onAcknowledgeNote(noteId);
+      } catch {
+        // ignore
+      }
     }
-    await supabase
-      .from('member_notes')
-      .update({ acknowledged: true, is_read: true })
-      .eq('id', noteId);
+
+    try {
+      const { data, error } = await supabase
+        .from('member_notes')
+        .update({ acknowledged: true, is_read: true })
+        .eq('id', noteId)
+        .select('id');
+
+      if (error || !Array.isArray(data) || data.length === 0) {
+        setAckedNoteIds(prev => {
+          const next = new Set(prev);
+          next.delete(noteId);
+          return next;
+        });
+        console.error('فشل حفظ تأكيد الاطلاع:', error?.message || 'لم يتم تحديث أي صف (غالباً صلاحيات RLS)');
+        alert('تعذر حفظ تأكيد الاطلاع، حاول مرة أخرى.');
+        return;
+      }
+
+      try {
+        await supabase
+          .from('member_notes')
+          .update({
+            acknowledged_at: new Date().toISOString(),
+            acknowledged_by: parent?.full_name || String(parent?.id || 'parent'),
+            acknowledged_by_role: 'parent'
+          })
+          .eq('id', noteId);
+      } catch {
+        // ignore
+      }
+    } catch (err) {
+      console.error('تعذر تحديث الملاحظة:', err);
+    }
   };
 
   const renderNameBreakdown = (child) => {
@@ -587,9 +621,11 @@ export default function ParentDashboard({
             <BellNotificationsPanel
               role="parent"
               currentUser={parent}
+              readerId={parent?.id}
               allUsers={allUsers}
               linkRequests={linkRequests}
               noteItems={bellNoteItems}
+              onAckNote={handleAcknowledge}
               birthdayItems={effectiveChildrenList}
               trips={[...childrenTripsForParent, ...generalTripsForParent]}
               todayISO={new Date().toLocaleDateString('en-CA')}
