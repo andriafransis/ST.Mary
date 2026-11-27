@@ -104,6 +104,15 @@ const getBirthMonthDay = (dobStr) => {
   return { month: Number(parts[1]), day: Number(parts[0]) };
 };
 
+const normalizePhone = (phone = '') => {
+  const digits = String(phone).replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('0020') && digits.length >= 13) return '0' + digits.slice(4);
+  if (digits.startsWith('20') && digits.length === 12) return '0' + digits.slice(2);
+  if (digits.length === 10 && digits.startsWith('1')) return '0' + digits;
+  return digits;
+};
+
 const compressPhotoFile = (file, maxSide = 480, quality = 0.72) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -406,6 +415,8 @@ export default function ServantDashboard({
   useEffect(() => {
     if (!servant?.id || !supabase || typeof supabase.channel !== 'function') return;
 
+    const normServantPhone = normalizePhone(servant.phone);
+
     const channel = supabase
       .channel(`servant-invites-alert-${servant.id}`)
       .on(
@@ -419,7 +430,7 @@ export default function ServantDashboard({
           const row = payload.new || payload.old;
           const matchesServant =
             row?.recipient_user_id === servant.id ||
-            (servant.phone && row?.recipient_phone === servant.phone);
+            (normServantPhone && normalizePhone(row?.recipient_phone) === normServantPhone);
           if (!matchesServant) return;
 
           if (payload.eventType === 'INSERT' && payload.new) {
@@ -531,7 +542,6 @@ export default function ServantDashboard({
       }
     };
 
-    // إخفاء فوري (تفاؤلي) — ويتراجع لو الحفظ في الداتابيز فشل
     const updatedMap = { ...hiddenNotes, [note.id]: true };
     setHiddenNotes(updatedMap);
     persistHidden(updatedMap);
@@ -547,7 +557,6 @@ export default function ServantDashboard({
     if (!supabase || typeof supabase.from !== 'function') return;
 
     try {
-      // 1) الأعمدة الأساسية فقط، مع التأكد إن الصف اتحدّث فعلاً
       const { data, error } = await supabase
         .from('member_notes')
         .update({ is_read: true, acknowledged: true })
@@ -564,7 +573,6 @@ export default function ServantDashboard({
         return;
       }
 
-      // 2) بيانات من علّم ومتى (محاولة منفصلة، لو الأعمدة مش موجودة ما توقفش الباقي)
       try {
         await supabase
           .from('member_notes')
@@ -609,7 +617,6 @@ export default function ServantDashboard({
     ...localGroups.map(g => [g.group_name, g])
   ]).values()];
 
-  // متاح لخادم الاجتماع ولأي مستخدم يملك صلاحية المسح أو مرتبط بالكشافة
   const canScanInvitations = useMemo(
     () =>
       canScanChurchInvitations(servant) ||
@@ -1075,7 +1082,7 @@ export default function ServantDashboard({
       ...servantBoundMainGroups
     ]
       .map(normalizeTripText)
-      .filter(Boolean);
+      .filter(t => t.length >= 2);
 
     const gen = [];
     const mine = [];
@@ -1085,8 +1092,15 @@ export default function ServantDashboard({
         gen.push(tr);
         continue;
       }
-      const tgt = normalizeTripText(tr.target_service || tr.stage_name || tr.service_name || tr.assigned_class || '');
-      const matchesMine = scopeTokens.some(tok => tgt === tok || tgt.includes(tok) || tok.includes(tgt));
+      const tgt = normalizeTripText(
+        tr.target_service || tr.stage_name || tr.service_name || tr.assigned_class || ''
+      );
+      const matchesMine = scopeTokens.some(
+        tok =>
+          tgt === tok ||
+          (tgt.length >= 3 && tok.includes(tgt)) ||
+          (tok.length >= 3 && tgt.includes(tok))
+      );
       if (matchesMine) {
         mine.push(tr);
       }
@@ -1487,12 +1501,12 @@ export default function ServantDashboard({
 
   const handleNoteSubmit = (e) => {
     e.preventDefault();
-    if (!newNoteText.trim()) return;
+    if (!newNoteText.trim() || !noteMember?.id) return;
     if (typeof onSaveMemberNote === 'function') {
       onSaveMemberNote({
         member_id: noteMember.id,
         author_id: servant?.id,
-        note_text: newNoteText,
+        note_text: newNoteText.trim(),
         behavior_tag: newNoteTag || noteTags[0] || 'عادي'
       });
     }
