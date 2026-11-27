@@ -6,8 +6,25 @@ import PriestInvitationModal from '../components/priest/PriestInvitationModal';
 import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
 import BellNotificationsPanel from '../components/priest/BellNotificationsPanel';
 import {
-  Phone, AlertCircle, CheckCircle2, Calendar, BookOpen,
-  Clock, UserCheck, MessageCircle, Bus, MapPin, Layers, XCircle, MailPlus, QrCode, X, RefreshCw, Download, ShieldCheck, User
+  Phone,
+  AlertCircle,
+  CheckCircle2,
+  Calendar,
+  BookOpen,
+  Clock,
+  UserCheck,
+  MessageCircle,
+  Bus,
+  MapPin,
+  Layers,
+  XCircle,
+  MailPlus,
+  QrCode,
+  X,
+  RefreshCw,
+  Download,
+  ShieldCheck,
+  User
 } from 'lucide-react';
 
 const normalizeText = (val = '') =>
@@ -34,7 +51,7 @@ const normalizePhoneNumber = (phone = '') => {
 const splitList = (val) =>
   String(val || '')
     .split(/[,،]/)
-    .map(s => s.trim())
+    .map((s) => s.trim())
     .filter(Boolean);
 
 function buildMemberQrPayload(member = {}) {
@@ -207,17 +224,17 @@ export default function MemberDashboard({
   const todayISO = new Date().toLocaleDateString('en-CA');
 
   const myAtt = useMemo(
-    () => attendance.filter(a => a.member_id === member?.id),
+    () => attendance.filter((a) => a.member_id === member?.id),
     [attendance, member?.id]
   );
 
   const presentCount = useMemo(
-    () => myAtt.filter(a => a.present).length,
+    () => myAtt.filter((a) => a.present).length,
     [myAtt]
   );
 
   const myConfFather = useMemo(
-    () => priests.find(p => p.id === member?.confession_father_id),
+    () => priests.find((p) => p.id === member?.confession_father_id),
     [priests, member?.confession_father_id]
   );
 
@@ -297,10 +314,14 @@ export default function MemberDashboard({
           if (payload.eventType === 'INSERT' && payload.new) {
             const tierLabel = payload.new.invite_tier === 'vip' ? 'VIP' : 'عامة';
             setLiveInviteToast(
-              `وصلتك دعوة ${tierLabel}: ${payload.new.event_title}${payload.new.seat_or_zone ? ` (${payload.new.seat_or_zone})` : ''} — كود: ${payload.new.qr_token}`
+              `وصلتك دعوة ${tierLabel}: ${payload.new.event_title}${
+                payload.new.seat_or_zone ? ` (${payload.new.seat_or_zone})` : ''
+              } — كود: ${payload.new.qr_token}`
             );
           } else if (payload.eventType === 'UPDATE' && payload.new?.status === 'checked_in') {
-            setLiveInviteToast(`تم مسح QR الدعوة (${payload.new.event_title}) وتسجيل دخولك.`);
+            setLiveInviteToast(
+              `تم مسح QR الدعوة (${payload.new.event_title}) وتسجيل دخولك.`
+            );
           }
         }
       )
@@ -311,7 +332,13 @@ export default function MemberDashboard({
         supabase.removeChannel(channel);
       }
     };
-  }, [member?.id, member?.phone, member?.father_phone, member?.mother_phone, member?.full_name]);
+  }, [
+    member?.id,
+    member?.phone,
+    member?.father_phone,
+    member?.mother_phone,
+    member?.full_name
+  ]);
 
   const myServiceCards = useMemo(() => {
     if (!member) return [];
@@ -320,14 +347,14 @@ export default function MemberDashboard({
     const generalNames = splitList(member.general_service_name);
     const detailedStages = splitList(member.detailed_stage || member.service_stage);
     const extraServices = Array.isArray(member?.permissions?.extra_services)
-      ? member.permissions.extra_services.map(s => String(s || '').trim()).filter(Boolean)
+      ? member.permissions.extra_services.map((s) => String(s || '').trim()).filter(Boolean)
       : [];
 
     const matchedMap = new Map();
 
     const getServantsForTarget = (targetTokens = [], targetServiceId = null) => {
-      const normTokens = targetTokens.map(t => normalizeText(t)).filter(Boolean);
-      return servants.filter(sv => {
+      const normTokens = targetTokens.map((t) => normalizeText(t)).filter(Boolean);
+      return servants.filter((sv) => {
         if (targetServiceId && sv.service_id === targetServiceId) return true;
         const svTokens = [
           ...splitList(sv.assigned_class),
@@ -335,13 +362,25 @@ export default function MemberDashboard({
           ...splitList(sv.general_service_name),
           ...splitList(sv.sector),
           ...(Array.isArray(sv.permissions?.extra_services) ? sv.permissions.extra_services : [])
-        ].map(t => normalizeText(t)).filter(Boolean);
+        ]
+          .map((t) => normalizeText(t))
+          .filter(Boolean);
 
-        return normTokens.some(tk => svTokens.includes(tk));
+        return normTokens.some((tk) => svTokens.includes(tk));
       });
     };
 
-    const addCard = ({ key, title, stageLabel, kindLabel, meetingTime, roomName, headServant, serviceId, matchTokens }) => {
+    const addCard = ({
+      key,
+      title,
+      stageLabel,
+      kindLabel,
+      meetingTime,
+      roomName,
+      headServant,
+      serviceId,
+      matchTokens
+    }) => {
       const normKey = normalizeText(key || title);
       if (!normKey || matchedMap.has(normKey)) return;
       matchedMap.set(normKey, {
@@ -357,7 +396,7 @@ export default function MemberDashboard({
     };
 
     if (member.service_id) {
-      const exactSrv = services.find(s => s.id === member.service_id);
+      const exactSrv = services.find((s) => s.id === member.service_id);
       if (exactSrv) {
         addCard({
           key: `srv-${exactSrv.id}`,
@@ -373,9 +412,9 @@ export default function MemberDashboard({
       }
     }
 
-    assignedClasses.forEach(clsName => {
+    assignedClasses.forEach((clsName) => {
       const normCls = normalizeText(clsName);
-      const foundSrv = services.find(s => normalizeText(s.class_name) === normCls);
+      const foundSrv = services.find((s) => normalizeText(s.class_name) === normCls);
       if (foundSrv) {
         addCard({
           key: `cls-${normCls}`,
@@ -403,16 +442,25 @@ export default function MemberDashboard({
       }
     });
 
-    const otherNames = [...new Set([...generalNames, ...extraServices, ...(assignedClasses.length === 0 ? detailedStages : [])])]
-      .filter(n => n && normalizeText(n) !== 'شعب عام');
+    const otherNames = [
+      ...new Set([
+        ...generalNames,
+        ...extraServices,
+        ...(assignedClasses.length === 0 ? detailedStages : [])
+      ])
+    ].filter((n) => n && normalizeText(n) !== 'شعب عام');
 
-    otherNames.forEach(srvName => {
+    otherNames.forEach((srvName) => {
       const normName = normalizeText(srvName);
-      const isExplicitExtra = extraServices.some(ex => normalizeText(ex) === normName) || generalNames.some(gn => normalizeText(gn) === normName);
+      const isExplicitExtra =
+        extraServices.some((ex) => normalizeText(ex) === normName) ||
+        generalNames.some((gn) => normalizeText(gn) === normName);
       if (assignedClasses.length > 0 && !isExplicitExtra && detailedStages.length <= 1) return;
 
-      const grp = serviceGroups.find(g => normalizeText(g.group_name) === normName);
-      const srvRow = services.find(s => normalizeText(s.stage_name) === normName || normalizeText(s.class_name) === normName);
+      const grp = serviceGroups.find((g) => normalizeText(g.group_name) === normName);
+      const srvRow = services.find(
+        (s) => normalizeText(s.stage_name) === normName || normalizeText(s.class_name) === normName
+      );
 
       if (grp) {
         addCard({
@@ -420,7 +468,9 @@ export default function MemberDashboard({
           title: grp.group_name,
           stageLabel: grp.gender_target || 'خدمة',
           kindLabel: grp.has_classes === false ? 'اجتماع / خدمة عامة' : 'خدمة مشترك بها',
-          meetingTime: grp.service_day ? `${grp.service_day} ${grp.start_time || ''}` : (srvRow?.meeting_time || ''),
+          meetingTime: grp.service_day
+            ? `${grp.service_day} ${grp.start_time || ''}`.trim()
+            : srvRow?.meeting_time || '',
           roomName: srvRow?.room_name || '',
           headServant: grp.head_servant_name || srvRow?.head_servant_name || '',
           serviceId: srvRow?.id || null,
@@ -458,16 +508,18 @@ export default function MemberDashboard({
 
   const { generalTrips, myServiceTrips } = useMemo(() => {
     const memberServiceTokens = [
-      ...myServiceCards.map(c => c.title),
-      ...myServiceCards.map(c => c.stageLabel),
+      ...myServiceCards.map((c) => c.title),
+      ...myServiceCards.map((c) => c.stageLabel),
       ...splitList(member?.assigned_class),
       ...splitList(member?.detailed_stage),
       ...splitList(member?.service_stage),
       ...splitList(member?.general_service_name),
-      ...(Array.isArray(member?.permissions?.extra_services) ? member.permissions.extra_services : [])
+      ...(Array.isArray(member?.permissions?.extra_services)
+        ? member.permissions.extra_services
+        : [])
     ]
-      .map(t => normalizeText(t))
-      .filter(Boolean);
+      .map((t) => normalizeText(t))
+      .filter((t) => t.length >= 2);
 
     const gen = [];
     const mine = [];
@@ -495,7 +547,10 @@ export default function MemberDashboard({
       }
 
       const matchesMine = memberServiceTokens.some(
-        tok => normTarget === tok || normTarget.includes(tok) || tok.includes(normTarget)
+        (tok) =>
+          normTarget === tok ||
+          (normTarget.length >= 3 && tok.includes(normTarget)) ||
+          (tok.length >= 3 && normTarget.includes(tok))
       );
 
       if (matchesMine) {
@@ -507,14 +562,17 @@ export default function MemberDashboard({
   }, [allTrips, myServiceCards, member]);
 
   const onlyMassEvents = useMemo(
-    () => events.filter(ev => (ev.event_type || '').includes('قداس') || (ev.event_type || '').includes('عشية')),
+    () =>
+      events.filter(
+        (ev) => (ev.event_type || '').includes('قداس') || (ev.event_type || '').includes('عشية')
+      ),
     [events]
   );
 
   const handleChooseConfessionFather = async (e) => {
     e.preventDefault();
     if (!selectedPriestId) return alert('اختر الأب الكاهن أولاً');
-    const priestObj = priests.find(p => p.id === selectedPriestId);
+    const priestObj = priests.find((p) => p.id === selectedPriestId);
     setSavingFather(true);
     try {
       const { data, error } = await supabase
@@ -545,28 +603,30 @@ export default function MemberDashboard({
   };
 
   const handleBookSlot = async (slot) => {
-    const already = myBookings.some(b => b.slot_id === slot.id && b.status === 'محجوز');
+    const already = myBookings.some((b) => b.slot_id === slot.id && b.status === 'محجوز');
     if (already) return alert('أنت حاجز هذا الميعاد بالفعل ✅');
     setBookingBusy(slot.id);
     try {
       const { data, error } = await supabase
         .from('confession_bookings')
-        .insert([{
-          slot_id: slot.id,
-          priest_id: slot.priest_id,
-          member_id: member.id,
-          member_name: member.full_name,
-          member_phone: member.phone || '',
-          booking_date: slot.slot_date,
-          booking_time: slot.start_time || '',
-          status: 'محجوز'
-        }])
+        .insert([
+          {
+            slot_id: slot.id,
+            priest_id: slot.priest_id,
+            member_id: member.id,
+            member_name: member.full_name,
+            member_phone: member.phone || '',
+            booking_date: slot.slot_date,
+            booking_time: slot.start_time || '',
+            status: 'محجوز'
+          }
+        ])
         .select()
         .single();
 
       if (error) alert('تعذر الحجز: ' + error.message);
       else if (data) {
-        setMyBookings(prev => [...prev, data]);
+        setMyBookings((prev) => [...prev, data]);
         logActivity({
           user: member,
           actionType: 'حجز_ميعاد_اعتراف',
@@ -595,7 +655,7 @@ export default function MemberDashboard({
 
       if (error) alert('تعذر إلغاء الحجز: ' + error.message);
       else if (data) {
-        setMyBookings(prev => prev.map(b => (b.id === booking.id ? data : b)));
+        setMyBookings((prev) => prev.map((b) => (b.id === booking.id ? data : b)));
         logActivity({
           user: member,
           actionType: 'إلغاء_حجز_اعتراف',
@@ -610,7 +670,10 @@ export default function MemberDashboard({
   };
 
   const handleJoinTrip = async (trip) => {
-    const countInput = prompt(`اشتراك في رحلة (${trip.title}):\nاكتب عدد الأفراد المطلوب حجزهم:`, '1');
+    const countInput = prompt(
+      `اشتراك في رحلة (${trip.title}):\nاكتب عدد الأفراد المطلوب حجزهم:`,
+      '1'
+    );
     if (!countInput) return;
     const seatsCount = Math.max(1, Number(countInput) || 1);
     const notesInput = prompt('أي ملاحظات للرحلة (اختياري):', '') || '';
@@ -619,21 +682,23 @@ export default function MemberDashboard({
     try {
       const { data, error } = await supabase
         .from('trip_registrations')
-        .insert([{
-          trip_id: trip.id,
-          user_id: member.id,
-          user_name: member.full_name,
-          user_phone: member.phone || '',
-          seats_count: seatsCount,
-          notes: notesInput,
-          status: 'طلب اشتراك'
-        }])
+        .insert([
+          {
+            trip_id: trip.id,
+            user_id: member.id,
+            user_name: member.full_name,
+            user_phone: member.phone || '',
+            seats_count: seatsCount,
+            notes: notesInput,
+            status: 'طلب اشتراك'
+          }
+        ])
         .select()
         .single();
 
       if (error) return alert('تعذر إرسال الاشتراك: ' + error.message);
       if (data) {
-        setMyTripRegs(prev => [...prev, data]);
+        setMyTripRegs((prev) => [...prev, data]);
         logActivity({
           user: member,
           actionType: 'اشتراك_رحلة',
@@ -660,7 +725,7 @@ export default function MemberDashboard({
 
       if (error) alert('تعذر إلغاء الاشتراك: ' + error.message);
       else {
-        setMyTripRegs(prev => prev.filter(r => r.id !== regObj.id));
+        setMyTripRegs((prev) => prev.filter((r) => r.id !== regObj.id));
         logActivity({
           user: member,
           actionType: 'إلغاء_اشتراك_رحلة',
@@ -677,7 +742,7 @@ export default function MemberDashboard({
   const displayedSlots = useMemo(
     () =>
       confessionSlots.filter(
-        s =>
+        (s) =>
           s.slot_date >= todayISO &&
           (filterPriestId === 'all' || s.priest_id === filterPriestId)
       ),
@@ -685,15 +750,16 @@ export default function MemberDashboard({
   );
 
   const activeBookingsCount = useMemo(
-    () => myBookings.filter(b => b.status === 'محجوز').length,
+    () => myBookings.filter((b) => b.status === 'محجوز').length,
     [myBookings]
   );
 
-  const intervalLabel = confessionIntervalDays === 45
-    ? 'كل شهر ونصف (45 يوم)'
-    : confessionIntervalDays === 60
-      ? 'كل شهرين (60 يوم)'
-      : `كل ${confessionIntervalDays} يوم`;
+  const intervalLabel =
+    confessionIntervalDays === 45
+      ? 'كل شهر ونصف (45 يوم)'
+      : confessionIntervalDays === 60
+        ? 'كل شهرين (60 يوم)'
+        : `كل ${confessionIntervalDays} يوم`;
 
   const visibleTripsList = tripSubTab === 'general' ? generalTrips : myServiceTrips;
 
@@ -710,16 +776,22 @@ export default function MemberDashboard({
 
     return (
       <div className="grid gap-3">
-        {list.map(tr => {
-          const myReg = myTripRegs.find(r => r.trip_id === tr.id);
-          const isOvernight = Number(tr.days_count || 1) > 1 || (Array.isArray(tr.rooms) && tr.rooms.length > 0);
+        {list.map((tr) => {
+          const myReg = myTripRegs.find((r) => r.trip_id === tr.id);
+          const isOvernight =
+            Number(tr.days_count || 1) > 1 || (Array.isArray(tr.rooms) && tr.rooms.length > 0);
           return (
-            <div key={tr.id} className="p-4 bg-purple-50/40 border border-purple-200 rounded-2xl space-y-2.5">
+            <div
+              key={tr.id}
+              className="p-4 bg-purple-50/40 border border-purple-200 rounded-2xl space-y-2.5"
+            >
               <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-3">
                 <div className="space-y-1">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="px-2 py-0.5 bg-purple-100 text-purple-950 rounded-lg text-[10px] font-black">
-                      {isGeneralSection ? '🌐 رحلات عام (مكتب الرحلات)' : `🏫 رحلات خدمتي (${tr.target_service || tr.stage_name || 'خدمتي'})`}
+                      {isGeneralSection
+                        ? '🌐 رحلات عام (مكتب الرحلات)'
+                        : `🏫 رحلات خدمتي (${tr.target_service || tr.stage_name || 'خدمتي'})`}
                     </span>
                     <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded-lg text-[10px] font-bold">
                       {tr.trip_category || 'رحلة'}
@@ -823,10 +895,14 @@ export default function MemberDashboard({
 
       <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-4">
         <div className="space-y-2">
-          <h2 className="text-base sm:text-xl font-black text-amber-300">أهلاً بك، {member?.full_name}</h2>
+          <h2 className="text-base sm:text-xl font-black text-amber-300">
+            أهلاً بك، {member?.full_name}
+          </h2>
           <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
             <span className="px-2.5 py-1 bg-white/15 rounded-xl font-bold">
-              {myConfFather ? `✝ أب الاعتراف: ${myConfFather.full_name}` : 'لم يتم تحديد أب الاعتراف بعد'}
+              {myConfFather
+                ? `✝ أب الاعتراف: ${myConfFather.full_name}`
+                : 'لم يتم تحديد أب الاعتراف بعد'}
             </span>
             <span className="px-2.5 py-1 bg-amber-400/20 text-amber-200 rounded-xl font-bold">
               {myServiceCards.length > 1
@@ -846,7 +922,7 @@ export default function MemberDashboard({
               confessionBookings={myBookings}
               masses={priestMasses}
               trips={[...myServiceTrips, ...generalTrips]}
-              registeredTripIds={myTripRegs.map(r => r.trip_id)}
+              registeredTripIds={myTripRegs.map((r) => r.trip_id)}
               needsConfessionFather={!member?.confession_father_id}
               todayISO={todayISO}
               onNavigateCard={(cardId) => setActiveTab(cardId)}
@@ -854,7 +930,9 @@ export default function MemberDashboard({
           </div>
           <div className="bg-white/15 border border-white/15 px-3.5 py-2 rounded-2xl text-center">
             <span className="text-[10px] opacity-85 font-bold block">حجوزات الاعتراف</span>
-            <strong className="text-sm sm:text-base text-white font-black">{activeBookingsCount}</strong>
+            <strong className="text-sm sm:text-base text-white font-black">
+              {activeBookingsCount}
+            </strong>
           </div>
           <div className="bg-white/15 border border-white/15 px-4 py-2 rounded-2xl text-center">
             <span className="text-[10px] opacity-85 font-bold block">نسبة حضورك</span>
@@ -880,7 +958,10 @@ export default function MemberDashboard({
       </div>
 
       {!member?.confession_father_id && (
-        <form onSubmit={handleChooseConfessionFather} className="bg-amber-50 border-2 border-amber-300 p-4 rounded-3xl space-y-2.5 shadow-sm">
+        <form
+          onSubmit={handleChooseConfessionFather}
+          className="bg-amber-50 border-2 border-amber-300 p-4 rounded-3xl space-y-2.5 shadow-sm"
+        >
           <strong className="text-sm text-amber-950 flex items-center gap-1.5">
             <UserCheck size={17} className="text-[#7a1c24]" /> تحديد أب الاعتراف لأول مرة:
           </strong>
@@ -889,11 +970,13 @@ export default function MemberDashboard({
               required
               className="w-full sm:max-w-md p-2.5 border border-amber-300 rounded-xl bg-white font-bold outline-none focus:border-[#7a1c24]"
               value={selectedPriestId}
-              onChange={e => setSelectedPriestId(e.target.value)}
+              onChange={(e) => setSelectedPriestId(e.target.value)}
             >
               <option value="">-- اختر الأب الكاهن --</option>
-              {priests.map(p => (
-                <option key={p.id} value={p.id}>{p.full_name}</option>
+              {priests.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.full_name}
+                </option>
               ))}
             </select>
             <button
@@ -912,7 +995,9 @@ export default function MemberDashboard({
           type="button"
           onClick={() => setActiveTab('services')}
           className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 ${
-            activeTab === 'services' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+            activeTab === 'services'
+              ? 'bg-[#7a1c24] text-white'
+              : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
           }`}
         >
           <BookOpen size={14} /> خدماتي ({myServiceCards.length})
@@ -921,7 +1006,9 @@ export default function MemberDashboard({
           type="button"
           onClick={() => setActiveTab('my_invites')}
           className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 ${
-            activeTab === 'my_invites' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+            activeTab === 'my_invites'
+              ? 'bg-[#7a1c24] text-white'
+              : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
           }`}
         >
           <QrCode size={14} /> دعواتي QR
@@ -935,7 +1022,9 @@ export default function MemberDashboard({
           type="button"
           onClick={() => setActiveTab('confessions')}
           className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 ${
-            activeTab === 'confessions' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+            activeTab === 'confessions'
+              ? 'bg-[#7a1c24] text-white'
+              : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
           }`}
         >
           <Clock size={14} /> مواعيد الاعتراف ({displayedSlots.length})
@@ -944,7 +1033,9 @@ export default function MemberDashboard({
           type="button"
           onClick={() => setActiveTab('masses')}
           className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 ${
-            activeTab === 'masses' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+            activeTab === 'masses'
+              ? 'bg-[#7a1c24] text-white'
+              : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
           }`}
         >
           <Calendar size={14} /> القداسات والصلوات
@@ -953,7 +1044,9 @@ export default function MemberDashboard({
           type="button"
           onClick={() => setActiveTab('trips')}
           className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 ${
-            activeTab === 'trips' ? 'bg-[#7a1c24] text-white' : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+            activeTab === 'trips'
+              ? 'bg-[#7a1c24] text-white'
+              : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
           }`}
         >
           <Bus size={14} /> الرحلات ({myServiceTrips.length + generalTrips.length})
@@ -962,7 +1055,9 @@ export default function MemberDashboard({
           type="button"
           onClick={() => setActiveTab('invite')}
           className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 ${
-            activeTab === 'invite' ? 'bg-[#7a1c24] text-white' : 'bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-200'
+            activeTab === 'invite'
+              ? 'bg-[#7a1c24] text-white'
+              : 'bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-200'
           }`}
         >
           <MailPlus size={14} /> دعوة لأبونا لمناسبة
@@ -982,7 +1077,9 @@ export default function MemberDashboard({
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
               <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5">
                 <BookOpen size={17} />
-                {myServiceCards.length > 1 ? `الخدمات المشترك بها (${myServiceCards.length} كروت)` : 'خدمتك الخاصة وخدامك'}
+                {myServiceCards.length > 1
+                  ? `الخدمات المشترك بها (${myServiceCards.length} كروت)`
+                  : 'خدمتك الخاصة وخدامك'}
               </h3>
               <span className="px-2.5 py-1 rounded-xl bg-[#fbfaf7] border border-gray-200 text-[11px] font-bold text-gray-700 flex items-center gap-1">
                 <Layers size={13} className="text-[#7a1c24]" />
@@ -995,9 +1092,16 @@ export default function MemberDashboard({
                 لم يتم تسكينك في فصل أو خدمة بعد. راجع خادمك أو أدمن الكنيسة.
               </div>
             ) : (
-              <div className={`grid gap-3.5 ${myServiceCards.length > 1 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
-                {myServiceCards.map(card => (
-                  <div key={card.id} className="p-4 bg-[#fbfaf7] border-2 border-amber-200/80 rounded-3xl space-y-3 shadow-2xs">
+              <div
+                className={`grid gap-3.5 ${
+                  myServiceCards.length > 1 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'
+                }`}
+              >
+                {myServiceCards.map((card) => (
+                  <div
+                    key={card.id}
+                    className="p-4 bg-[#fbfaf7] border-2 border-amber-200/80 rounded-3xl space-y-3 shadow-2xs"
+                  >
                     <div className="flex items-start justify-between gap-2 border-b border-amber-200/60 pb-2.5">
                       <div>
                         <div className="flex flex-wrap items-center gap-1.5 mb-1">
@@ -1024,14 +1128,21 @@ export default function MemberDashboard({
                         👥 خدام هذه الخدمة ({card.servants.length}):
                       </span>
                       {card.servants.length === 0 ? (
-                        <p className="text-[11px] text-gray-400">لا يوجد خدام مسجلون لهذه الخدمة حالياً.</p>
+                        <p className="text-[11px] text-gray-400">
+                          لا يوجد خدام مسجلون لهذه الخدمة حالياً.
+                        </p>
                       ) : (
                         <div className="space-y-1.5">
-                          {card.servants.map(s => (
-                            <div key={s.id} className="p-2.5 bg-white border border-gray-200 rounded-2xl flex flex-wrap justify-between items-center gap-2">
+                          {card.servants.map((s) => (
+                            <div
+                              key={s.id}
+                              className="p-2.5 bg-white border border-gray-200 rounded-2xl flex flex-wrap justify-between items-center gap-2"
+                            >
                               <div>
                                 <strong className="block text-gray-900 text-xs">{s.full_name}</strong>
-                                {s.phone && <span className="text-[11px] text-gray-500">📞 {s.phone}</span>}
+                                {s.phone && (
+                                  <span className="text-[11px] text-gray-500">📞 {s.phone}</span>
+                                )}
                               </div>
                               {s.phone && (
                                 <div className="flex gap-1.5 shrink-0">
@@ -1066,8 +1177,12 @@ export default function MemberDashboard({
         {activeTab === 'confessions' && (
           <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm space-y-3">
             <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl flex flex-wrap items-center justify-between gap-2 text-amber-950 font-bold">
-              <span>🙏 نظام الاعتراف بالكنيسة لكل الشعب: <strong>{intervalLabel}</strong></span>
-              <span className="text-[11px] text-[#7a1c24]">يرجى الحفاظ على ميعاد الاعتراف بانتظام</span>
+              <span>
+                🙏 نظام الاعتراف بالكنيسة لكل الشعب: <strong>{intervalLabel}</strong>
+              </span>
+              <span className="text-[11px] text-[#7a1c24]">
+                يرجى الحفاظ على ميعاد الاعتراف بانتظام
+              </span>
             </div>
 
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2.5 border-b border-gray-100 pb-3">
@@ -1077,11 +1192,13 @@ export default function MemberDashboard({
               <select
                 className="w-full sm:w-64 p-2.5 border border-gray-200 rounded-xl bg-[#fbfaf7] font-bold text-xs outline-none focus:border-[#7a1c24]"
                 value={filterPriestId}
-                onChange={e => setFilterPriestId(e.target.value)}
+                onChange={(e) => setFilterPriestId(e.target.value)}
               >
                 <option value="all">كل آباء الكنيسة</option>
-                {priests.map(p => (
-                  <option key={p.id} value={p.id}>{p.full_name}</option>
+                {priests.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.full_name}
+                  </option>
                 ))}
               </select>
             </div>
@@ -1092,44 +1209,66 @@ export default function MemberDashboard({
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {displayedSlots.map(s => {
-                  const slotPriest = priests.find(p => p.id === s.priest_id);
-                  const activeBooking = myBookings.find(b => b.slot_id === s.id && b.status === 'محجوز');
+                {displayedSlots.map((s) => {
+                  const slotPriest = priests.find((p) => p.id === s.priest_id);
+                  const activeBooking = myBookings.find(
+                    (b) => b.slot_id === s.id && b.status === 'محجوز'
+                  );
 
                   return (
                     <div
                       key={s.id}
                       className={`p-4 rounded-2xl border flex flex-col justify-between gap-3 ${
-                        s.is_cancelled ? 'bg-red-50/70 border-red-200' : 'bg-[#fbfaf7] border-gray-200'
+                        s.is_cancelled
+                          ? 'bg-red-50/70 border-red-200'
+                          : 'bg-[#fbfaf7] border-gray-200'
                       }`}
                     >
                       <div className="space-y-1.5">
                         <div className="flex justify-between items-start gap-2">
-                          <strong className="text-sm text-gray-900">{s.confession_title} ({s.period})</strong>
+                          <strong className="text-sm text-gray-900">
+                            {s.confession_title} ({s.period})
+                          </strong>
                           <span
                             className={`px-2.5 py-1 rounded-full font-bold text-[10px] flex items-center gap-1 shrink-0 ${
-                              s.is_cancelled ? 'bg-red-600 text-white' : 'bg-green-100 text-green-800'
+                              s.is_cancelled
+                                ? 'bg-red-600 text-white'
+                                : 'bg-green-100 text-green-800'
                             }`}
                           >
                             {s.is_cancelled ? (
-                              <><AlertCircle size={12} /> معتذر</>
+                              <>
+                                <AlertCircle size={12} /> معتذر
+                              </>
                             ) : (
-                              <><CheckCircle2 size={12} /> متاح</>
+                              <>
+                                <CheckCircle2 size={12} /> متاح
+                              </>
                             )}
                           </span>
                         </div>
 
-                        {slotPriest && <span className="text-[#7a1c24] font-black block">✝ {slotPriest.full_name}</span>}
+                        {slotPriest && (
+                          <span className="text-[#7a1c24] font-black block">
+                            ✝ {slotPriest.full_name}
+                          </span>
+                        )}
                         <div className="flex flex-wrap gap-x-3 gap-y-1 text-gray-600">
                           <span>📅 {s.slot_date}</span>
-                          <span>⏰ {s.start_time} - {s.end_time}</span>
+                          <span>
+                            ⏰ {s.start_time} - {s.end_time}
+                          </span>
                         </div>
                         {s.location && (
                           <span className="text-gray-500 flex items-center gap-1">
                             <MapPin size={12} className="text-[#7a1c24]" /> {s.location}
                           </span>
                         )}
-                        {s.is_cancelled && <p className="text-red-700 font-bold pt-1">⚠️ اعتذر أبونا: {s.cancel_reason}</p>}
+                        {s.is_cancelled && (
+                          <p className="text-red-700 font-bold pt-1">
+                            ⚠️ اعتذر أبونا: {s.cancel_reason}
+                          </p>
+                        )}
                       </div>
 
                       {!s.is_cancelled && (
@@ -1173,33 +1312,46 @@ export default function MemberDashboard({
             <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5 border-b border-gray-100 pb-3">
               <Calendar size={17} /> مواعيد القداسات الإلهية والصلوات
             </h3>
-            {priestMasses.filter(m => m.is_available).length === 0 && onlyMassEvents.length === 0 ? (
+            {priestMasses.filter((m) => m.is_available).length === 0 &&
+            onlyMassEvents.length === 0 ? (
               <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
                 لا توجد مواعيد قداسات أو صلوات منشورة حالياً.
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {priestMasses.filter(m => m.is_available).map(m => (
-                  <div key={m.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-2">
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="px-2 py-0.5 rounded-lg bg-blue-100 text-blue-900 font-bold text-[10px]">{m.target_audience}</span>
-                        <strong className="text-sm text-gray-900">{m.mass_name}</strong>
+                {priestMasses
+                  .filter((m) => m.is_available)
+                  .map((m) => (
+                    <div
+                      key={m.id}
+                      className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-2"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="px-2 py-0.5 rounded-lg bg-blue-100 text-blue-900 font-bold text-[10px]">
+                            {m.target_audience}
+                          </span>
+                          <strong className="text-sm text-gray-900">{m.mass_name}</strong>
+                        </div>
+                        <p className="text-gray-500 flex items-center gap-1">
+                          <MapPin size={12} className="text-[#7a1c24]" /> {m.church_name}
+                        </p>
                       </div>
-                      <p className="text-gray-500 flex items-center gap-1">
-                        <MapPin size={12} className="text-[#7a1c24]" /> {m.church_name}
-                      </p>
+                      <span className="self-start sm:self-center px-3 py-1 bg-red-50 text-[#7a1c24] rounded-xl font-black text-[11px] shrink-0">
+                        {m.mass_date} ({m.mass_time})
+                      </span>
                     </div>
-                    <span className="self-start sm:self-center px-3 py-1 bg-red-50 text-[#7a1c24] rounded-xl font-black text-[11px] shrink-0">
-                      {m.mass_date} ({m.mass_time})
-                    </span>
-                  </div>
-                ))}
-                {onlyMassEvents.map(ev => (
-                  <div key={ev.id} className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                  ))}
+                {onlyMassEvents.map((ev) => (
+                  <div
+                    key={ev.id}
+                    className="p-3.5 bg-[#fbfaf7] border border-gray-200 rounded-2xl flex flex-col sm:flex-row justify-between sm:items-center gap-2"
+                  >
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900 font-bold text-[10px]">{ev.event_type}</span>
+                        <span className="px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900 font-bold text-[10px]">
+                          {ev.event_type}
+                        </span>
                         <strong className="text-sm text-gray-900">{ev.title}</strong>
                       </div>
                       <p className="text-gray-500 flex items-center gap-1">
@@ -1227,7 +1379,9 @@ export default function MemberDashboard({
                   type="button"
                   onClick={() => setTripSubTab('my_service')}
                   className={`px-3.5 py-1.5 rounded-xl font-black text-xs cursor-pointer transition ${
-                    tripSubTab === 'my_service' ? 'bg-[#7a1c24] text-white' : 'text-gray-700 hover:bg-gray-100'
+                    tripSubTab === 'my_service'
+                      ? 'bg-[#7a1c24] text-white'
+                      : 'text-gray-700 hover:bg-gray-100'
                   }`}
                 >
                   رحلات خدمتي ({myServiceTrips.length})
@@ -1236,7 +1390,9 @@ export default function MemberDashboard({
                   type="button"
                   onClick={() => setTripSubTab('general')}
                   className={`px-3.5 py-1.5 rounded-xl font-black text-xs cursor-pointer transition ${
-                    tripSubTab === 'general' ? 'bg-[#7a1c24] text-white' : 'text-gray-700 hover:bg-gray-100'
+                    tripSubTab === 'general'
+                      ? 'bg-[#7a1c24] text-white'
+                      : 'text-gray-700 hover:bg-gray-100'
                   }`}
                 >
                   رحلات عام ({generalTrips.length})
