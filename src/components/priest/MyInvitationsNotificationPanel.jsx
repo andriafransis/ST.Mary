@@ -70,6 +70,23 @@ export default function MyInvitationsNotificationPanel({ currentUser }) {
     loadMyInvitations();
   }, [loadMyInvitations]);
 
+  useEffect(() => {
+    if (!currentUser?.id || !supabase || typeof supabase.channel !== 'function') return;
+    const ch = supabase
+      .channel(`my-invitations-sync-${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'church_invitations' },
+        () => loadMyInvitations()
+      )
+      .subscribe();
+    return () => {
+      if (typeof supabase.removeChannel === 'function') {
+        supabase.removeChannel(ch);
+      }
+    };
+  }, [currentUser?.id, loadMyInvitations]);
+
   const getInvKey = (inv) => String(inv.id || inv.qr_token);
 
   const isItemDismissed = useCallback(
@@ -95,7 +112,6 @@ export default function MyInvitationsNotificationPanel({ currentUser }) {
     const ids = targetInvitations.map((i) => i.id).filter(Boolean);
     if (ids.length === 0) return;
 
-    // محاولة آمنة لتحديث عمود is_read إن كان موجوداً في الجدول
     await supabase
       .from('church_invitations')
       .update({ is_read: true })
@@ -290,7 +306,7 @@ export default function MyInvitationsNotificationPanel({ currentUser }) {
 
       {activeInvite && (
         <InvitationQrCard
-          invitation={activeInvite}
+          invite={activeInvite}
           onClose={handleCloseCard}
         />
       )}
