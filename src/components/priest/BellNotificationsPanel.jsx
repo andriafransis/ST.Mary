@@ -262,7 +262,12 @@ export default function BellNotificationsPanel({
       ]);
 
       if (!bkRes.error && Array.isArray(bkRes.data)) {
-        setLiveBookings(bkRes.data);
+        // حجوزات اعتراف الكاهن ده بس (مش حجوزات باقي الآباء)
+        setLiveBookings(
+          dbReaderId
+            ? bkRes.data.filter((b) => String(b.priest_id) === String(dbReaderId))
+            : bkRes.data
+        );
       }
       if (!invRes.error && Array.isArray(invRes.data)) {
         setLiveInvitations(invRes.data);
