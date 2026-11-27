@@ -1,6 +1,17 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
-import { Bell, RefreshCw, Clock, UserCheck, Ticket, Eye, X } from 'lucide-react';
+import {
+  Bell,
+  RefreshCw,
+  Clock,
+  UserCheck,
+  Ticket,
+  Eye,
+  X,
+  CheckCheck,
+  EyeOff,
+  RotateCcw
+} from 'lucide-react';
 
 function formatDateTimeAr(isoStr) {
   if (!isoStr) return '—';
@@ -14,10 +25,38 @@ function formatDateTimeAr(isoStr) {
   });
 }
 
+function getClearedKey(userId) {
+  return `cleared_notifications_panel_${userId || 'guest'}`;
+}
+
+function readClearedIds(userId) {
+  try {
+    const raw = localStorage.getItem(getClearedKey(userId));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeClearedIds(userId, ids) {
+  try {
+    localStorage.setItem(getClearedKey(userId), JSON.stringify([...new Set(ids)]));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export default function NotificationsDataPanel({ currentUser, onOpenItem }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
+  const [clearedIds, setClearedIds] = useState(() => readClearedIds(currentUser?.id));
+  const [showCleared, setShowCleared] = useState(false);
+
+  useEffect(() => {
+    setClearedIds(readClearedIds(currentUser?.id));
+  }, [currentUser?.id]);
 
   const loadNotificationsData = useCallback(async () => {
     if (!currentUser?.id || !supabase || typeof supabase.from !== 'function') return;
@@ -83,6 +122,37 @@ export default function NotificationsDataPanel({ currentUser, onOpenItem }) {
     loadNotificationsData();
   }, [loadNotificationsData]);
 
+  const visibleItems = useMemo(() => {
+    if (showCleared) return items;
+    return items.filter((item) => !clearedIds.includes(item.id));
+  }, [items, showCleared, clearedIds]);
+
+  const clearedCount = useMemo(
+    () => items.filter((item) => clearedIds.includes(item.id)).length,
+    [items, clearedIds]
+  );
+
+  const handleDismissOne = (itemId) => {
+    const next = [...clearedIds, itemId];
+    setClearedIds(next);
+    writeClearedIds(currentUser?.id, next);
+    if (selectedItem?.id === itemId) setSelectedItem(null);
+  };
+
+  const handleClearAll = () => {
+    if (visibleItems.length === 0) return;
+    const next = [...clearedIds, ...visibleItems.map((i) => i.id)];
+    setClearedIds(next);
+    writeClearedIds(currentUser?.id, next);
+    setSelectedItem(null);
+  };
+
+  const handleRestoreAll = () => {
+    setClearedIds([]);
+    writeClearedIds(currentUser?.id, []);
+    setShowCleared(false);
+  };
+
   if (!currentUser) return null;
 
   return (
@@ -90,12 +160,12 @@ export default function NotificationsDataPanel({ currentUser, onOpenItem }) {
       className="bg-white border-2 border-slate-200 rounded-3xl p-4 sm:p-5 shadow-sm space-y-3 text-xs"
       dir="rtl"
     >
-      <div className="flex items-center justify-between border-b pb-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
         <div className="flex items-center gap-2 text-[#7a1c24]">
           <Bell size={18} />
           <div>
             <h3 className="text-sm font-black">
-              تفاصيل الإشعارات والبيانات ({items.length})
+              تفاصيل الإشعارات والبيانات ({visibleItems.length})
             </h3>
             <p className="text-[11px] text-gray-500">
               عرض البيانات التفصيلية لكل إشعار بدلاً من الاكتفاء بالأرقام فقط.
@@ -103,22 +173,54 @@ export default function NotificationsDataPanel({ currentUser, onOpenItem }) {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={loadNotificationsData}
-          className="px-3 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 font-bold text-xs inline-flex items-center gap-1 cursor-pointer"
-        >
-          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> تحديث
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {visibleItems.length > 0 && (
+            <button
+              type="button"
+              onClick={handleClearAll}
+              className="px-3 py-1.5 rounded-xl bg-[#7a1c24] hover:bg-[#5c1319] text-white font-bold text-xs inline-flex items-center gap-1 cursor-pointer transition"
+            >
+              <CheckCheck size={13} /> إزالة الكل
+            </button>
+          )}
+
+          {clearedCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowCleared((prev) => !prev)}
+              className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-300 font-bold text-xs cursor-pointer transition"
+            >
+              {showCleared ? 'إخفاء المزالة' : `المزالة (${clearedCount})`}
+            </button>
+          )}
+
+          {clearedCount > 0 && showCleared && (
+            <button
+              type="button"
+              onClick={handleRestoreAll}
+              className="px-3 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs inline-flex items-center gap-1 cursor-pointer transition"
+            >
+              <RotateCcw size={12} /> استعادة
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={loadNotificationsData}
+            className="px-3 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 font-bold text-xs inline-flex items-center gap-1 cursor-pointer transition"
+          >
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> تحديث
+          </button>
+        </div>
       </div>
 
-      {items.length === 0 ? (
+      {visibleItems.length === 0 ? (
         <div className="p-6 text-center text-gray-400 bg-slate-50 rounded-2xl border border-dashed">
-          {loading ? 'جاري تحميل البيانات...' : 'لا توجد بيانات إشعارات متاحة حالياً.'}
+          {loading ? 'جاري تحميل البيانات...' : 'لا توجد بيانات إشعارات معروضة حالياً.'}
         </div>
       ) : (
         <div className="space-y-2 max-h-96 overflow-y-auto">
-          {items.map((item) => (
+          {visibleItems.map((item) => (
             <div
               key={item.id}
               className="p-3 rounded-2xl border bg-[#fbfaf7] hover:bg-white transition flex flex-wrap items-center justify-between gap-2"
@@ -141,16 +243,26 @@ export default function NotificationsDataPanel({ currentUser, onOpenItem }) {
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedItem(item);
-                  if (typeof onOpenItem === 'function') onOpenItem(item);
-                }}
-                className="px-3 py-1.5 rounded-xl bg-[#7a1c24] hover:bg-[#5c1319] text-white font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer shrink-0"
-              >
-                <Eye size={12} /> عرض الداتا
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedItem(item);
+                    if (typeof onOpenItem === 'function') onOpenItem(item);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-[#7a1c24] hover:bg-[#5c1319] text-white font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <Eye size={12} /> عرض الداتا
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDismissOne(item.id)}
+                  title="إخفاء الإشعار"
+                  className="p-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 cursor-pointer"
+                >
+                  <EyeOff size={13} />
+                </button>
+              </div>
             </div>
           ))}
         </div>

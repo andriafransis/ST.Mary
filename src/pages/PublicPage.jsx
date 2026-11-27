@@ -349,7 +349,7 @@ export default function PublicPage({
     setContentForm({
       ...emptyEdit,
       kind: defaultKind,
-      title: defaultKind === 'hanna_word' ? 'كلمة قدس أبونا حنا فؤاد' : ''
+      title: defaultKind === 'hanna_word' ? hannaWordMeta.title : ''
     });
     setShowContentModal(true);
   };
@@ -756,7 +756,7 @@ export default function PublicPage({
                 onClick={() => openAddContentModal('hanna_word')}
                 className="px-3.5 py-2 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl text-xs font-black cursor-pointer shadow"
               >
-                + إضافة / تحديث كلمة لأبونا حنا فؤاد
+                + إضافة / تحديث كلمة
               </button>
             )}
           </div>
@@ -767,9 +767,9 @@ export default function PublicPage({
                 ✝
               </div>
               <div className="space-y-1 text-center sm:text-right">
-                <strong className="text-base font-black text-gray-900 block">رسالة وكلمة قدس أبونا القمص/القس حنا فؤاد</strong>
+                <strong className="text-base font-black text-gray-900 block">{sec.title}</strong>
                 <p className="text-xs md:text-sm text-gray-600 leading-relaxed">
-                  سلام ونعمة لشعب الكنيسة المبارك — هذه المساحة مخصصة لعرض كلمات وتأملات ورسائل قدس أبونا حنا فؤاد الروحية لجميع أفراد الكنيسة.
+                  سلام ونعمة لشعب الكنيسة المبارك — هذه المساحة مخصصة لعرض الكلمات والتأملات والرسائل الروحية لجميع أفراد الكنيسة.
                 </p>
               </div>
             </div>
@@ -1488,23 +1488,23 @@ export default function PublicPage({
       )}
 
       {showRegister && (
-  <UserFormModal
-    isEditing={false}
-    isVisitorMode={true}
-    formData={visitorForm}
-    setFormData={setVisitorForm}
-    priestsList={[]}
-    parentsWorkersList={[]}
-    availableServantServices={availableServantServices}
-    effectiveGroups={effectiveGroups}
-    services={servicesList}
-    deaconRanksTable={deaconRanksTable}
-    onClose={() => {
-      setShowRegister(false);
-      setVisitorForm(emptyVisitorForm);
-    }}
-  />
-)}
+        <UserFormModal
+          isEditing={false}
+          isVisitorMode={true}
+          formData={visitorForm}
+          setFormData={setVisitorForm}
+          priestsList={[]}
+          parentsWorkersList={[]}
+          availableServantServices={availableServantServices}
+          effectiveGroups={effectiveGroups}
+          services={servicesList}
+          deaconRanksTable={deaconRanksTable}
+          onClose={() => {
+            setShowRegister(false);
+            setVisitorForm(emptyVisitorForm);
+          }}
+        />
+      )}
     </div>
   );
 }
