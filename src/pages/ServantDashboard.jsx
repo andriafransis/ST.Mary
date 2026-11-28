@@ -2089,7 +2089,7 @@ export default function ServantDashboard({
         </div>
       )}
 
-      <div ref={scrollBoxRef} className="max-h-[calc(100dvh-270px)] overflow-y-auto pr-1 space-y-3">
+      <div ref={scrollBoxRef} className="space-y-3">
         {activeTab === 'my_invites' && (
           <ReceivedInvitationsSection
             currentUser={servant}
@@ -2126,7 +2126,7 @@ export default function ServantDashboard({
             </div>
 
             {displayedServantTrips.length === 0 ? (
-              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+              <div className="p-4 md:p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
                 {tripSubTab === 'general'
                   ? 'لا توجد رحلات عامة معلنة من مكتب الرحلات حالياً.'
                   : 'لا توجد رحلات خاصة بخدمتك أو فصلك حالياً.'}
@@ -2561,8 +2561,8 @@ export default function ServantDashboard({
       )}
 
       {quickStatusModal.open && quickStatusModal.member && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-55">
-          <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-3 text-xs font-bold">
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-55">
+          <div className="max-h-[92dvh] overflow-y-auto bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-md p-4 sm:p-6 space-y-3 text-xs font-bold">
             <div className="flex justify-between items-center border-b pb-2">
               <h3 className="font-extrabold text-sm text-[#7a1c24]">
                 {quickStatusModal.statusLabel} — {quickStatusModal.member.full_name}
@@ -2675,8 +2675,8 @@ export default function ServantDashboard({
       )}
 
       {rewardModal.open && rewardModal.member && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-55">
-          <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-3 text-xs font-bold">
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-55">
+          <div className="max-h-[92dvh] overflow-y-auto bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-md p-4 sm:p-6 space-y-3 text-xs font-bold">
             <div className="flex justify-between items-center border-b pb-2">
               <h3 className="font-extrabold text-sm text-amber-900">
                 🌟 رحلة / مكافأة مواظبة — {rewardModal.member.full_name}
@@ -2752,8 +2752,8 @@ export default function ServantDashboard({
       )}
 
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50">
-          <div className="bg-white rounded-3xl w-full max-w-xl p-4 sm:p-6 space-y-3 text-xs font-bold max-h-[92dvh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
+          <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-xl p-4 sm:p-6 space-y-3 text-xs font-bold max-h-[92dvh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-2">
               <h3 className="font-extrabold text-sm text-[#7a1c24]">إضافة مخدوم جديد لفصل: {selectedClassFilter || selectedYearFilter || selectedScope}</h3>
               <button type="button" onClick={() => setShowAddModal(false)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer"><X size={16} /></button>
@@ -2852,8 +2852,8 @@ export default function ServantDashboard({
       )}
 
       {noteModal && noteMember && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-55">
-          <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-3 text-xs font-bold">
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-55">
+          <div className="max-h-[92dvh] overflow-y-auto bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-md p-4 sm:p-6 space-y-3 text-xs font-bold">
             <div className="flex justify-between items-center">
               <h3 className="font-extrabold text-sm text-[#7a1c24]">تسجيل ملاحظة لـ: {noteMember.full_name}</h3>
               <button type="button" onClick={() => setNoteModal(false)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer"><X size={16} /></button>
@@ -2875,8 +2875,8 @@ export default function ServantDashboard({
       )}
 
       {actModal && selectedMember && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-55">
-          <div className="bg-white rounded-3xl w-full max-w-md p-5 sm:p-6 space-y-3 text-xs font-bold">
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-55">
+          <div className="max-h-[92dvh] overflow-y-auto bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-md p-4 sm:p-6 space-y-3 text-xs font-bold">
             <div className="flex justify-between items-center">
               <h3 className="font-extrabold text-sm text-[#7a1c24]">تسجيل حضور وأوقات لـ: {selectedMember.full_name}</h3>
               <button type="button" onClick={() => setActModal(false)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer"><X size={16} /></button>
