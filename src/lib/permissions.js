@@ -14,7 +14,6 @@ export const SCREEN_ORDER = [
   'trips_office',
   'deacons',
   'certs',
-  'social_status',
   'public_editor',
   'public_page'
 ];
@@ -36,7 +35,6 @@ export const SCREEN_LABELS = {
   trips_office: '🚌 مكتب الرحلات',
   deacons: '🕯️ جدول الشمامسة',
   certs: '📜 سجل الشهادات',
-  social_status: '👪 الحالة الاجتماعية والعمل',
   public_editor: '✏️ تعديل الصفحة العامة',
   public_page: '🌐 صفحة الكنيسة العامة'
 };
@@ -85,8 +83,7 @@ export const CATEGORY_PRESETS = {
       'trips_office',
       'deacons',
       'certs',
-      'social_status',
-      'public_page'
+          'public_page'
     ],
     actions: { view: true, create: true, edit: true, delete: false, send_invitations: false, scan_invitations: false }
   },
@@ -106,8 +103,7 @@ export const CATEGORY_PRESETS = {
       'trips_office',
       'deacons',
       'certs',
-      'social_status',
-      'public_editor',
+          'public_editor',
       'public_page'
     ],
     actions: { view: true, create: true, edit: true, delete: true, send_invitations: true, scan_invitations: true }
@@ -129,8 +125,7 @@ export const CATEGORY_PRESETS = {
       'trips_office',
       'deacons',
       'certs',
-      'social_status',
-      'public_editor',
+          'public_editor',
       'public_page'
     ],
     actions: { view: true, create: true, edit: true, delete: false, send_invitations: true, scan_invitations: true }
