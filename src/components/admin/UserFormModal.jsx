@@ -840,7 +840,7 @@ export default function UserFormModal({
               <input
                 required
                 dir="auto"
-                placeholder="مثال: andy_2026 أو أندريا.1"
+                placeholder="اختر اسم دخول خاص بك (3 أحرف أو أكثر)"
                 className={`w-full p-2.5 border rounded-xl bg-white text-left ${
                   isUsernameTaken
                     ? 'border-red-500 bg-red-50/40'
@@ -1171,7 +1171,7 @@ export default function UserFormModal({
           )}
 
           {!isObserverVisitor && formData.role === 'worker' && (
-            <div><label className="block mb-1">وظيفة العامل / الفراش</label><input className="w-full p-2.5 border rounded-xl" placeholder="فراش الكنيسة / أمن..." value={formData.church_job || ''} onChange={e => setFormData({ ...formData, church_job: e.target.value })} /></div>
+            <div><label className="block mb-1">وظيفة العامل / الفراش</label><input className="w-full p-2.5 border rounded-xl" placeholder="اكتب الوظيفة" value={formData.church_job || ''} onChange={e => setFormData({ ...formData, church_job: e.target.value })} /></div>
           )}
 
           {/* بيانات المخدوم / الشعب / اجتماع الصالة عند التواجد */}
@@ -1434,7 +1434,7 @@ export default function UserFormModal({
                 </label>
                 <input
                   required
-                  placeholder="مثال: عين شمس أو أحمد جبر..."
+                  placeholder="اكتب اسم الشارع"
                   className="w-full p-2.5 border rounded-xl bg-white"
                   value={formData.street_name || ''}
                   onChange={e => {
@@ -1450,7 +1450,7 @@ export default function UserFormModal({
                 </label>
                 <input
                   required
-                  placeholder="مثال: منطقة عين شمس أو النعام..."
+                  placeholder="اكتب اسم المنطقة"
                   className="w-full p-2.5 border rounded-xl bg-white"
                   value={formData.sector || ''}
                   onChange={e => {
@@ -1466,7 +1466,7 @@ export default function UserFormModal({
               <div>
                 <label className="block mb-1 text-[11px]">رقم / اسم العمارة</label>
                 <input
-                  placeholder="مثال: عمارة 4"
+                  placeholder="رقم / اسم العمارة"
                   className="w-full p-2 border rounded-xl bg-white"
                   value={formData.building_no || ''}
                   onChange={e => setFormData({ ...formData, building_no: e.target.value })}
@@ -1475,7 +1475,7 @@ export default function UserFormModal({
               <div>
                 <label className="block mb-1 text-[11px]">الدور</label>
                 <input
-                  placeholder="مثال: الثالث / 3"
+                  placeholder="الدور"
                   className="w-full p-2 border rounded-xl bg-white"
                   value={formData.floor_no || ''}
                   onChange={e => setFormData({ ...formData, floor_no: e.target.value })}
@@ -1484,7 +1484,7 @@ export default function UserFormModal({
               <div>
                 <label className="block mb-1 text-[11px]">رقم الشقة</label>
                 <input
-                  placeholder="مثال: شقة 8"
+                  placeholder="رقم الشقة"
                   className="w-full p-2 border rounded-xl bg-white"
                   value={formData.apartment_no || ''}
                   onChange={e => setFormData({ ...formData, apartment_no: e.target.value })}
