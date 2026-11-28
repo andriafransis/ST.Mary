@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import {
   DEACON_RANKS,
@@ -27,6 +27,79 @@ function isPureArabicNoSpace(val = '') {
 
 function sanitizeArabicNoSpace(val = '') {
   return String(val || '').replace(/[A-Za-z]/g, '').replace(/\s+/g, '');
+}
+
+/**
+ * تنظيف اسم المستخدم والسماح بحروف (إنجليزي/عربي) وأرقام ورموز (_ . -) بدون مسافات
+ */
+function sanitizeUsernameValue(raw = '') {
+  return String(raw || '')
+    .replace(/\s+/g, '')
+    .replace(/[^\p{L}\p{N}_.-]/gu, '');
+}
+
+function buildUsernameSuggestions(baseRaw = '') {
+  const base = sanitizeUsernameValue(baseRaw).replace(/[_.-]+$/g, '') || 'user';
+  return [
+    `${base}_1`,
+    `${base}.2`,
+    `${base}_2026`
+  ];
+}
+
+async function checkUsernameDuplicateInDb(rawUsername, excludeId = null) {
+  const clean = sanitizeUsernameValue(rawUsername).trim();
+  const normalized = clean.toLowerCase();
+
+  if (!clean || clean.length < 3) {
+    return {
+      status: 'short',
+      message: 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل بدون مسافات.',
+      suggestions: []
+    };
+  }
+
+  if (!supabase || typeof supabase.from !== 'function') {
+    return { status: 'ok', message: '', suggestions: [] };
+  }
+
+  let query = supabase
+    .from('church_users')
+    .select('id, username')
+    .ilike('username', normalized)
+    .limit(5);
+
+  if (excludeId) {
+    query = query.neq('id', excludeId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    return {
+      status: 'error',
+      message: 'تعذر التحقق من تكرار اسم المستخدم حالياً.',
+      suggestions: []
+    };
+  }
+
+  const matched = Array.isArray(data)
+    ? data.find((row) => String(row.username || '').trim().toLowerCase() === normalized)
+    : null;
+
+  if (matched) {
+    return {
+      status: 'taken',
+      message: `اسم المستخدم (${clean}) مستخدم بالفعل؛ يرجى اختيار اسم آخر أو إضافة حروف/أرقام/رموز.`,
+      suggestions: buildUsernameSuggestions(clean)
+    };
+  }
+
+  return {
+    status: 'ok',
+    message: 'اسم المستخدم متاح.',
+    suggestions: []
+  };
 }
 
 function parseDobParts(dobStr = '') {
@@ -143,6 +216,14 @@ export default function UserFormModal({
   const [visitorStatus, setVisitorStatus] = useState({ type: '', msg: '' });
   const [nameError, setNameError] = useState('');
 
+  // حالة فحص تكرار اسم المستخدم
+  const [usernameCheck, setUsernameCheck] = useState({
+    status: 'idle', // 'idle' | 'checking' | 'ok' | 'taken' | 'short' | 'error'
+    message: '',
+    suggestions: []
+  });
+  const checkSeqRef = useRef(0);
+
   const initialDob = parseDobParts(formData.dob);
   const [dobDay, setDobDay] = useState(initialDob.day);
   const [dobMonth, setDobMonth] = useState(initialDob.month);
@@ -151,6 +232,7 @@ export default function UserFormModal({
   useEffect(() => {
     setVisitorStatus({ type: '', msg: '' });
     setNameError('');
+    setUsernameCheck({ status: 'idle', message: '', suggestions: [] });
   }, [isVisitorMode, isEditing]);
 
   useEffect(() => {
@@ -159,6 +241,50 @@ export default function UserFormModal({
     if (parsed.month !== dobMonth) setDobMonth(parsed.month);
     if (parsed.year !== dobYear) setDobYear(parsed.year);
   }, [formData.dob]);
+
+  // فحص تلقائي فوري (debounced) عند تغيير اسم المستخدم
+  useEffect(() => {
+    const cleanUser = sanitizeUsernameValue(formData.username || '');
+    if (!cleanUser) {
+      setUsernameCheck({ status: 'idle', message: '', suggestions: [] });
+      return;
+    }
+    if (cleanUser.length < 3) {
+      setUsernameCheck({
+        status: 'short',
+        message: 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل بدون مسافات.',
+        suggestions: []
+      });
+      return;
+    }
+
+    const seq = ++checkSeqRef.current;
+    setUsernameCheck((prev) => ({
+      ...prev,
+      status: 'checking',
+      message: 'جاري التحقق من عدم تكرار اسم المستخدم...'
+    }));
+
+    const timer = setTimeout(async () => {
+      const res = await checkUsernameDuplicateInDb(cleanUser, isEditing ? formData.id : null);
+      if (seq === checkSeqRef.current) {
+        setUsernameCheck(res);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [formData.username, formData.id, isEditing]);
+
+  const handleUsernameInputChange = (rawVal) => {
+    const cleaned = sanitizeUsernameValue(rawVal);
+    if (nameError) setNameError('');
+    setFormData({ ...formData, username: cleaned });
+  };
+
+  const handleApplySuggestion = (suggestedName) => {
+    const cleaned = sanitizeUsernameValue(suggestedName);
+    setFormData({ ...formData, username: cleaned });
+  };
 
   const handleDobPartChange = (nextDay, nextMonth, nextYear) => {
     setDobDay(nextDay);
@@ -282,6 +408,32 @@ export default function UserFormModal({
     return true;
   };
 
+  const validateUniqueUsernameBeforeSave = async (cleanUser) => {
+    if (!cleanUser || cleanUser.length < 3) {
+      setNameError('اسم المستخدم يجب أن يكون 3 أحرف على الأقل بدون مسافات.');
+      return false;
+    }
+    if (isVisitorMode && cleanUser.toLowerCase() === 'admin') {
+      setNameError('لا يمكن استخدام اسم المستخدم (admin) في طلبات التسجيل.');
+      return false;
+    }
+
+    const checkRes = await checkUsernameDuplicateInDb(cleanUser, isEditing ? formData.id : null);
+    setUsernameCheck(checkRes);
+
+    if (checkRes.status === 'taken') {
+      setNameError(checkRes.message);
+      return false;
+    }
+    if (checkRes.status === 'short' || checkRes.status === 'error') {
+      setNameError(checkRes.message);
+      return false;
+    }
+
+    setNameError('');
+    return true;
+  };
+
   const validateRequiredStreetAndArea = () => {
     const cleanStreet = String(formData.street_name || '').trim();
     const cleanArea = String(formData.sector || '').trim();
@@ -370,7 +522,7 @@ export default function UserFormModal({
     const f4 = sanitizeArabicNoSpace(formData.fourth_name || '');
     const full_name = [f1, f2, f3, f4].filter(Boolean).join(' ');
 
-    const cleanUser = (formData.username || '').trim().replace(/\s+/g, '');
+    const cleanUser = sanitizeUsernameValue(formData.username || '');
     const resolvedEngagement =
       formData.engagement_mode ||
       (Boolean(formData.is_site_observer) || formData.role === 'site_visitor' || (formData.service_membership_status || 'in_service') === 'not_in_service'
@@ -426,7 +578,7 @@ export default function UserFormModal({
     const finalDob = buildIsoDob(dobDay, dobMonth, dobYear) || formData.dob || null;
 
     return {
-      username: forVisitor ? cleanUser.toLowerCase() : cleanUser,
+      username: cleanUser,
       password: formData.password,
       full_name,
       first_name: f1,
@@ -489,6 +641,9 @@ export default function UserFormModal({
   const handleAdminFormSubmit = async (e) => {
     e.preventDefault();
     if (!validateArabicQuadName()) return;
+    const cleanUser = sanitizeUsernameValue(formData.username || '');
+    const isUserOk = await validateUniqueUsernameBeforeSave(cleanUser);
+    if (!isUserOk) return;
     if (!validateRequiredStreetAndArea()) return;
     const payload = await buildStandardPayload(false);
     if (typeof onSubmit === 'function') {
@@ -501,12 +656,16 @@ export default function UserFormModal({
     setVisitorStatus({ type: '', msg: '' });
 
     if (!validateArabicQuadName()) return;
+    const cleanUser = sanitizeUsernameValue(formData.username || '');
+    const isUserOk = await validateUniqueUsernameBeforeSave(cleanUser);
+    if (!isUserOk) {
+      return setVisitorStatus({
+        type: 'error',
+        msg: `اسم المستخدم (${cleanUser}) مستخدم بالفعل أو غير صالح، اختر اسماً مختلفاً.`
+      });
+    }
     if (!validateRequiredStreetAndArea()) return;
 
-    const cleanUser = (formData.username || '').trim().replace(/\s+/g, '');
-    if (cleanUser.length < 3 || cleanUser.toLowerCase() === 'admin') {
-      return setVisitorStatus({ type: 'error', msg: 'يرجى إدخال اسم دخول مناسب (3 أحرف على الأقل).' });
-    }
     if ((formData.password || '').length < 3) {
       return setVisitorStatus({ type: 'error', msg: 'كلمة المرور يجب أن تكون 3 أحرف على الأقل.' });
     }
@@ -528,9 +687,17 @@ export default function UserFormModal({
         .single();
 
       if (error) {
+        const isDup = error.code === '23505' || /duplicate key|unique/i.test(error.message || '');
+        if (isDup) {
+          setUsernameCheck({
+            status: 'taken',
+            message: `اسم الدخول (${cleanUser}) مستخدم بالفعل، اختر اسم دخول آخر.`,
+            suggestions: buildUsernameSuggestions(cleanUser)
+          });
+        }
         return setVisitorStatus({
           type: 'error',
-          msg: error.code === '23505'
+          msg: isDup
             ? 'اسم الدخول مستخدم بالفعل، اختر اسم دخول آخر.'
             : 'حدث خطأ أثناء إرسال طلب التسجيل: ' + error.message
         });
@@ -563,6 +730,8 @@ export default function UserFormModal({
   ];
   const currentYear = new Date().getFullYear();
   const yearsList = Array.from({ length: 110 }, (_, i) => String(currentYear - i));
+
+  const isUsernameTaken = usernameCheck.status === 'taken';
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50" dir="rtl">
@@ -634,18 +803,55 @@ export default function UserFormModal({
             </div>
           </div>
 
-          {/* اسم الدخول (يقبل إنجليزي وعربي) + كلمة المرور */}
-          <div className="grid grid-cols-2 gap-2">
+          {/* اسم الدخول (يقبل إنجليزي وعربي ورموز _ . - بدون تكرار) + كلمة المرور */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
-              <label className="block mb-1">اسم الدخول (Username - يقبل إنجليزي) *</label>
+              <label className="block mb-1">
+                اسم الدخول (غير مكرر — إنجليزي/عربي/رموز) *
+              </label>
               <input
                 required
-                dir="ltr"
-                placeholder="username / اسم الدخول"
-                className="w-full p-2.5 border rounded-xl bg-white text-left"
+                dir="auto"
+                placeholder="مثال: andy_2026 أو أندريا.1"
+                className={`w-full p-2.5 border rounded-xl bg-white text-left ${
+                  isUsernameTaken
+                    ? 'border-red-500 bg-red-50/40'
+                    : usernameCheck.status === 'ok'
+                      ? 'border-emerald-500'
+                      : ''
+                }`}
                 value={formData.username || ''}
-                onChange={e => setFormData({ ...formData, username: e.target.value })}
+                onChange={e => handleUsernameInputChange(e.target.value)}
+                onBlur={e => validateUniqueUsernameBeforeSave(e.target.value)}
               />
+              {usernameCheck.status !== 'idle' && (
+                <p
+                  className={`mt-1 text-[10px] font-bold ${
+                    isUsernameTaken || usernameCheck.status === 'short' || usernameCheck.status === 'error'
+                      ? 'text-red-700'
+                      : usernameCheck.status === 'ok'
+                        ? 'text-emerald-700'
+                        : 'text-gray-500'
+                  }`}
+                >
+                  {usernameCheck.message}
+                </p>
+              )}
+              {isUsernameTaken && Array.isArray(usernameCheck.suggestions) && usernameCheck.suggestions.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                  <span className="text-[10px] text-gray-600">اقتراحات متاحة:</span>
+                  {usernameCheck.suggestions.map((sug) => (
+                    <button
+                      key={sug}
+                      type="button"
+                      onClick={() => handleApplySuggestion(sug)}
+                      className="px-2 py-0.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-950 text-[10px] font-black cursor-pointer"
+                    >
+                      {sug}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               <label className="block mb-1">كلمة المرور *</label>
@@ -1279,8 +1485,8 @@ export default function UserFormModal({
             </button>
             <button
               type="submit"
-              disabled={submittingVisitor}
-              className="px-5 py-2 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl shadow cursor-pointer"
+              disabled={submittingVisitor || usernameCheck.status === 'checking'}
+              className="px-5 py-2 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl shadow cursor-pointer disabled:opacity-60"
             >
               {submittingVisitor
                 ? 'جاري الإرسال...'
