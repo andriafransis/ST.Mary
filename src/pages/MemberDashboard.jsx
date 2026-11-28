@@ -5,6 +5,7 @@ import { logActivity } from '../lib/activityLogger';
 import PriestInvitationModal from '../components/priest/PriestInvitationModal';
 import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
 import BellNotificationsPanel from '../components/priest/BellNotificationsPanel';
+import ChangePasswordBox from '../components/ChangePasswordBox';
 import {
   Phone,
   AlertCircle,
@@ -956,6 +957,8 @@ export default function MemberDashboard({
           </button>
         </div>
       </div>
+
+      {member && <ChangePasswordBox user={member} />}
 
       {!member?.confession_father_id && (
         <form
