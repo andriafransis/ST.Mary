@@ -299,6 +299,10 @@ export const DEFAULT_THEME = {
   label_joseph: '',
   label_register: '',
   label_login: '',
+  show_credit: true,
+  credit_label: 'Created by',
+  credit_name: 'Andrea Francis',
+  credit_url: '',
   show_services: true,    // قسم الخدمات الإلكترونية (المركز التعليمي / يوسف الرامي / الدخول)
   primary: '',            // لون أساسي مخصص (فاضي = الألوان الجاهزة)
   accent: '',             // لون التمييز للأزرار (فاضي = الذهبي)

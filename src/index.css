@@ -44,8 +44,10 @@ button:disabled { cursor: not-allowed; }
 }
 
 /* صور وفيديو ما تتخطاش عرض الشاشة */
-img, video, canvas, svg { max-width: 100%; }
-img { height: auto; }
+@layer base {
+  img, video, canvas, svg { max-width: 100%; }
+  img { height: auto; }
+}
 
 /* إخفاء السكرول بار في شريط التابات على الموبايل مع بقاء السحب شغال */
 .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -163,3 +165,19 @@ body:has(.fixed.inset-0) { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   .screen-root button { transition: none; }
 }
+
+
+/* ═════════ نموذج التسجيل ═════════ */
+.reg-form label { color: #3b2a2c; font-weight: 800; }
+.reg-form :is(input, select, textarea) {
+  min-height: 44px; font-size: 14px; border-color: #e5dede; background: #fffdfc;
+  border-radius: 14px;
+}
+.reg-form :is(input, select, textarea):required { border-right: 3px solid #c8962a; }
+.reg-form :is(input, textarea):required:not(:placeholder-shown):valid:not(:focus) { border-color: #34a06a; background: #f6fcf9; }
+.reg-form :is(input, select, textarea):focus { border-color: #7a1c24; box-shadow: 0 0 0 3px rgba(122, 28, 36, .14); outline: none; }
+.reg-form input::placeholder { color: #a79b9b; font-weight: 600; }
+.reg-sheet { box-shadow: 0 -12px 40px -12px rgba(0, 0, 0, .4); }
+.reg-head { border-radius: 0; }
+@media (min-width: 640px) { .reg-head { border-radius: 1.5rem 1.5rem 0 0; } }
+.reg-head { position: sticky; top: 0; }
