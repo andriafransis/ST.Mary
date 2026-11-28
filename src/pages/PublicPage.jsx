@@ -1177,12 +1177,6 @@ export default function PublicPage({
 
       {/* ───── الواجهة الرئيسية (Hero) ───── */}
       <header id="top" className={`relative overflow-hidden bg-linear-to-br ${theme.headerBg} text-white`}>
-        {theme.show_mary !== false && activeMaryUrl && (
-          <>
-            <img src={activeMaryUrl} alt="السيدة العذراء مريم" className="absolute inset-0 w-full h-full object-cover object-[50%_28%]" />
-            <div aria-hidden className="absolute inset-0 bg-linear-to-b from-black/45 via-[#3a0a10]/60 to-[#2b0910]/85" />
-          </>
-        )}
         <div aria-hidden className="absolute inset-0 opacity-[0.07]" style={{ backgroundImage: CROSS_PATTERN, backgroundSize: '72px' }} />
         <div aria-hidden className="absolute -top-24 -left-24 w-96 h-96 rounded-full bg-amber-300/10 blur-3xl" />
         <div aria-hidden className="absolute -bottom-32 right-10 w-96 h-96 rounded-full bg-white/5 blur-3xl" />
@@ -1199,8 +1193,24 @@ export default function PublicPage({
             </div>
           </div>
         )}
-        <div className="relative max-w-3xl mx-auto px-4 md:px-5 pt-14 md:pt-24 pb-24 md:pb-36 min-h-[26rem] md:min-h-[34rem] flex flex-col justify-center">
-          <div className="space-y-5 text-center">
+        <div className="relative max-w-3xl mx-auto px-4 md:px-5 pt-8 md:pt-12 pb-24 md:pb-32 flex flex-col items-center">
+          {theme.show_mary !== false && (
+            <div className="relative pp-float mb-7 md:mb-9">
+              <div aria-hidden className="absolute -inset-3 rounded-t-[999px] rounded-b-[2.5rem] border border-amber-300/40" />
+              <div className="relative w-56 h-72 md:w-64 md:h-80 rounded-t-[999px] rounded-b-[2rem] overflow-hidden border-2 border-amber-300/80 shadow-2xl bg-[#2b0910] flex items-center justify-center">
+                {activeMaryUrl ? (
+                  <img src={activeMaryUrl} alt="السيدة العذراء مريم" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="text-center text-amber-100 p-4">
+                    <div className="w-20 h-20 mx-auto rounded-full border-2 border-amber-300/80 bg-amber-200/15 flex items-center justify-center text-5xl mb-2">🕊️</div>
+                    <span className="text-amber-300 font-black text-sm">السيدة العذراء مريم</span>
+                  </div>
+                )}
+                <span className="absolute bottom-0 inset-x-0 bg-black/55 py-1 text-center text-[11px] font-black text-amber-200">✝ أم النور القديسة مريم</span>
+              </div>
+            </div>
+          )}
+          <div className="space-y-5 text-center w-full">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-amber-300/30 text-amber-200 text-xs font-black">
               <Sparkles size={13} /> {churchTagline}
             </div>
@@ -1208,7 +1218,7 @@ export default function PublicPage({
               <div className="space-y-3"><div className="pp-skel h-10 w-3/4 rounded-xl opacity-30" /><div className="pp-skel h-5 w-1/2 rounded-lg opacity-30" /></div>
             ) : (
               <>
-                <h1 className="text-3xl md:text-6xl font-black leading-[1.25] text-white drop-shadow-lg">{churchTitle}</h1>
+                <h1 className="text-3xl md:text-5xl font-black leading-[1.25] text-white drop-shadow">{churchTitle}</h1>
                 <p className="text-sm md:text-lg text-white/85 leading-8 max-w-2xl mx-auto">{churchSubtitle}</p>
               </>
             )}
@@ -1243,6 +1253,21 @@ export default function PublicPage({
                   <strong className="block text-sm md:text-base truncate">{nextMass.title}</strong>
                   <span className="block text-[11px] text-white/70 truncate">{formatDateFull(nextMass.date)}{nextMass.time ? ` • ${nextMass.time}` : ''}</span>
                 </div>
+              </div>
+            )}
+
+            {heroMedia && (heroEmbed || heroDirect) && (
+              <div className="w-full max-w-md mx-auto rounded-3xl bg-black/30 border border-white/20 p-2.5 shadow-2xl space-y-2 text-right">
+                <div className="flex items-center justify-between px-1">
+                  <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-black inline-flex items-center gap-1 ${featuredLive ? 'bg-red-600' : 'bg-indigo-600'}`}>
+                    {featuredLive ? <><Radio size={11} className="animate-pulse" /> بث مباشر</> : <><Video size={11} /> فيديو الكنيسة</>}
+                  </span>
+                  <EditChip item={heroMedia} />
+                </div>
+                <div className="aspect-video rounded-2xl overflow-hidden bg-black">
+                  {heroEmbed ? <iframe src={heroEmbed} title={heroMedia.title} className="w-full h-full" allowFullScreen /> : <video src={heroMedia.url} controls muted loop playsInline className="w-full h-full object-cover" />}
+                </div>
+                <strong className="block px-1 text-sm text-amber-200 truncate">{heroMedia.title}</strong>
               </div>
             )}
 
