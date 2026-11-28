@@ -92,7 +92,6 @@ export const INTERNAL_SCREENS = [
   { key: 'joseph_arimathea', label: 'خدمة يوسف الرامي' },
   { key: 'burial_and_caskets', label: 'أماكن الدفن والصناديق' },
   { key: 'categories', label: 'كروت بحث الحالة' },
-  { key: 'page_designer', label: 'التصميم وتعديل الصفحات' },
   { key: 'settings', label: 'الإعدادات وهوية الكنيسة' }
 ];
 
