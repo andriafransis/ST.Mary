@@ -12,6 +12,7 @@ import BirthdayBanner from '../components/BirthdayBanner';
 import BellNotificationsPanel from '../components/priest/BellNotificationsPanel';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
 import { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/ServiceGroupFeed';
+import GrowthServantPanel from '../components/growth/GrowthServantPanel';
 import MonthlyAnalyticsAndRewards from '../components/MonthlyAnalyticsAndRewards';
 import PriestInvitationModal from '../components/priest/PriestInvitationModal';
 import InvitationScannerModal from '../components/priest/InvitationScannerModal';
@@ -1550,6 +1551,7 @@ export default function ServantDashboard({
     { id: 'my_invites', label: 'دعواتي QR', badge: receivedInvitesCount },
     { id: 'trips', label: '🚌 الرحلات', badge: myServiceTripsForServant.length + generalTripsForServant.length },
     { id: 'analytics', label: '📊 تحليلات ومكافآت الشهر' },
+    { id: 'growth', label: '🌱 النمو الروحي' },
     { id: 'birthdays', label: `🎂 أعياد الميلاد (${activeBirthdayList.length})` },
     ...(canSendInvites ? [{ id: 'invite', label: '💌 دعوة لأبونا لمناسبة' }, { id: 'event_invites', label: '🎟️ دعوات المناسبات (QR)' }] : [])
   ];
@@ -2090,6 +2092,15 @@ export default function ServantDashboard({
       )}
 
       <div ref={scrollBoxRef} className="space-y-3">
+        {activeTab === 'growth' && (
+          <GrowthServantPanel
+            servant={servant}
+            stageOptions={availableServicesList}
+            defaultStages={servantBoundMainGroups.length > 0 ? servantBoundMainGroups : [selectedScope].filter(Boolean)}
+            elevated={isAdminUser || ['admin', 'head_servant', 'priest'].includes(servant?.role)}
+          />
+        )}
+
         {activeTab === 'my_invites' && (
           <ReceivedInvitationsSection
             currentUser={servant}

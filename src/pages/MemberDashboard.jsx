@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
+import GrowthMemberPanel from '../components/growth/GrowthMemberPanel';
+import VerseBanner from '../components/growth/VerseBanner';
 import QRCode from 'qrcode';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activityLogger';
@@ -108,10 +110,10 @@ function MemberPersonalQrModal({ member, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/75 flex items-end sm:items-center justify-center p-0 sm:p-4"
       dir="rtl"
     >
-      <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl p-5 space-y-4 text-xs border border-slate-200">
+      <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl max-h-[92dvh] overflow-y-auto shadow-2xl p-3.5 md:p-5 space-y-4 text-xs border border-slate-200">
         <div className="flex items-center justify-between border-b pb-3">
           <div className="flex items-center gap-2 text-[#7a1c24]">
             <div className="p-2 rounded-2xl bg-[#f9ecee]">
@@ -766,7 +768,7 @@ export default function MemberDashboard({
   const renderTripCards = (list, isGeneralSection) => {
     if (list.length === 0) {
       return (
-        <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+        <div className="p-4 md:p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
           {isGeneralSection
             ? 'لا توجد رحلات عامة معلنة من مكتب الرحلات حالياً.'
             : 'لا توجد رحلات مضافة لخدمتك أو اجتماعك حالياً.'}
@@ -893,7 +895,7 @@ export default function MemberDashboard({
         </div>
       )}
 
-      <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-4">
+      <div className="app-hero bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-4">
         <div className="space-y-2">
           <h2 className="text-base sm:text-xl font-black text-amber-300">
             أهلاً بك، {member?.full_name}
@@ -911,6 +913,10 @@ export default function MemberDashboard({
                   ? `🏫 خدمتك: ${myServiceCards[0].title}`
                   : 'غير مسكن في خدمة بعد'}
             </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5 pt-0.5">
+            <span className="app-chip">✅ مرات الحضور <b>{presentCount}</b></span>
+            <span className="app-chip">📅 سجل الحضور <b>{myAtt.length}</b></span>
           </div>
         </div>
 
@@ -990,7 +996,9 @@ export default function MemberDashboard({
         </form>
       )}
 
-      <div className="bg-white p-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto font-black">
+      <VerseBanner member={member} />
+
+      <div className="app-tabs bg-white p-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto font-black">
         <button
           type="button"
           onClick={() => setActiveTab('services')}
@@ -1001,6 +1009,17 @@ export default function MemberDashboard({
           }`}
         >
           <BookOpen size={14} /> خدماتي ({myServiceCards.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('growth')}
+          className={`px-3.5 py-2 rounded-xl shrink-0 cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'growth'
+              ? 'bg-[#7a1c24] text-white'
+              : 'bg-gray-50 hover:bg-gray-100 text-gray-700'
+          }`}
+        >
+          🌱 نموّي الروحي
         </button>
         <button
           type="button"
@@ -1064,7 +1083,9 @@ export default function MemberDashboard({
         </button>
       </div>
 
-      <div className="max-h-[calc(100dvh-260px)] overflow-y-auto pr-1 space-y-3">
+      <div className="space-y-3">
+        {activeTab === 'growth' && <GrowthMemberPanel member={member} />}
+
         {activeTab === 'my_invites' && (
           <ReceivedInvitationsSection
             currentUser={member}
@@ -1088,7 +1109,7 @@ export default function MemberDashboard({
             </div>
 
             {myServiceCards.length === 0 ? (
-              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+              <div className="p-4 md:p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
                 لم يتم تسكينك في فصل أو خدمة بعد. راجع خادمك أو أدمن الكنيسة.
               </div>
             ) : (
@@ -1204,7 +1225,7 @@ export default function MemberDashboard({
             </div>
 
             {displayedSlots.length === 0 ? (
-              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+              <div className="p-4 md:p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
                 لا توجد مواعيد اعتراف قادمة منشورة حالياً.
               </div>
             ) : (
@@ -1314,7 +1335,7 @@ export default function MemberDashboard({
             </h3>
             {priestMasses.filter((m) => m.is_available).length === 0 &&
             onlyMassEvents.length === 0 ? (
-              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+              <div className="p-4 md:p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
                 لا توجد مواعيد قداسات أو صلوات منشورة حالياً.
               </div>
             ) : (
