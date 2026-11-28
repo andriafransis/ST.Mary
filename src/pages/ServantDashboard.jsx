@@ -16,7 +16,6 @@ import MonthlyAnalyticsAndRewards from '../components/MonthlyAnalyticsAndRewards
 import PriestInvitationModal from '../components/priest/PriestInvitationModal';
 import InvitationScannerModal from '../components/priest/InvitationScannerModal';
 import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
-import PasswordChangeButton from '../components/PasswordChangeButton';
 
 const STAGE_OPTIONS = [
   'حضانة',
@@ -1527,7 +1526,6 @@ export default function ServantDashboard({
             ← رجوع لشاشة الخدمة
           </button>
           <div className="flex items-center gap-2">
-            {servant && <PasswordChangeButton user={servant} />}
             <span className="text-xs font-black text-[#7a1c24]">📋 شيت التسلسل والافتقاد</span>
           </div>
         </div>
@@ -1627,7 +1625,6 @@ export default function ServantDashboard({
             todayISO={new Date().toLocaleDateString('en-CA')}
             onNavigateCard={(cardId) => setActiveTab(cardId)}
           />
-          {servant && <PasswordChangeButton user={servant} variant="hero" />}
           {canScanInvitations && (
             <button
               type="button"

@@ -21,6 +21,7 @@ import HiddenFamiliesPage from './pages/HiddenFamiliesPage';
 import LoginPage from './pages/LoginPage';
 import InstallPrompt from './components/InstallPrompt';
 import BiometricOffer from './components/BiometricOffer';
+import PasswordChangeButton from './components/PasswordChangeButton';
 import {
   isBiometricSupported,
   isBiometricDeclined,
@@ -1299,6 +1300,8 @@ function AppInner() {
                 <Bell size={14} />
                 <span>{notificationStats.total}</span>
               </button>
+
+              <PasswordChangeButton user={currentUser} compact />
 
               {!['member', 'parent', 'worker'].includes(currentUser.role) && upcomingBirthdays.length > 0 && (
                 <span

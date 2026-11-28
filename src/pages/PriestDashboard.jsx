@@ -15,7 +15,6 @@ import CertificatesRegistry from '../components/CertificatesRegistry';
 import EducationalCenterManager from '../components/EducationalCenterManager';
 import JosephArimatheaManager from '../components/JosephArimatheaManager';
 import MasterCongregationSheet from '../components/MasterCongregationSheet';
-import PasswordChangeButton from '../components/PasswordChangeButton';
 import {
   BusVisualizerSection,
   PrintBusModal,
@@ -874,8 +873,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
         senderName={priest?.full_name}
         canSend
       />
-
-      {priest && <PasswordChangeButton user={priest} />}
 
       {totalJosephAlerts > 0 && (
         <button

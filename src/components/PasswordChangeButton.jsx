@@ -6,7 +6,7 @@ import ChangePasswordBox from './ChangePasswordBox';
 // زرار 🔑 صغير: بالضغط عليه تفتح نافذة تغيير كلمة المرور للمستخدم الحالي
 // variant="hero"  → للأشرطة الداكنة (خلفية شفافة)
 // variant="plain" → للأشرطة الفاتحة (خلفية بيضاء)
-export default function PasswordChangeButton({ user, variant = 'plain', label = 'كلمة المرور' }) {
+export default function PasswordChangeButton({ user, variant = 'plain', label = 'كلمة المرور', compact = false }) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -31,9 +31,14 @@ export default function PasswordChangeButton({ user, variant = 'plain', label = 
         type="button"
         onClick={() => setOpen(true)}
         title="تغيير كلمة المرور"
-        className={`px-3.5 py-2 rounded-2xl font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs transition ${buttonStyle}`}
+        aria-label="تغيير كلمة المرور"
+        className={
+          compact
+            ? 'px-2.5 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl flex items-center justify-center cursor-pointer transition'
+            : `px-3.5 py-2 rounded-2xl font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs transition ${buttonStyle}`
+        }
       >
-        <KeyRound size={15} /> {label}
+        <KeyRound size={compact ? 14 : 15} /> {!compact && label}
       </button>
 
       {open &&
