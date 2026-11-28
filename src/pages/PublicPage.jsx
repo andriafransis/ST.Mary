@@ -1185,7 +1185,7 @@ export default function PublicPage({
         </div>
       </div>
 
-      {navItems.length > 0 && (
+      {theme.show_nav === true && navItems.length > 0 && (
         <div className={`hidden md:block ${theme.sticky_header !== false ? 'md:sticky md:top-14' : ''} z-30 pp-hdr bg-linear-to-l ${theme.headerBg} text-white border-b border-white/10 shadow-md`}>
           <nav aria-label="أقسام الصفحة" className="bg-black/25 backdrop-blur">
             <div className="max-w-6xl mx-auto px-2 md:px-5 py-2 flex flex-wrap md:flex-nowrap items-center justify-center md:justify-start gap-1.5 md:overflow-x-auto pp-noscroll">
@@ -1281,18 +1281,6 @@ export default function PublicPage({
               )}
             </div>
 
-            {(navItems.length > 0 || (onOpenEdu && theme.show_edu_btn !== false) || (onOpenJoseph && theme.show_joseph_btn !== false)) && (
-              <div className="md:hidden grid grid-cols-2 gap-2 w-full max-w-md mx-auto pt-0.5" aria-label="أقسام الصفحة">
-                {[
-                  ...navItems.map(n => ({ key: n.anchor, label: `${n.icon ? n.icon + ' ' : ''}${n.full || n.label}`, onClick: () => goTo(n.anchor), cls: n.tone === 'gold' ? 'bg-amber-300 hover:bg-amber-200 text-[#4a0e13] font-black shadow' : 'bg-white/15 hover:bg-white/25 border border-white/20 text-white font-bold' })),
-                  ...(onOpenEdu && theme.show_edu_btn !== false ? [{ key: 'edu', label: '🎓 المركز التعليمي', onClick: onOpenEdu, cls: 'bg-indigo-600 hover:bg-indigo-700 border border-indigo-300/40 text-white font-black shadow' }] : []),
-                  ...(onOpenJoseph && theme.show_joseph_btn !== false ? [{ key: 'joseph', label: '🕊️ خدمة يوسف الرامي', onClick: onOpenJoseph, cls: 'bg-slate-900/85 hover:bg-slate-900 border border-white/30 text-white font-black shadow' }] : [])
-                ].map((b, i, arr) => (
-                  <button key={b.key} type="button" onClick={b.onClick} className={`min-h-11 px-3 py-2 rounded-xl text-xs flex items-center justify-center text-center leading-snug cursor-pointer transition ${b.cls} ${arr.length % 2 === 1 && i === arr.length - 1 ? 'col-span-2' : ''}`}>{b.label}</button>
-                ))}
-              </div>
-            )}
-
             {nextMass && (
               <div className="inline-flex items-center gap-3 rounded-2xl bg-black/25 border border-white/15 backdrop-blur px-4 py-3 max-w-full">
                 <span className="w-10 h-10 rounded-xl bg-amber-400 text-[#4a0e13] flex items-center justify-center shrink-0"><Clock size={20} /></span>
@@ -1371,24 +1359,31 @@ export default function PublicPage({
         )}
 
         {(() => {
+          const sectionCards = navItems.map(n => ({
+            key: n.anchor, icon: n.icon || '📌', title: n.full || n.label, hint: 'اضغط للانتقال للقسم',
+            onClick: () => goTo(n.anchor),
+            cls: n.tone === 'gold' ? 'from-amber-500 to-amber-700' : 'from-[#7a1c24] to-[#5c1319]'
+          }));
           const services = [
+            ...sectionCards,
             onOpenEdu && theme.show_edu_btn !== false && { key: 'edu', icon: '🎓', title: 'المركز التعليمي', hint: 'الدروس والمراحل والمواد والتسجيل', onClick: onOpenEdu, cls: 'from-indigo-600 to-indigo-800' },
             onOpenJoseph && theme.show_joseph_btn !== false && { key: 'joseph', icon: '🕊️', title: 'خدمة يوسف الرامي', hint: 'خدمة الراقدين والجنازات', onClick: onOpenJoseph, cls: 'from-slate-700 to-slate-900' },
-            !isLoggedIn && { key: 'login', icon: '👤', title: 'دخول المنظومة', hint: 'للخدام والمخدومين وأولياء الأمور', onClick: onOpenLogin, cls: 'from-[#7a1c24] to-[#5c1319]' },
-            isLoggedIn && onBackToApp && { key: 'app', icon: '🏠', title: 'العودة لحسابي', hint: 'لوحتك الشخصية والخدمات', onClick: onBackToApp, cls: 'from-[#7a1c24] to-[#5c1319]' }
+            !isLoggedIn && { key: 'register', icon: '📝', title: 'تسجيل جديد', hint: 'سجّل بياناتك كمخدوم أو ولي أمر', onClick: openRegister, cls: 'from-sky-600 to-sky-800' },
+            !isLoggedIn && { key: 'login', icon: '👤', title: 'دخول المنظومة', hint: 'للخدام والمخدومين وأولياء الأمور', onClick: onOpenLogin, cls: 'from-emerald-600 to-emerald-800' },
+            isLoggedIn && onBackToApp && { key: 'app', icon: '🏠', title: 'العودة لحسابي', hint: 'لوحتك الشخصية والخدمات', onClick: onBackToApp, cls: 'from-emerald-600 to-emerald-800' }
           ].filter(Boolean);
           if (theme.show_services === false || services.length === 0) return null;
           return (
             <section id="sec-services" aria-label="الخدمات الإلكترونية" className="scroll-mt-32">
               <Reveal>
                 <SectionHeader icon="🧭" title="الخدمات الإلكترونية" count={services.length} />
-                <div className={`grid gap-3 md:gap-4 ${services.length >= 3 ? 'sm:grid-cols-3' : services.length === 2 ? 'sm:grid-cols-2' : ''}`}>
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 md:gap-4">
                   {services.map(sv => (
-                    <button key={sv.key} type="button" onClick={sv.onClick} className={`group text-right p-5 rounded-3xl text-white bg-linear-to-br ${sv.cls} shadow-lg hover:shadow-xl hover:-translate-y-1 transition cursor-pointer flex items-center gap-4`}>
-                      <span className="w-14 h-14 rounded-2xl bg-white/15 border border-white/25 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition">{sv.icon}</span>
+                    <button key={sv.key} type="button" onClick={sv.onClick} className={`group p-3.5 sm:p-5 rounded-3xl text-white bg-linear-to-br ${sv.cls} shadow-lg hover:shadow-xl hover:-translate-y-1 transition cursor-pointer flex flex-col sm:flex-row items-center sm:items-center gap-2.5 sm:gap-4 text-center sm:text-right`}>
+                      <span className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-white/15 border border-white/25 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition">{sv.icon}</span>
                       <span className="min-w-0">
-                        <strong className="block text-base font-black">{sv.title}</strong>
-                        <span className="block text-xs text-white/80 mt-0.5 leading-5">{sv.hint}</span>
+                        <strong className="block text-[13px] sm:text-base font-black leading-snug">{sv.title}</strong>
+                        <span className="hidden sm:block text-xs text-white/80 mt-0.5 leading-5">{sv.hint}</span>
                       </span>
                     </button>
                   ))}
