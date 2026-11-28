@@ -86,6 +86,13 @@ const APP_SCREEN_ORDER = [
   ...BASE_SCREEN_ORDER.filter(s => s !== 'admin_panel' && s !== 'approvals')
 ];
 
+// تجميع الشاشات في أقسام عشان شريط التنقل يبقى صف واحد منظم
+const NAV_GROUPS = [
+  { id: 'admin', label: 'الإدارة', screens: ['admin_panel', 'approvals', 'permissions', 'public_editor', 'public_page'] },
+  { id: 'panels', label: 'اللوحات', screens: ['priest_panel', 'servant_panel', 'member_panel', 'parent_panel'] },
+  { id: 'services', label: 'الخدمات', screens: ['trips_office', 'deacons', 'certs', 'social_status', 'hidden_families'], extras: true }
+];
+
 const ROLE_TEXT = {
   admin: '🛡️ سوبر أدمن الكنيسة',
   priest: '✝ أب كاهن',
@@ -542,6 +549,7 @@ function AppInner() {
   ]);
 
   const badgeCountRef = useRef(0);
+  const navRowRef = useRef(null);
 
   // تحديث الرقم الفعلي على أيقونة التطبيق من بره + عنوان المتصفح باستمرار
   useEffect(() => {
@@ -720,6 +728,14 @@ function AppInner() {
     setActiveScreen(getPostLoginScreen(user, roleScreens, roleTemplates));
     fetchData();
   };
+
+  // شريط التنقل: يوصّل التاب النشط لنص الشاشة
+  useEffect(() => {
+    const el = navRowRef.current?.querySelector('[data-nav-active="1"]');
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+    }
+  }, [activeScreen, extraScreen, currentUser?.id]);
 
   useEffect(() => {
     if (currentUser?.id && notifPermission === 'granted') ensurePushSubscription(currentUser);
@@ -1297,6 +1313,19 @@ function AppInner() {
     return allowed.has(s);
   });
 
+  const navGroupsView = (() => {
+    const used = new Set();
+    const groups = NAV_GROUPS.map(g => {
+      const screens = g.screens.filter(sc => navScreens.includes(sc));
+      screens.forEach(sc => used.add(sc));
+      return { ...g, screens };
+    });
+    const leftovers = navScreens.filter(sc => !used.has(sc));
+    const last = groups[groups.length - 1];
+    last.screens = [...last.screens, ...leftovers];
+    return groups.filter(g => g.screens.length > 0 || g.extras);
+  })();
+
   const selectScreen = (scr) => {
     setExtraScreen('');
     setActiveScreen(scr);
@@ -1521,101 +1550,116 @@ function AppInner() {
             </div>
           </div>
 
-          <div className="bg-[#5a1218]/75 border-t border-white/10">
-            <div className="max-w-6xl mx-auto px-3 sm:px-5 py-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar lg:flex-wrap">
-              {navScreens.map(scr => {
-                const isActive = !extraScreen && currentScr === scr;
-                return (
-                  <button
-                    key={scr}
-                    type="button"
-                    onClick={() => selectScreen(scr)}
-                    className={`px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition ${
-                      isActive
-                        ? 'bg-amber-400 text-[#4a0e13] shadow-sm font-black'
-                        : 'bg-white/10 hover:bg-white/20 text-white/95'
-                    }`}
-                  >
-                    <span>{APP_SCREEN_LABELS[scr] || scr}</span>
-                    {scr === 'approvals' && pendingCount > 0 && (
-                      <span className="px-1.5 py-0.5 bg-red-600 text-white rounded-full text-[10px] font-black">{pendingCount}</span>
-                    )}
-                    {scr === 'parent_panel' && myPendingChildRequests.length > 0 && (
-                      <span className="px-1.5 py-0.5 bg-emerald-600 text-white rounded-full text-[10px] font-black">{myPendingChildRequests.length}</span>
-                    )}
-                  </button>
-                );
-              })}
-
-              <button
-                type="button"
-                onClick={() => selectExtra('edu_center')}
-                className={`px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition ${
-                  extraScreen === 'edu_center'
-                    ? 'bg-amber-400 text-[#4a0e13] shadow-sm font-black'
-                    : 'bg-white/10 hover:bg-white/20 text-white/95'
-                }`}
-              >
-                <GraduationCap size={14} /> {canManageEduCenter ? 'إدارة المركز التعليمي' : 'المركز التعليمي'}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => selectExtra('joseph_arimathea')}
-                className={`px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition ${
-                  extraScreen === 'joseph_arimathea'
-                    ? 'bg-amber-400 text-[#4a0e13] shadow-sm font-black'
-                    : 'bg-red-600/80 hover:bg-red-600 text-white'
-                }`}
-              >
-                <HeartHandshake size={14} /> يوسف الرامي
-              </button>
+          <div className="bg-[#5a1218]/75 border-t border-white/10 relative">
+            <div ref={navRowRef} className="max-w-6xl mx-auto px-3 sm:px-5 py-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth">
+              {navGroupsView.map((g, gi) => (
+                <div key={g.id} className="flex items-center gap-1.5 shrink-0">
+                  {gi > 0 && <span aria-hidden className="w-px h-5 bg-white/20 mx-1" />}
+                  <span className="hidden sm:inline text-[10px] font-black text-amber-200/70 pl-1">{g.label}</span>
+                  {g.screens.map(scr => {
+                    const isActive = !extraScreen && currentScr === scr;
+                    return (
+                      <button
+                        key={scr}
+                        type="button"
+                        data-nav-active={isActive ? '1' : undefined}
+                        onClick={() => selectScreen(scr)}
+                        className={`px-3 py-1.5 rounded-full text-[11px] sm:text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition ${
+                          isActive ? 'bg-amber-400 text-[#4a0e13] shadow-sm font-black' : 'bg-white/10 hover:bg-white/20 text-white/95'
+                        }`}
+                      >
+                        <span>{APP_SCREEN_LABELS[scr] || scr}</span>
+                        {scr === 'approvals' && pendingCount > 0 && (
+                          <span className="px-1.5 py-0.5 bg-red-600 text-white rounded-full text-[10px] font-black">{pendingCount}</span>
+                        )}
+                        {scr === 'parent_panel' && myPendingChildRequests.length > 0 && (
+                          <span className="px-1.5 py-0.5 bg-emerald-600 text-white rounded-full text-[10px] font-black">{myPendingChildRequests.length}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                  {g.extras && (
+                    <>
+                      <button
+                        type="button"
+                        data-nav-active={extraScreen === 'edu_center' ? '1' : undefined}
+                        onClick={() => selectExtra('edu_center')}
+                        className={`px-3 py-1.5 rounded-full text-[11px] sm:text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition ${
+                          extraScreen === 'edu_center' ? 'bg-amber-400 text-[#4a0e13] shadow-sm font-black' : 'bg-white/10 hover:bg-white/20 text-white/95'
+                        }`}
+                      >
+                        <GraduationCap size={14} /> {canManageEduCenter ? 'إدارة المركز التعليمي' : 'المركز التعليمي'}
+                      </button>
+                      <button
+                        type="button"
+                        data-nav-active={extraScreen === 'joseph_arimathea' ? '1' : undefined}
+                        onClick={() => selectExtra('joseph_arimathea')}
+                        className={`px-3 py-1.5 rounded-full text-[11px] sm:text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 transition ${
+                          extraScreen === 'joseph_arimathea' ? 'bg-amber-400 text-[#4a0e13] shadow-sm font-black' : 'bg-red-600/80 hover:bg-red-600 text-white'
+                        }`}
+                      >
+                        <HeartHandshake size={14} /> يوسف الرامي
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
             </div>
+            <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-5 bg-linear-to-l from-[#5a1218] to-transparent" />
+            <div aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-5 bg-linear-to-r from-[#5a1218] to-transparent" />
           </div>
 
           {mobileMenuOpen && (
-            <div className="lg:hidden bg-[#4a0e13] border-t border-white/15 px-3 py-3 shadow-xl">
-              <p className="text-[10px] text-amber-200/80 font-bold mb-2">كل الشاشات المتاحة لحسابك:</p>
-              <div className="grid grid-cols-2 gap-2">
-                {navScreens.map(scr => {
-                  const isActive = !extraScreen && currentScr === scr;
-                  return (
-                    <button
-                      key={scr}
-                      type="button"
-                      onClick={() => selectScreen(scr)}
-                      className={`px-3 py-2.5 rounded-xl text-xs font-bold flex items-center justify-between gap-1 cursor-pointer text-right ${
-                        isActive ? 'bg-amber-400 text-[#4a0e13] font-black' : 'bg-white/10 text-white'
-                      }`}
-                    >
-                      <span className="truncate">{APP_SCREEN_LABELS[scr] || scr}</span>
-                      {scr === 'approvals' && pendingCount > 0 && (
-                        <span className="px-1.5 py-0.5 bg-red-600 text-white rounded-full text-[10px] font-black">{pendingCount}</span>
-                      )}
-                    </button>
-                  );
-                })}
-                <button
-                  type="button"
-                  onClick={() => selectExtra('edu_center')}
-                  className={`px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
-                    extraScreen === 'edu_center' ? 'bg-amber-400 text-[#4a0e13] font-black' : 'bg-white/10 text-white'
-                  }`}
-                >
-                  <GraduationCap size={14} className="shrink-0" />
-                  <span className="truncate">{canManageEduCenter ? 'إدارة المركز التعليمي' : 'المركز التعليمي'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => selectExtra('joseph_arimathea')}
-                  className={`px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
-                    extraScreen === 'joseph_arimathea' ? 'bg-amber-400 text-[#4a0e13] font-black' : 'bg-red-700/80 text-white'
-                  }`}
-                >
-                  <HeartHandshake size={14} className="shrink-0" />
-                  <span className="truncate">يوسف الرامي</span>
-                </button>
-              </div>
+            <div className="lg:hidden bg-[#4a0e13] border-t border-white/15 px-3 py-3 shadow-xl max-h-[70dvh] overflow-y-auto space-y-3">
+              {navGroupsView.map(g => (
+                <div key={g.id}>
+                  <p className="text-[10px] text-amber-200/80 font-black mb-1.5">{g.label}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {g.screens.map(scr => {
+                      const isActive = !extraScreen && currentScr === scr;
+                      return (
+                        <button
+                          key={scr}
+                          type="button"
+                          onClick={() => selectScreen(scr)}
+                          className={`px-3 py-2.5 rounded-xl text-xs font-bold flex items-center justify-between gap-1 cursor-pointer text-right ${
+                            isActive ? 'bg-amber-400 text-[#4a0e13] font-black' : 'bg-white/10 text-white'
+                          }`}
+                        >
+                          <span className="truncate">{APP_SCREEN_LABELS[scr] || scr}</span>
+                          {scr === 'approvals' && pendingCount > 0 && (
+                            <span className="px-1.5 py-0.5 bg-red-600 text-white rounded-full text-[10px] font-black">{pendingCount}</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                    {g.extras && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => selectExtra('edu_center')}
+                          className={`px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
+                            extraScreen === 'edu_center' ? 'bg-amber-400 text-[#4a0e13] font-black' : 'bg-white/10 text-white'
+                          }`}
+                        >
+                          <GraduationCap size={14} className="shrink-0" />
+                          <span className="truncate">{canManageEduCenter ? 'إدارة المركز التعليمي' : 'المركز التعليمي'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => selectExtra('joseph_arimathea')}
+                          className={`px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
+                            extraScreen === 'joseph_arimathea' ? 'bg-amber-400 text-[#4a0e13] font-black' : 'bg-red-700/80 text-white'
+                          }`}
+                        >
+                          <HeartHandshake size={14} className="shrink-0" />
+                          <span className="truncate">يوسف الرامي</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </header>

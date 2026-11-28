@@ -558,7 +558,7 @@ export default function AdminDashboard({
   ];
 
   const renderQuickNavBar = () => (
-    <div className="bg-white px-3 py-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto print:hidden">
+    <div className="app-tabs bg-white px-3 py-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto print:hidden">
       {quickNavTabs.map(tab => {
         const isCurrent = activeCard === tab.id || (tab.id === 'setup_hub' && isSetupChildCard && !['users', 'nested_cards', 'roles_permissions', 'page_designer', 'settings'].includes(activeCard));
         return (
@@ -652,10 +652,15 @@ export default function AdminDashboard({
             )}
           </div>
         ) : (
-          <div className="bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-4 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
+          <div className="app-hero bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-4 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
             <div>
               <h2 className="text-lg font-black text-amber-200">🛡️ لوحة الإدارة — {churchName}</h2>
               <p className="text-xs text-white/85 mt-0.5">اختر الكارت المطلوب للإدارة والتحكم الكامل</p>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                <span className="app-chip">👥 المستخدمين <b>{users.length}</b></span>
+                <span className="app-chip">📅 الفعاليات <b>{events.length}</b></span>
+                <span className="app-chip">🏫 الخدمات <b>{services.length}</b></span>
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               {isAdmin && (
@@ -672,24 +677,50 @@ export default function AdminDashboard({
           </div>
         )}
 
-        <div className={isSetup ? 'max-h-[calc(100dvh-230px)] overflow-y-auto pr-1' : 'max-h-[calc(100dvh-250px)] overflow-y-auto pr-1'}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {cardsList.map(c => (
-              <button key={c.id} type="button" onClick={() => handleLaunchAdminOrSetupCard(c)} className={`${c.color} border-2 p-4 rounded-2xl text-right shadow-2xs hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-2.5 cursor-pointer`}>
-                <div className="flex justify-between items-start w-full gap-1">
-                  <span className="text-3xl">{c.icon}</span>
-                  <div className="flex items-center gap-1 flex-wrap justify-end">
-                    {c.innerCount > 0 && <span className="px-2 py-0.5 bg-indigo-100 text-indigo-900 rounded-full text-[10px] font-black">🧩 {c.innerCount} جواه</span>}
-                    <span className="px-2.5 py-0.5 bg-[#f9ecee] text-[#7a1c24] rounded-full text-[11px] font-black">{c.count}</span>
-                  </div>
+        <div className="space-y-5">
+          {(() => {
+            const HUB_GROUPS = isSetup
+              ? [
+                  { title: '👥 الأفراد والصلاحيات', accent: 'border-r-red-500', ids: ['users', 'roles_permissions'] },
+                  { title: '🎨 الصفحات والهوية والكروت', accent: 'border-r-pink-500', ids: ['page_designer', 'settings', 'nested_cards'] },
+                  { title: '📊 المتابعة', accent: 'border-r-indigo-500', ids: ['logs'] }
+                ]
+              : [
+                  { title: '🛠️ الإدارة والتقارير', accent: 'border-r-rose-500', ids: ['setup_hub', 'master_sheet'] },
+                  { title: '⛪ المناسبات والخدمات', accent: 'border-r-amber-500', ids: ['event_invitations', 'events', 'services'] },
+                  { title: '🎓 التعليم ويوسف الرامي', accent: 'border-r-indigo-500', ids: ['edu_center', 'joseph_arimathea', 'burial_and_caskets'] },
+                  { title: '✝ مكتب الكاهن', accent: 'border-r-emerald-500', ids: ['categories', 'custom_cards'] }
+                ];
+            const placed = new Set(HUB_GROUPS.flatMap(g => g.ids));
+            const groups = HUB_GROUPS
+              .map(g => ({ ...g, cards: g.ids.map(id => cardsList.find(c => c.id === id)).filter(Boolean) }))
+              .filter(g => g.cards.length > 0);
+            const extra = cardsList.filter(c => !placed.has(c.id));
+            if (extra.length > 0) groups.push({ title: '🧩 كروت مضافة', accent: 'border-r-purple-500', cards: extra });
+            return groups.map(g => (
+              <section key={g.title} className="space-y-2">
+                <h3 className="text-[12px] font-black text-gray-600 flex items-center gap-2">
+                  {g.title}
+                  <span className="flex-1 h-px bg-gray-200" aria-hidden />
+                </h3>
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-2.5">
+                  {g.cards.map(c => (
+                    <button key={c.id} type="button" onClick={() => handleLaunchAdminOrSetupCard(c)} className={`group bg-white border border-gray-200 border-r-4 ${g.accent} p-3 sm:p-3.5 rounded-2xl text-right shadow-2xs hover:shadow-md hover:-translate-y-0.5 transition flex flex-col sm:flex-row items-start gap-2 sm:gap-3 cursor-pointer`}>
+                      <span className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-[#f9f4ee] flex items-center justify-center text-xl sm:text-2xl shrink-0 group-hover:scale-110 transition">{c.icon}</span>
+                      <span className="min-w-0 flex-1 w-full">
+                        <span className="flex flex-col-reverse sm:flex-row items-start sm:justify-between gap-1 sm:gap-2">
+                          <strong className="block text-[13px] sm:text-sm font-black text-gray-900 leading-snug">{c.title}</strong>
+                          <span className="px-2 py-0.5 bg-[#f9ecee] text-[#7a1c24] rounded-full text-[10px] font-black shrink-0 whitespace-nowrap">{c.count}</span>
+                        </span>
+                        <span className="hidden sm:block text-[11px] text-gray-500 mt-1 leading-5 line-clamp-2">{c.desc}</span>
+                        {c.innerCount > 0 && <span className="inline-block mt-1.5 px-2 py-0.5 bg-indigo-100 text-indigo-900 rounded-full text-[10px] font-black">🧩 {c.innerCount} جواه</span>}
+                      </span>
+                    </button>
+                  ))}
                 </div>
-                <div>
-                  <h3 className="text-base font-black text-gray-900">{c.title}</h3>
-                  <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{c.desc}</p>
-                </div>
-              </button>
-            ))}
-          </div>
+              </section>
+            ));
+          })()}
         </div>
 
         {activeCustomInfoCard && (
@@ -714,7 +745,7 @@ export default function AdminDashboard({
     <div className="space-y-3">
       {renderQuickNavBar()}
 
-      <div className="max-h-[calc(100dvh-195px)] overflow-y-auto pr-1 space-y-3">
+      <div className="space-y-3">
         {activeCard === 'nested_cards' && (
           <div className="space-y-3">
             {renderTopBack('🧩 إضافة وتعديل كروت (كروت جوا كروت وصلاحيات الظهور)')}

@@ -131,7 +131,6 @@ body:has(.fixed.inset-0) { overflow: hidden; }
 .app-chip b { color: #fff; font-size: 13px; }
 
 .app-tabs {
-  position: sticky; top: 3.6rem; z-index: 20;
   scroll-snap-type: x proximity;
   scrollbar-width: none; -ms-overflow-style: none;
   background: rgba(255, 255, 255, .92) !important;
