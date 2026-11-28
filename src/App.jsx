@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import { supabase } from './lib/supabase';
 import { startUserSession, endUserSession } from './lib/activityLogger';
 import { resolveScreens, getScreenAccess, SCREEN_LABELS, SCREEN_ORDER } from './lib/permissions';
@@ -9,15 +9,15 @@ import {
 } from './lib/mobileNotifications';
 import { getUpcomingBirthdays } from './utils/birthdays';
 import BirthdayBanner from './components/BirthdayBanner';
-import EducationalCenterManager from './components/EducationalCenterManager';
-import JosephArimatheaManager from './components/JosephArimatheaManager';
+const EducationalCenterManager = lazy(() => import('./components/EducationalCenterManager'));
+const JosephArimatheaManager = lazy(() => import('./components/JosephArimatheaManager'));
 import ChurchGlobalFooter from './components/ChurchGlobalFooter';
 import PublicPage from './pages/PublicPage';
-import PublicEditor from './pages/PublicEditor';
-import ApprovalsPage from './pages/ApprovalsPage';
-import PermissionsPage from './pages/PermissionsPage';
-import TripsOfficePage from './pages/TripsOfficePage';
-import HiddenFamiliesPage from './pages/HiddenFamiliesPage';
+const PublicEditor = lazy(() => import('./pages/PublicEditor'));
+const ApprovalsPage = lazy(() => import('./pages/ApprovalsPage'));
+const PermissionsPage = lazy(() => import('./pages/PermissionsPage'));
+const TripsOfficePage = lazy(() => import('./pages/TripsOfficePage'));
+const HiddenFamiliesPage = lazy(() => import('./pages/HiddenFamiliesPage'));
 import LoginPage from './pages/LoginPage';
 import InstallPrompt from './components/InstallPrompt';
 import BiometricOffer from './components/BiometricOffer';
@@ -28,13 +28,13 @@ import {
   verifyBiometric,
   getBiometricOwnerId
 } from './lib/biometricLock';
-import AdminDashboard from './pages/AdminDashboard';
-import PriestDashboard from './pages/PriestDashboard';
-import ServantDashboard from './pages/ServantDashboard';
-import MemberDashboard from './pages/MemberDashboard';
-import ParentDashboard from './pages/ParentDashboard';
-import DeaconSchedule from './pages/DeaconSchedule';
-import CertificatesRegistry from './pages/CertificatesRegistry';
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const PriestDashboard = lazy(() => import('./pages/PriestDashboard'));
+const ServantDashboard = lazy(() => import('./pages/ServantDashboard'));
+const MemberDashboard = lazy(() => import('./pages/MemberDashboard'));
+const ParentDashboard = lazy(() => import('./pages/ParentDashboard'));
+const DeaconSchedule = lazy(() => import('./pages/DeaconSchedule'));
+const CertificatesRegistry = lazy(() => import('./pages/CertificatesRegistry'));
 import { ensurePushSubscription, removePushSubscription } from './lib/pushSubscribe';
 import { LogOut, Bell, BellRing, GraduationCap, HeartHandshake, Menu, X, Check } from 'lucide-react';
 
@@ -1185,7 +1185,7 @@ function AppInner() {
               <button type="button" onClick={() => setAuthView('login')} className="px-3 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl text-xs font-black cursor-pointer shrink-0">🔐 دخول</button>
             </div>
             <div className="max-w-5xl mx-auto p-3 sm:p-6">
-              <EducationalCenterManager currentUser={null} todayISO={todayISO} />
+              <Suspense fallback={<div className="py-16 text-center text-sm font-bold text-gray-500">جاري التحميل...</div>}><EducationalCenterManager currentUser={null} todayISO={todayISO} /></Suspense>
             </div>
           </div>
           <ChurchGlobalFooter churchName={churchName} />
@@ -1203,7 +1203,7 @@ function AppInner() {
               <button type="button" onClick={() => setAuthView('login')} className="px-3 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl text-xs font-black cursor-pointer shrink-0">🔐 دخول</button>
             </div>
             <div className="max-w-5xl mx-auto p-3 sm:p-6">
-              <JosephArimatheaManager currentUser={null} users={users} todayISO={todayISO} onRequireLogin={() => setAuthView('login')} />
+              <Suspense fallback={<div className="py-16 text-center text-sm font-bold text-gray-500">جاري التحميل...</div>}><JosephArimatheaManager currentUser={null} users={users} todayISO={todayISO} onRequireLogin={() => setAuthView('login')} /></Suspense>
             </div>
           </div>
           <ChurchGlobalFooter churchName={churchName} />
@@ -1663,6 +1663,7 @@ function AppInner() {
         </header>
 
         <main className="screen-root flex-1 w-full p-3 sm:p-5 md:p-6 max-w-6xl mx-auto">
+          <Suspense fallback={<div className="py-16 text-center text-sm font-bold text-gray-500">جاري التحميل...</div>}>
           {extraScreen === 'edu_center' && (
             <EducationalCenterManager currentUser={currentUser} todayISO={todayISO} />
           )}
@@ -1802,6 +1803,7 @@ function AppInner() {
               🔒 لا توجد شاشة مفعلة لحسابك حالياً. يرجى مراجعة أدمن الكنيسة لمنحك الصلاحية.
             </div>
           )}
+          </Suspense>
         </main>
       </div>
 
