@@ -1776,7 +1776,7 @@ function AppInner() {
           )}
 
           {!extraScreen && currentScr === 'permissions' && (
-            <PermissionsPage users={users} roleScreens={roleScreens} roleTemplates={roleTemplates} currentUser={currentUser} onRefresh={fetchData} />
+            <PermissionsPage users={users} services={churchServices} serviceGroups={serviceGroups} roleScreens={roleScreens} roleTemplates={roleTemplates} currentUser={currentUser} onRefresh={fetchData} />
           )}
 
           {!extraScreen && currentScr === 'public_editor' && canEditPublic && (
