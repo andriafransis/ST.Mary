@@ -138,7 +138,7 @@ body:has(.fixed.inset-0) { overflow: hidden; }
   box-shadow: 0 6px 18px -12px rgba(20, 20, 30, .35);
 }
 .app-tabs::-webkit-scrollbar { display: none; }
-.app-tabs > button { scroll-snap-align: center; min-height: 40px; }
+.app-tabs > button { scroll-snap-align: center; min-height: 40px; flex-shrink: 0; white-space: nowrap; }
 
 .screen-root :is(.rounded-2xl, .rounded-3xl).bg-white {
   box-shadow: 0 1px 2px rgba(20, 20, 30, .04), 0 8px 20px -12px rgba(20, 20, 30, .2);

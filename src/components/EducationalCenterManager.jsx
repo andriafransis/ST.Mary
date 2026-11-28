@@ -642,27 +642,27 @@ export default function EducationalCenterManager({ currentUser, todayISO }) {
 
   return (
     <div className="space-y-4 text-sm md:text-base" dir="rtl">
-      <div className="bg-white p-4 rounded-3xl border shadow-2xs flex flex-wrap justify-between items-center gap-3 print:hidden">
+      <div className="app-hero bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-4 md:p-5 rounded-3xl flex flex-wrap justify-between items-center gap-3 print:hidden">
         <div className="flex items-center gap-2">
-          <span className="p-2.5 bg-indigo-100 text-indigo-900 rounded-2xl"><GraduationCap size={22} /></span>
+          <span className="p-2.5 bg-white/15 text-amber-200 rounded-2xl"><GraduationCap size={22} /></span>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-base md:text-lg font-black text-[#7a1c24]">المركز التعليمي الكنسي</h3>
+              <h3 className="text-base md:text-lg font-black text-amber-200">المركز التعليمي الكنسي</h3>
               {currentUser && !canEditEdu && (
                 <span className="px-2 py-0.5 bg-amber-100 text-amber-900 rounded-full text-[10px] font-black flex items-center gap-1">
                   <Lock size={10} /> مشاهدة فقط
                 </span>
               )}
             </div>
-            <p className="text-xs text-gray-600">
+            <p className="text-xs text-white/85">
               الدروس المتاحة: <strong>{lessons.length}</strong> • المواد: <strong>{subjects.length}</strong>
               {canViewBookings && <> • الحجوزات: <strong>{bookings.length}</strong></>}
-              {canViewRevenue && <> • إجمالي الإيراد المحصل: <strong className="text-emerald-700">{totalCollectedStudents} ج.م</strong></>}
+              {canViewRevenue && <> • إجمالي الإيراد المحصل: <strong className="text-emerald-300">{totalCollectedStudents} ج.م</strong></>}
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-1.5">
+        <div className="app-tabs flex items-center gap-1.5 overflow-x-auto w-full p-1.5 rounded-2xl border bg-white">
           {canViewSchedule && (
             <button type="button" onClick={() => setTab('schedule')} className={`px-3 py-2 rounded-xl text-xs font-black cursor-pointer ${tab === 'schedule' ? 'bg-[#7a1c24] text-white' : 'bg-gray-100'}`}>📅 جدول الدروس</button>
           )}
@@ -699,7 +699,7 @@ export default function EducationalCenterManager({ currentUser, todayISO }) {
       {tab === 'schedule' && canViewSchedule && (
         <div className="space-y-4">
           {canEditEdu && (
-            <form onSubmit={handleSaveLesson} className="bg-white p-5 rounded-3xl border space-y-3 font-bold print:hidden">
+            <form onSubmit={handleSaveLesson} className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-3 font-bold print:hidden">
               <h4 className="font-black text-[#7a1c24] flex items-center gap-1.5"><Plus size={17} /> {editingLessonId ? 'تعديل موعد درس' : 'إضافة درس في جدول المركز التعليمي'}</h4>
               <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2.5">
                 <select
@@ -749,7 +749,7 @@ export default function EducationalCenterManager({ currentUser, todayISO }) {
           {renderStageFilters()}
 
           {filteredLessons.length === 0 ? (
-            <div className="bg-white p-8 rounded-3xl border text-center text-gray-500">لا توجد دروس معلنة لهذه المرحلة حالياً.</div>
+            <div className="bg-white p-5 md:p-8 rounded-3xl border text-center text-gray-500">لا توجد دروس معلنة لهذه المرحلة حالياً.</div>
           ) : (
             <div className="grid gap-3">
               {filteredLessons.map(l => {
@@ -813,7 +813,7 @@ export default function EducationalCenterManager({ currentUser, todayISO }) {
       {tab === 'subjects' && (
         <div className="space-y-4">
           {canEditEdu && (
-            <form onSubmit={handleSaveSubject} className="bg-white p-5 rounded-3xl border space-y-3 font-bold">
+            <form onSubmit={handleSaveSubject} className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-3 font-bold">
               <h4 className="font-black text-[#7a1c24] flex items-center gap-1.5">
                 <BookOpen size={17} /> {editingSubId ? 'تعديل مادة دراسية' : 'إضافة مادة دراسية جديدة للمركز'}
               </h4>
@@ -951,7 +951,7 @@ export default function EducationalCenterManager({ currentUser, todayISO }) {
       {tab === 'student_att' && canViewStudentAtt && (
         <div className="space-y-4">
           {canEditEdu && (
-            <form onSubmit={handleSaveStudentAttendance} className="bg-white p-5 rounded-3xl border space-y-3 font-bold">
+            <form onSubmit={handleSaveStudentAttendance} className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-3 font-bold">
               <h4 className="font-black text-[#7a1c24] flex items-center gap-1.5"><UserCheck size={17} /> تسجيل حضور وانصراف طالب</h4>
               <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-2">
                 <select
@@ -1041,7 +1041,7 @@ export default function EducationalCenterManager({ currentUser, todayISO }) {
       {tab === 'teacher_att' && canViewTeacherAtt && (
         <div className="space-y-4">
           {canEditEdu && (
-            <form onSubmit={handleSaveTeacherAttendance} className="bg-white p-5 rounded-3xl border space-y-3 font-bold">
+            <form onSubmit={handleSaveTeacherAttendance} className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-3 font-bold">
               <h4 className="font-black text-[#7a1c24] flex items-center gap-1.5"><Clock size={17} /> تسجيل حضور وانصراف المدرس (المواعيد والتأخير والغياب)</h4>
               <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-2">
                 <select
@@ -1166,7 +1166,7 @@ export default function EducationalCenterManager({ currentUser, todayISO }) {
           </div>
 
           {canEditEdu && (
-            <form onSubmit={handleSaveTeacher} className="bg-white p-5 rounded-3xl border space-y-3 font-bold print:hidden">
+            <form onSubmit={handleSaveTeacher} className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-3 font-bold print:hidden">
               <h4 className="font-black text-[#7a1c24] flex items-center gap-1.5"><DollarSign size={17} /> {teacherForm.id ? 'تعديل اتفاق مدرس' : 'إضافة مدرس وتحديد نظام المحاسبة'}</h4>
               <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2.5">
                 <input required placeholder="اسم المدرس *" className="p-2.5 border rounded-xl w-full min-w-0" value={teacherForm.teacher_name} onChange={e => setTeacherForm({ ...teacherForm, teacher_name: e.target.value })} />
@@ -1238,8 +1238,8 @@ export default function EducationalCenterManager({ currentUser, todayISO }) {
 
       {/* مودال حجز مكان في الدرس */}
       {bookModalLesson && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4 z-70">
-          <form onSubmit={handleBookLessonSeat} className="bg-white rounded-3xl w-full max-w-md p-6 space-y-3 font-bold text-sm">
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-70">
+          <form onSubmit={handleBookLessonSeat} className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-md p-4 md:p-6 space-y-3 font-bold text-sm">
             <div className="flex justify-between items-center border-b pb-2">
               <h4 className="text-base font-black text-[#7a1c24]">📌 حجز مكان: {bookModalLesson.subject_name}</h4>
               <button type="button" onClick={() => setBookModalLesson(null)} className="p-1.5 bg-gray-100 rounded-xl"><X size={16} /></button>
@@ -1261,8 +1261,8 @@ export default function EducationalCenterManager({ currentUser, todayISO }) {
 
       {/* مودال صرف دفعة للمدرس */}
       {payoutModalTeacher && canViewRevenue && canEditEdu && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4 z-70">
-          <form onSubmit={handleSavePayout} className="bg-white rounded-3xl w-full max-w-md p-6 space-y-3 font-bold text-sm">
+        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-70">
+          <form onSubmit={handleSavePayout} className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-md p-4 md:p-6 space-y-3 font-bold text-sm">
             <div className="flex justify-between items-center border-b pb-2">
               <h4 className="text-base font-black text-emerald-800">💵 صرف مستحقات: {payoutModalTeacher.teacher_name}</h4>
               <button type="button" onClick={() => setPayoutModalTeacher(null)} className="p-1.5 bg-gray-100 rounded-xl"><X size={16} /></button>

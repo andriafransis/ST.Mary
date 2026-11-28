@@ -803,9 +803,14 @@ export default function CertificatesRegistry({ users = [], currentUser = null, o
         }
       `}</style>
 
+      <div className="app-hero bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-4 md:p-6 rounded-3xl shadow print:hidden">
+        <h2 className="text-lg md:text-xl font-black text-amber-200">📜 سجل الشهادات والعقود</h2>
+        <p className="text-xs md:text-sm text-white/85 mt-1">شهادات المعمودية، رسامة الشمامسة، وخطابات الإخلاء — سجل واحد منظم.</p>
+      </div>
+
       {/* التبويبات */}
       <div className="flex flex-wrap justify-between items-center gap-2 border-b pb-3 font-bold print:hidden">
-        <div className="grid grid-cols-1 sm:grid-cols-3 sm:inline-flex gap-2 w-full sm:w-auto">
+        <div className="app-tabs flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto p-1.5 rounded-2xl border bg-white">
           <button
             type="button"
             onClick={() => setTab('baptism')}
@@ -1321,7 +1326,7 @@ export default function CertificatesRegistry({ users = [], currentUser = null, o
                     <tbody className="divide-y font-bold">
                       {filteredDirectory.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="p-6 text-center text-gray-400">
+                          <td colSpan={6} className="p-4 md:p-6 text-center text-gray-400">
                             لا توجد بيانات مطابقة للتصفية الحالية.
                           </td>
                         </tr>
@@ -1404,7 +1409,7 @@ export default function CertificatesRegistry({ users = [], currentUser = null, o
             {dirSubView === 'clearances_list' && (
               <div className="grid gap-2.5">
                 {filteredClearances.length === 0 ? (
-                  <div className="bg-[#fbfaf7] p-6 rounded-2xl border border-dashed text-center text-gray-400">
+                  <div className="bg-[#fbfaf7] p-4 md:p-6 rounded-2xl border border-dashed text-center text-gray-400">
                     لا توجد شهادات خلو موانع مسجلة حتى الآن.
                   </div>
                 ) : (
@@ -1462,8 +1467,8 @@ export default function CertificatesRegistry({ users = [], currentUser = null, o
 
       {/* معاينة وطباعة وتعديل شهادة المعمودية */}
       {printBaptism && (
-        <div className="fixed inset-0 bg-black/65 flex items-start justify-center p-2 sm:p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-5xl w-full p-4 sm:p-6 space-y-4 my-auto">
+        <div className="fixed inset-0 bg-black/65 flex items-end sm:items-start justify-center p-0 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-t-3xl sm:rounded-3xl max-w-5xl w-full p-4 sm:p-6 space-y-4 sm:my-auto">
             <div className="flex flex-wrap justify-between items-center gap-2 no-print">
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => window.print()} className="px-4 sm:px-5 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-bold flex items-center gap-2 shadow cursor-pointer">
@@ -1558,7 +1563,7 @@ export default function CertificatesRegistry({ users = [], currentUser = null, o
                 borderStyle: design.borderStyle,
                 borderWidth: '8px'
               }}
-              className="p-6 sm:p-9 rounded-2xl bg-[#fffdf9] text-center flex flex-col justify-between gap-4"
+              className="p-4 md:p-6 sm:p-9 rounded-2xl bg-[#fffdf9] text-center flex flex-col justify-between gap-4"
             >
               <div className="flex justify-between items-center border-b-2 pb-3" style={{ borderColor: design.accentColor }}>
                 <div className="text-right space-y-1">
@@ -1581,7 +1586,7 @@ export default function CertificatesRegistry({ users = [], currentUser = null, o
                   تشهد {printBaptism.church_name || settings.church_name} {design.baptismIntro} ({printBaptism.gender === 'أنثى' ? 'الابنة' : 'الابن'}):
                 </p>
 
-                <div className={`bg-white border-2 border-[#e6dfd3] rounded-2xl p-5 sm:p-6 max-w-4xl mx-auto text-right grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3.5 ${fp.fields}`}>
+                <div className={`bg-white border-2 border-[#e6dfd3] rounded-2xl p-3.5 md:p-5 sm:p-6 max-w-4xl mx-auto text-right grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3.5 ${fp.fields}`}>
                   <p className="sm:col-span-2 text-center border-b border-gray-100 pb-3">
                     <strong className="text-gray-600 ml-2">الاسم بالكامل:</strong>
                     <span className={`font-black ${fp.mainName}`} style={{ color: design.themeColor }}>{printBaptism.child_full_name}</span>
@@ -1613,8 +1618,8 @@ export default function CertificatesRegistry({ users = [], currentUser = null, o
 
       {/* معاينة وطباعة وتعديل شهادة الشماسية */}
       {printOrdination && (
-        <div className="fixed inset-0 bg-black/65 flex items-start justify-center p-2 sm:p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-5xl w-full p-4 sm:p-6 space-y-4 my-auto">
+        <div className="fixed inset-0 bg-black/65 flex items-end sm:items-start justify-center p-0 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-t-3xl sm:rounded-3xl max-w-5xl w-full p-4 sm:p-6 space-y-4 sm:my-auto">
             <div className="flex flex-wrap justify-between items-center gap-2 no-print">
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => window.print()} className="px-4 sm:px-5 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-bold flex items-center gap-2 shadow cursor-pointer">
@@ -1676,7 +1681,7 @@ export default function CertificatesRegistry({ users = [], currentUser = null, o
                 borderStyle: design.borderStyle,
                 borderWidth: '8px'
               }}
-              className="p-6 sm:p-9 rounded-2xl bg-[#fffdf9] text-center flex flex-col justify-between gap-4"
+              className="p-4 md:p-6 sm:p-9 rounded-2xl bg-[#fffdf9] text-center flex flex-col justify-between gap-4"
             >
               <div className="flex justify-between items-center border-b-2 pb-3" style={{ borderColor: design.themeColor }}>
                 <div className="text-right space-y-1">
@@ -1699,7 +1704,7 @@ export default function CertificatesRegistry({ users = [], currentUser = null, o
                   بوضع اليد الرسولي ونعمة الروح القدس، تشهد {printOrdination.church_name || settings.church_name} بأنه قد تمت {printOrdination.action_type} الابن المبارك:
                 </p>
 
-                <div className={`bg-white border-2 border-[#e6dfd3] rounded-2xl p-6 max-w-4xl mx-auto space-y-4 ${fp.fields}`}>
+                <div className={`bg-white border-2 border-[#e6dfd3] rounded-2xl p-4 md:p-6 max-w-4xl mx-auto space-y-4 ${fp.fields}`}>
                   <p className={`font-black ${fp.mainName}`} style={{ color: design.themeColor }}>{printOrdination.deacon_full_name}</p>
                   <p className="font-bold text-gray-800">
                     إلى رتبة: <span className="px-5 py-1.5 bg-amber-100 text-amber-950 rounded-xl font-black">{printOrdination.deacon_rank}</span>
@@ -1722,8 +1727,8 @@ export default function CertificatesRegistry({ users = [], currentUser = null, o
 
       {/* معاينة وطباعة وتعديل شهادة خلو الموانع */}
       {printClearance && (
-        <div className="fixed inset-0 bg-black/65 flex items-start justify-center p-2 sm:p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-5xl w-full p-4 sm:p-6 space-y-4 my-auto">
+        <div className="fixed inset-0 bg-black/65 flex items-end sm:items-start justify-center p-0 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-t-3xl sm:rounded-3xl max-w-5xl w-full p-4 sm:p-6 space-y-4 sm:my-auto">
             <div className="flex flex-wrap justify-between items-center gap-2 no-print">
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => window.print()} className="px-4 sm:px-5 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-bold flex items-center gap-2 shadow cursor-pointer">
@@ -1791,7 +1796,7 @@ export default function CertificatesRegistry({ users = [], currentUser = null, o
                 borderStyle: design.borderStyle,
                 borderWidth: '8px'
               }}
-              className="p-6 sm:p-9 rounded-2xl bg-[#fffdf9] text-center flex flex-col justify-between gap-4"
+              className="p-4 md:p-6 sm:p-9 rounded-2xl bg-[#fffdf9] text-center flex flex-col justify-between gap-4"
             >
               <div className="flex justify-between items-center border-b-2 pb-3" style={{ borderColor: design.accentColor }}>
                 <div className="text-right space-y-1">
@@ -1816,7 +1821,7 @@ export default function CertificatesRegistry({ users = [], currentUser = null, o
                   {design.clearanceIntro}:
                 </p>
 
-                <div className={`bg-white border-2 border-[#e6dfd3] rounded-2xl p-5 sm:p-6 max-w-4xl mx-auto text-right grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 ${fp.fields}`}>
+                <div className={`bg-white border-2 border-[#e6dfd3] rounded-2xl p-3.5 md:p-5 sm:p-6 max-w-4xl mx-auto text-right grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 ${fp.fields}`}>
                   <p className="sm:col-span-2 text-center border-b border-gray-100 pb-2.5">
                     <strong className="text-gray-600 ml-2">الاسم بالكامل:</strong>
                     <span className={`font-black ${fp.mainName}`} style={{ color: design.themeColor }}>{printClearance.full_name}</span>

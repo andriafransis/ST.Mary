@@ -1062,7 +1062,7 @@ export default function JosephArimatheaManager({
       <div className="space-y-4 text-sm md:text-base" dir="rtl">
         {renderBackgroundAudio()}
 
-        <div className="bg-gradient-to-r from-slate-900 to-[#4a0e13] text-white p-6 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
+        <div className="app-hero bg-gradient-to-r from-slate-900 to-[#4a0e13] text-white p-4 md:p-6 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
           <div>
             <h3 className="text-lg md:text-xl font-black text-amber-200">🕊️ خدمة يوسف الرامي — الخدمات المتاحة</h3>
             <p className="text-xs md:text-sm text-white/85 mt-1">تجهيز المنتقلين، ترتيب الصلوات، حجز قاعات العزاء، الصناديق، والانتقال للمدافن</p>
@@ -1094,7 +1094,7 @@ export default function JosephArimatheaManager({
         </div>
 
         <div className="grid md:grid-cols-2 gap-4">
-          <div className="bg-white p-5 rounded-3xl border space-y-3">
+          <div className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-3">
             <h4 className="font-black text-[#7a1c24] flex items-center gap-1.5"><MapPin size={18} /> أماكن الدفن المتاحة ورسوم الانتقال ({burialLocations.length})</h4>
             {burialLocations.length === 0 ? (
               <p className="text-xs text-gray-500">لا توجد أماكن دفن مسجلة حالياً.</p>
@@ -1113,7 +1113,7 @@ export default function JosephArimatheaManager({
             )}
           </div>
 
-          <div className="bg-white p-5 rounded-3xl border space-y-3">
+          <div className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-3">
             <h4 className="font-black text-[#7a1c24] flex items-center gap-1.5"><Package size={18} /> الصناديق المتاحة حالياً ({openCaskets.length})</h4>
             {openCaskets.length === 0 ? (
               <p className="text-xs text-gray-500">يرجى التواصل مع لجنة الكنيسة بعد تسجيل الدخول.</p>
@@ -1612,10 +1612,10 @@ export default function JosephArimatheaManager({
       )}
 
       {/* الرأس التفاعلي */}
-      <div className="bg-gradient-to-r from-slate-900 to-[#4a0e13] text-white p-5 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3 print:hidden">
+      <div className="app-hero bg-gradient-to-r from-slate-900 to-[#4a0e13] text-white p-3.5 md:p-5 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3 print:hidden">
         <div>
-          <h3 className="text-lg font-black text-amber-200 flex items-center gap-2">
-            🕊️ خدمة يوسف الرامي (بيان المنتقل، قاعات العزاء، الصناديق، والمرافقين)
+          <h3 className="text-base md:text-lg font-black text-amber-200 flex items-center gap-2">
+            🕊️ خدمة يوسف الرامي
           </h3>
           <p className="text-xs text-white/85 mt-1">
             المسجل حالياً: <strong className="text-amber-300">{currentUser?.full_name}</strong> • الصناديق المتاحة: <strong>{caskets.filter(x => x.status === 'متاح').length}</strong> • أماكن الدفن: <strong>{burialLocations.length}</strong>
@@ -1725,7 +1725,7 @@ export default function JosephArimatheaManager({
       </div>
 
       {/* أزرار التبويبات */}
-      <div className="bg-white p-2.5 rounded-2xl border flex flex-wrap gap-2 text-xs font-black print:hidden">
+      <div className="app-tabs bg-white p-2 rounded-2xl border flex items-center gap-1.5 overflow-x-auto text-xs font-black print:hidden">
         {isAdminUser && (
           <button
             type="button"
@@ -1812,7 +1812,7 @@ export default function JosephArimatheaManager({
       ) : (
         <>
           {!canReport && (
-            <div className="bg-amber-50 border-2 border-amber-300 rounded-3xl p-5 text-center space-y-2">
+            <div className="bg-amber-50 border-2 border-amber-300 rounded-3xl p-3.5 md:p-5 text-center space-y-2">
               <Lock size={28} className="mx-auto text-[#7a1c24]" />
               <h4 className="font-black text-[#7a1c24] text-base">خدمة يوسف الرامي — متاحة للبالغين وأولياء الأمور فقط</h4>
               <p className="text-xs md:text-sm text-amber-950 font-bold leading-relaxed">
@@ -1838,7 +1838,7 @@ export default function JosephArimatheaManager({
 
           {/* كارت النعي الجاهز للمشاركة والطباعة وتنزيل الصورة */}
           {obituaryCardCase && (
-            <div className="bg-amber-50/80 border-2 border-amber-400 p-5 rounded-3xl space-y-4 shadow-md print:hidden">
+            <div className="bg-amber-50/80 border-2 border-amber-400 p-3.5 md:p-5 rounded-3xl space-y-4 shadow-md print:hidden">
               <div className="flex flex-wrap justify-between items-center gap-2 border-b border-amber-300 pb-3">
                 <div>
                   <h4 className="font-black text-[#4a0e13] text-base flex items-center gap-2">
@@ -1864,7 +1864,7 @@ export default function JosephArimatheaManager({
                   </p>
                 </div>
 
-                <div className="p-5 text-center space-y-3 text-gray-900">
+                <div className="p-3.5 md:p-5 text-center space-y-3 text-gray-900">
                   <h3 className="text-xl md:text-2xl font-black text-[#4a0e13] border-b border-amber-300 pb-2">
                     {obituaryCardCase.deceased_name}
                   </h3>
@@ -1941,7 +1941,7 @@ export default function JosephArimatheaManager({
 
           {/* كارت الترحيم (ذكرى الأربعين / ذكرى سنوية) مع صورة العذراء على الشمال، والاسم، والكنيسة، والقداس الأول/الثاني، والمذبح، والساعة */}
           {memorialCardItem && (
-            <div className="bg-amber-50/80 border-2 border-amber-400 p-5 rounded-3xl space-y-4 shadow-md print:hidden">
+            <div className="bg-amber-50/80 border-2 border-amber-400 p-3.5 md:p-5 rounded-3xl space-y-4 shadow-md print:hidden">
               <div className="flex flex-wrap justify-between items-center gap-2 border-b border-amber-300 pb-3">
                 <div>
                   <h4 className="font-black text-[#4a0e13] text-base flex items-center gap-2">
@@ -1969,7 +1969,7 @@ export default function JosephArimatheaManager({
                   </p>
                 </div>
 
-                <div className="p-5 grid grid-cols-1 sm:grid-cols-3 items-center gap-3 text-center">
+                <div className="p-3.5 md:p-5 grid grid-cols-1 sm:grid-cols-3 items-center gap-3 text-center">
                   {/* الشمال: صورة السيدة العذراء مريم */}
                   <VirginMaryCardBox />
 
@@ -2057,7 +2057,7 @@ export default function JosephArimatheaManager({
 
           {/* تبويب تعديل حساب InstaPay للأدمن */}
           {isAdminUser && activeMainTab === 'instapay_settings' && (
-            <div className="bg-white p-6 rounded-3xl border space-y-4 print:hidden max-w-xl">
+            <div className="bg-white p-4 md:p-6 rounded-3xl border space-y-4 print:hidden max-w-xl">
               <div className="border-b pb-3">
                 <h4 className="font-black text-gray-900 text-base flex items-center gap-2">
                   <DollarSign size={18} className="text-amber-600" /> تعديل بيانات حساب وتليفون InstaPay للكنيسة
@@ -2101,7 +2101,7 @@ export default function JosephArimatheaManager({
 
           {/* تبويب إدارة القاعات وسعتها وأسعارها بدقة */}
           {isFinanceAuthorized && activeMainTab === 'halls_settings' && (
-            <div className="bg-white p-5 rounded-3xl border space-y-5 print:hidden">
+            <div className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-5 print:hidden">
               <div className="border-b pb-3 flex justify-between items-center">
                 <div>
                   <h4 className="font-black text-gray-900 text-base flex items-center gap-2">
@@ -2214,7 +2214,7 @@ export default function JosephArimatheaManager({
 
           {/* تبويب تعيين وإلغاء صلاحيات السائقين والفراشين */}
           {isAdminUser && activeMainTab === 'staff_manage' && (
-            <div className="bg-white p-5 rounded-3xl border space-y-5 print:hidden">
+            <div className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-5 print:hidden">
               <div className="border-b pb-3">
                 <h4 className="font-black text-gray-900 text-base flex items-center gap-2">
                   <Users size={18} className="text-blue-900" /> إدارة طاقم العمل (تعيين وإلغاء صلاحيات السائقين والفراشين)
@@ -2333,7 +2333,7 @@ export default function JosephArimatheaManager({
 
           {/* نموذج تقديم كارت ترحيم (أربعين / سنوية / ترحيم وتذكار عام) */}
           {showMemorialForm && (
-            <form onSubmit={handleSaveMemorial} className="bg-amber-50/60 p-5 rounded-3xl border-2 border-amber-300 space-y-4 print:hidden">
+            <form onSubmit={handleSaveMemorial} className="bg-amber-50/60 p-3.5 md:p-5 rounded-3xl border-2 border-amber-300 space-y-4 print:hidden">
               <div className="flex justify-between items-center border-b border-amber-200 pb-2">
                 <h4 className="font-black text-amber-950 text-base flex items-center gap-2">
                   <HeartHandshake size={18} className="text-[#7a1c24]" /> {editingMemorialId ? 'تعديل كارت الترحيم' : 'تسجيل كارت ترحيم جديد (ذكرى الأربعين / ذكرى سنوية)'}
@@ -2618,7 +2618,7 @@ export default function JosephArimatheaManager({
           {activeMainTab === 'cases' && (
             <div className="space-y-4">
               {showDeathForm && canReport && (!isStaff || canEditCases) && (
-                <form onSubmit={handleSaveCase} className="bg-white p-5 rounded-3xl border-2 border-[#7a1c24]/30 space-y-4 font-bold shadow-sm print:hidden">
+                <form onSubmit={handleSaveCase} className="bg-white p-3.5 md:p-5 rounded-3xl border-2 border-[#7a1c24]/30 space-y-4 font-bold shadow-sm print:hidden">
                   <div className="flex flex-wrap justify-between items-center border-b pb-2 gap-2">
                     <h4 className="text-base font-black text-[#7a1c24]">📋 {editingId ? 'تعديل بيان حالة الوفاة' : 'اختيار المنتقل، خط السير، وحجز قاعة العزاء'}</h4>
                     <div className="flex items-center gap-2">
@@ -3124,7 +3124,7 @@ export default function JosephArimatheaManager({
                 </div>
               </div>
 
-              <div className="bg-white p-6 rounded-3xl border shadow-sm">
+              <div className="bg-white p-4 md:p-6 rounded-3xl border shadow-sm">
                 <div className="border-b-2 border-gray-900 pb-3 mb-4 text-center">
                   <h3 className="text-xl font-black text-gray-900">✝ كشف أسماء المنتقلين في صلاة الترحيم (القداس الإلهي)</h3>
                   <p className="text-xs text-gray-600 mt-1">كنيسة السيدة العذراء مريم • قداس يوم: <strong>{filterMassDate}</strong></p>
@@ -3175,7 +3175,7 @@ export default function JosephArimatheaManager({
           {/* تبويب 4: كشف حساب وخرجات الفراشين والعشور */}
           {isFinanceAuthorized && activeMainTab === 'workers_stats' && (
             <div className="space-y-4">
-              <div className="bg-white p-5 rounded-3xl border space-y-4 print:hidden">
+              <div className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-4 print:hidden">
                 <div className="border-b pb-3">
                   <h4 className="font-black text-gray-900 text-base flex items-center gap-2">
                     <Calculator size={18} className="text-indigo-900" /> كشف حساب وخرجات الفراشين (لحساب العشور أو الإكراميات)
@@ -3251,7 +3251,7 @@ export default function JosephArimatheaManager({
                 </div>
               </div>
 
-              <div className="bg-white p-6 rounded-3xl border shadow-sm">
+              <div className="bg-white p-4 md:p-6 rounded-3xl border shadow-sm">
                 <div className="border-b-2 border-gray-900 pb-3 mb-4 text-center">
                   <h3 className="text-xl font-black text-gray-900">✝ كشف بيان خرجات طاقم الفراشين (خدمة يوسف الرامي)</h3>
                   <p className="text-xs text-gray-600 mt-1">
@@ -3299,7 +3299,7 @@ export default function JosephArimatheaManager({
 
           {/* طباعة كارت الترحيم (ذكرى الأربعين / ذكرى سنوية) */}
           {printMemorialCard && (
-            <div className="hidden print:block p-8 border-2 border-gray-900 rounded-3xl max-w-2xl mx-auto space-y-4">
+            <div className="hidden print:block p-5 md:p-8 border-2 border-gray-900 rounded-3xl max-w-2xl mx-auto space-y-4">
               <div className="text-center border-b-2 border-gray-900 pb-3">
                 <div className="text-2xl font-black">✝</div>
                 <h2 className="text-xl font-black">{printMemorialCard.memorial_type || 'ذكرى الأربعين'}</h2>
@@ -3331,7 +3331,7 @@ export default function JosephArimatheaManager({
 
           {/* أمر الطباعة الكامل لحالة الوفاة وخط السير والقاعة */}
           {printCase && (
-            <div className="hidden print:block p-8 border-2 border-gray-900 rounded-2xl space-y-4">
+            <div className="hidden print:block p-5 md:p-8 border-2 border-gray-900 rounded-2xl space-y-4">
               <div className="flex justify-between items-center border-b-2 border-[#7a1c24] pb-3">
                 <h2 className="text-xl font-black text-[#7a1c24]">✝ بيان خدمة يوسف الرامي وخط سير السائق والقاعة</h2>
                 <span className="text-xs">تاريخ الطباعة: {todayISO}</span>
@@ -3361,7 +3361,7 @@ export default function JosephArimatheaManager({
 
           {/* طباعة إيصال الترحيم الرسمي للمستخدم */}
           {printMemorialReceipt && (
-            <div className="hidden print:block p-8 border-2 border-gray-900 rounded-3xl max-w-lg mx-auto space-y-4">
+            <div className="hidden print:block p-5 md:p-8 border-2 border-gray-900 rounded-3xl max-w-lg mx-auto space-y-4">
               <div className="text-center border-b-2 border-gray-900 pb-3">
                 <h2 className="text-lg font-black">✝ إيصال ترحيم رسمي وتبرع</h2>
                 <p className="text-xs text-gray-600">{printMemorialReceipt.church_name || 'كنيسة السيدة العذراء مريم'} — خدمة يوسف الرامي</p>

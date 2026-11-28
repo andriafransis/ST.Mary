@@ -356,8 +356,8 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
   const renderDynamicCardModal = () => {
     if (!activeDynamicCard) return null;
     return (
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50" dir="rtl">
-        <div className="bg-white rounded-3xl w-full max-w-2xl p-6 space-y-4 text-xs font-bold max-h-[90dvh] overflow-y-auto">
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 z-50" dir="rtl">
+        <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-2xl p-4 md:p-6 space-y-4 text-xs font-bold max-h-[90dvh] overflow-y-auto">
           <div className="flex items-center justify-between border-b pb-3">
             <div>
               <h3 className="text-sm md:text-base font-black text-[#7a1c24]">
@@ -440,7 +440,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
             </form>
           )}
 
-          <div className="space-y-2 max-h-60 overflow-y-auto">
+          <div className="space-y-2">
             {customEntries.filter(en => String(en.card_id) === String(activeDynamicCard.id)).map(en => {
               const parsed = parseDynamicEntry(en);
               return (
@@ -695,7 +695,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
 
     return (
       <div className="space-y-4 text-xs md:text-sm" dir="rtl">
-        <div className="bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-6 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
+        <div className="app-hero bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-4 md:p-6 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
           <div>
             <h2 className="text-xl font-black text-amber-200">🕯️ خورس الشمامسة والكتب الطقسية</h2>
             <p className="text-xs md:text-sm text-white/85 mt-1">
@@ -710,7 +710,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
               key={c.id}
               type="button"
               onClick={() => openCard(c.id, c.title)}
-              className={`${c.color} border-2 p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer`}
+              className={`${c.color} border-2 p-3.5 md:p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer`}
             >
               <div className="flex justify-between items-start w-full">
                 <span className="text-4xl">{c.icon}</span>
@@ -808,7 +808,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
         </div>
 
         {canEdit ? (
-          <form onSubmit={handleSaveBook} className="bg-white p-5 rounded-3xl border shadow-sm space-y-3 font-bold">
+          <form onSubmit={handleSaveBook} className="bg-white p-3.5 md:p-5 rounded-3xl border shadow-sm space-y-3 font-bold">
             <div className="flex justify-between items-center border-b pb-2">
               <strong className="text-base text-[#7a1c24] flex items-center gap-1.5">
                 {activeCard === 'liturgy' ? <Church size={18} /> : activeCard === 'euchologion' ? <BookMarked size={18} /> : <ScrollText size={18} />} {activeBookMeta?.title}
@@ -826,7 +826,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
             />
           </form>
         ) : (
-          <div className="bg-white p-6 rounded-3xl border shadow-sm space-y-3">
+          <div className="bg-white p-4 md:p-6 rounded-3xl border shadow-sm space-y-3">
             <h3 className="text-lg font-black text-[#7a1c24] border-b pb-2">{activeBookMeta?.title}</h3>
             {bookText ? (
               <div className="text-sm leading-loose whitespace-pre-line text-gray-800">{bookText}</div>
@@ -924,7 +924,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
           </div>
         </div>
 
-        <form onSubmit={handleSaveKatameros} className="bg-white p-5 rounded-3xl border shadow-sm space-y-3 font-bold">
+        <form onSubmit={handleSaveKatameros} className="bg-white p-3.5 md:p-5 rounded-3xl border shadow-sm space-y-3 font-bold">
           <div className="flex flex-wrap justify-between items-center gap-2 border-b pb-2">
             <h3 className="text-base font-black text-[#7a1c24]">
               ✝ قراءات يوم ({selectedCopticDay} {selectedCopticMonth})
@@ -1008,7 +1008,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
 
         <div className="grid gap-3">
           {displayedSchedules.length === 0 ? (
-            <div className="bg-white p-8 rounded-3xl border text-center text-gray-500">لا توجد مواعيد مسجلة لك حتى الآن.</div>
+            <div className="bg-white p-5 md:p-8 rounded-3xl border text-center text-gray-500">لا توجد مواعيد مسجلة لك حتى الآن.</div>
           ) : displayedSchedules.map(s => {
             const deacon = deacons.find(d => d.id === s.deacon_id);
             return (
