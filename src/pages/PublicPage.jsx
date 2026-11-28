@@ -303,8 +303,8 @@ export default function PublicPage({
   const [visitorForm, setVisitorForm] = useState(emptyVisitorForm);
   const [regLists, setRegLists] = useState({ groups: [], services: [], ranks: [] });
 
-  const loadPublic = useCallback(async () => {
-    setLoading(true);
+  const loadPublic = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setLoadError('');
     try {
       await probeSchema(supabase);
@@ -332,6 +332,25 @@ export default function PublicPage({
 
   useEffect(() => {
     loadPublic();
+  }, [loadPublic]);
+
+  // تحديث تلقائي هادئ: لما المستخدم يرجع للصفحة أو التطبيق يرجع للواجهة، وكل دقيقتين
+  useEffect(() => {
+    let last = Date.now();
+    const refresh = () => {
+      if (document.visibilityState === 'hidden') return;
+      if (Date.now() - last < 20000) return;
+      last = Date.now();
+      loadPublic(true);
+    };
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    const t = setInterval(refresh, 120000);
+    return () => {
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+      clearInterval(t);
+    };
   }, [loadPublic]);
 
   useEffect(() => {
@@ -1097,14 +1116,14 @@ export default function PublicPage({
 
       {/* ───── الشريط العلوي الثابت ───── */}
       <div className={`${theme.sticky_header !== false ? 'sticky top-0' : ''} z-40 bg-linear-to-l ${theme.headerBg} text-white shadow-lg border-b border-amber-300/30`}>
-        <div className="max-w-6xl mx-auto px-3 md:px-5 h-14 flex items-center justify-between gap-3">
-          <a href="#top" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="flex items-center gap-2.5 min-w-0">
-            <span className="w-9 h-9 rounded-xl bg-white/10 border border-amber-300/50 flex items-center justify-center overflow-hidden shrink-0">
+        <div className="max-w-6xl mx-auto px-3 md:px-5 min-h-14 py-1.5 grid grid-cols-[5.25rem_1fr_5.25rem] items-center gap-2 md:flex md:justify-between md:gap-3 md:py-0 md:h-14">
+          <a href="#top" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="contents md:flex md:items-center md:gap-2.5 md:min-w-0">
+            <span className="w-9 h-9 rounded-xl bg-white/10 border border-amber-300/50 flex items-center justify-center overflow-hidden shrink-0 justify-self-start col-start-1 row-start-1">
               {logoConfig?.url ? <img src={logoConfig.url} alt="" className="w-full h-full object-cover" /> : <span className="text-lg font-black text-amber-300">✝</span>}
             </span>
-            <span className="font-black text-sm md:text-base truncate text-amber-100">{churchTitle}</span>
+            <span className="col-start-2 row-start-1 text-center md:text-right font-black text-[13px] leading-tight md:leading-normal md:text-base line-clamp-2 md:truncate text-amber-100">{churchTitle}</span>
           </a>
-          <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
+          <div className="col-start-3 row-start-1 justify-self-end flex items-center gap-1.5 md:gap-2 shrink-0">
             {isLoggedIn ? (
               <>
                 {canEdit && onOpenEditor && (
@@ -1122,39 +1141,48 @@ export default function PublicPage({
                   <UserPlus size={14} /> تسجيل حساب جديد
                 </button>
                 <button type="button" onClick={onOpenLogin} className="px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-[#4a0e13] rounded-xl text-xs font-black inline-flex items-center gap-1.5 cursor-pointer shadow transition">
-                  <LogIn size={14} /> تسجيل الدخول
+                  <LogIn size={14} /> <span className="hidden sm:inline">تسجيل الدخول</span><span className="sm:hidden">دخول</span>
                 </button>
               </>
             )}
           </div>
         </div>
-        {navItems.length > 0 && (
-          <nav aria-label="أقسام الصفحة" className="border-t border-white/10 bg-black/20">
-            <div className="max-w-6xl mx-auto px-3 md:px-5 py-1.5 flex items-center gap-1.5 overflow-x-auto pp-noscroll">
+      </div>
+
+      {navItems.length > 0 && (
+        <div className={`${theme.sticky_header !== false ? 'md:sticky md:top-14' : ''} z-30 bg-linear-to-l ${theme.headerBg} text-white border-b border-white/10 shadow-md`}>
+          <nav aria-label="أقسام الصفحة" className="bg-black/25 backdrop-blur">
+            <div className="max-w-6xl mx-auto px-2 md:px-5 py-2 flex flex-wrap md:flex-nowrap items-center justify-center md:justify-start gap-1.5 md:overflow-x-auto pp-noscroll">
               {navItems.map(n => (
                 <button
                   key={n.anchor}
                   type="button"
                   onClick={() => goTo(n.anchor)}
                   aria-current={activeAnchor === n.anchor ? 'true' : undefined}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-black whitespace-nowrap cursor-pointer transition ${activeAnchor === n.anchor ? 'bg-amber-400 text-[#4a0e13] shadow' : 'text-white/85 hover:bg-white/15'}`}
+                  className={`px-3 md:px-3.5 py-1.5 rounded-full text-[11.5px] md:text-xs font-black whitespace-nowrap cursor-pointer transition ${activeAnchor === n.anchor ? 'bg-amber-400 text-[#4a0e13] shadow' : 'text-white/85 hover:bg-white/15'}`}
                 >
                   {n.label}
                 </button>
               ))}
               {onOpenEdu && theme.show_edu_btn !== false && (
-                <button type="button" onClick={onOpenEdu} className="px-3.5 py-1.5 rounded-full text-xs font-black whitespace-nowrap cursor-pointer bg-indigo-600/90 hover:bg-indigo-600 text-white transition">🎓 المركز التعليمي</button>
+                <button type="button" onClick={onOpenEdu} className="px-3 md:px-3.5 py-1.5 rounded-full text-[11.5px] md:text-xs font-black whitespace-nowrap cursor-pointer bg-indigo-600/90 hover:bg-indigo-600 text-white transition">🎓 المركز التعليمي</button>
               )}
               {onOpenJoseph && theme.show_joseph_btn !== false && (
-                <button type="button" onClick={onOpenJoseph} className="px-3.5 py-1.5 rounded-full text-xs font-black whitespace-nowrap cursor-pointer bg-slate-900/80 hover:bg-slate-900 text-white border border-white/20 transition">🕊️ خدمة يوسف الرامي</button>
+                <button type="button" onClick={onOpenJoseph} className="px-3 md:px-3.5 py-1.5 rounded-full text-[11.5px] md:text-xs font-black whitespace-nowrap cursor-pointer bg-slate-900/80 hover:bg-slate-900 text-white border border-white/20 transition">🕊️ خدمة يوسف الرامي</button>
               )}
             </div>
           </nav>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* ───── الواجهة الرئيسية (Hero) ───── */}
       <header id="top" className={`relative overflow-hidden bg-linear-to-br ${theme.headerBg} text-white`}>
+        {theme.show_mary !== false && activeMaryUrl && (
+          <>
+            <img src={activeMaryUrl} alt="السيدة العذراء مريم" className="absolute inset-0 w-full h-full object-cover object-[50%_28%]" />
+            <div aria-hidden className="absolute inset-0 bg-linear-to-b from-black/45 via-[#3a0a10]/60 to-[#2b0910]/85" />
+          </>
+        )}
         <div aria-hidden className="absolute inset-0 opacity-[0.07]" style={{ backgroundImage: CROSS_PATTERN, backgroundSize: '72px' }} />
         <div aria-hidden className="absolute -top-24 -left-24 w-96 h-96 rounded-full bg-amber-300/10 blur-3xl" />
         <div aria-hidden className="absolute -bottom-32 right-10 w-96 h-96 rounded-full bg-white/5 blur-3xl" />
@@ -1171,8 +1199,8 @@ export default function PublicPage({
             </div>
           </div>
         )}
-        <div className="relative max-w-6xl mx-auto px-4 md:px-5 pt-8 md:pt-14 pb-20 md:pb-28 grid lg:grid-cols-12 gap-8 items-center">
-          <div className="lg:col-span-7 space-y-5">
+        <div className="relative max-w-3xl mx-auto px-4 md:px-5 pt-14 md:pt-24 pb-24 md:pb-36 min-h-[26rem] md:min-h-[34rem] flex flex-col justify-center">
+          <div className="space-y-5 text-center">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-amber-300/30 text-amber-200 text-xs font-black">
               <Sparkles size={13} /> {churchTagline}
             </div>
@@ -1180,12 +1208,12 @@ export default function PublicPage({
               <div className="space-y-3"><div className="pp-skel h-10 w-3/4 rounded-xl opacity-30" /><div className="pp-skel h-5 w-1/2 rounded-lg opacity-30" /></div>
             ) : (
               <>
-                <h1 className="text-3xl md:text-5xl font-black leading-[1.25] text-white drop-shadow">{churchTitle}</h1>
-                <p className="text-sm md:text-lg text-white/85 leading-8 max-w-2xl">{churchSubtitle}</p>
+                <h1 className="text-3xl md:text-6xl font-black leading-[1.25] text-white drop-shadow-lg">{churchTitle}</h1>
+                <p className="text-sm md:text-lg text-white/85 leading-8 max-w-2xl mx-auto">{churchSubtitle}</p>
               </>
             )}
 
-            <div className="flex flex-wrap gap-2.5 pt-1">
+            <div className="flex flex-wrap justify-center gap-2.5 pt-1">
               {featuredLive ? (
                 <button type="button" onClick={() => setVideoItem(featuredLive)} className="px-5 py-3 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-black text-sm inline-flex items-center gap-2 shadow-lg cursor-pointer transition">
                   <Radio size={17} className="animate-pulse" /> شاهد البث المباشر
@@ -1219,7 +1247,7 @@ export default function PublicPage({
             )}
 
             {socialLinks.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 pt-1">
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                 {socialLinks.map(sl => (
                   isSafeHttpUrl(sl.url) && (
                     <a key={sl.id} href={sl.url} target="_blank" rel="noreferrer" className="px-3.5 py-2 rounded-full bg-white/10 hover:bg-white/20 border border-white/25 text-xs font-black inline-flex items-center gap-1.5 transition">
@@ -1231,37 +1259,6 @@ export default function PublicPage({
             )}
           </div>
 
-          <div className="lg:col-span-5 flex justify-center lg:justify-end">
-            {heroMedia && (heroEmbed || heroDirect) ? (
-              <div className="w-full max-w-md rounded-3xl bg-black/30 border border-white/20 p-2.5 shadow-2xl space-y-2">
-                <div className="flex items-center justify-between px-1">
-                  <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-black inline-flex items-center gap-1 ${featuredLive ? 'bg-red-600' : 'bg-indigo-600'}`}>
-                    {featuredLive ? <><Radio size={11} className="animate-pulse" /> بث مباشر</> : <><Video size={11} /> فيديو الكنيسة</>}
-                  </span>
-                  <EditChip item={heroMedia} />
-                </div>
-                <div className="aspect-video rounded-2xl overflow-hidden bg-black">
-                  {heroEmbed ? <iframe src={heroEmbed} title={heroMedia.title} className="w-full h-full" allowFullScreen /> : <video src={heroMedia.url} controls muted loop playsInline className="w-full h-full object-cover" />}
-                </div>
-                <strong className="block px-1 text-sm text-amber-200 truncate">{heroMedia.title}</strong>
-              </div>
-            ) : theme.show_mary !== false ? (
-              <div className="relative pp-float">
-                <div aria-hidden className="absolute -inset-3 rounded-t-[999px] rounded-b-[2.5rem] border border-amber-300/40" />
-                <div className="relative w-56 h-72 md:w-64 md:h-80 rounded-t-[999px] rounded-b-[2rem] overflow-hidden border-2 border-amber-300/80 shadow-2xl bg-[#2b0910] flex items-center justify-center">
-                  {activeMaryUrl ? (
-                    <img src={activeMaryUrl} alt="السيدة العذراء مريم" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="text-center text-amber-100 p-4">
-                      <div className="w-20 h-20 mx-auto rounded-full border-2 border-amber-300/80 bg-amber-200/15 flex items-center justify-center text-5xl mb-2">🕊️</div>
-                      <span className="text-amber-300 font-black text-sm">السيدة العذراء مريم</span>
-                    </div>
-                  )}
-                  <span className="absolute bottom-0 inset-x-0 bg-black/55 py-1 text-center text-[11px] font-black text-amber-200">✝ أم النور القديسة مريم</span>
-                </div>
-              </div>
-            ) : null}
-          </div>
         </div>
 
       </header>
@@ -1370,7 +1367,7 @@ export default function PublicPage({
           </div>
           <div className="flex md:justify-end justify-center gap-2">
             {!isLoggedIn && (
-              <button type="button" onClick={onOpenLogin} className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-[#4a0e13] text-xs font-black cursor-pointer inline-flex items-center gap-1.5"><LogIn size={14} /> تسجيل الدخول</button>
+              <button type="button" onClick={onOpenLogin} className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-[#4a0e13] text-xs font-black cursor-pointer inline-flex items-center gap-1.5"><LogIn size={14} /> <span className="hidden sm:inline">تسجيل الدخول</span><span className="sm:hidden">دخول</span></button>
             )}
           </div>
         </div>
