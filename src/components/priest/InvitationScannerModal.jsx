@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
 import { supabase } from '../../lib/supabase';
 import {
@@ -20,7 +20,8 @@ import {
   LogOut,
   Ticket,
   ImagePlus,
-  QrCode
+  QrCode,
+  Armchair
 } from 'lucide-react';
 
 const UUID_REGEX =
@@ -39,6 +40,24 @@ const ROLE_AR_LABELS = {
   parent: 'ولي أمر',
   worker: 'عامل / فراش'
 };
+
+const ROW_LABELS_AR = [
+  'الصف الأول',
+  'الصف الثاني',
+  'الصف الثالث',
+  'الصف الرابع',
+  'الصف الخامس',
+  'الصف السادس'
+];
+
+function getRowLabel(rowIndex) {
+  return ROW_LABELS_AR[rowIndex] || `الصف ${rowIndex + 1}`;
+}
+
+function extractSeatNumber(seatText = '') {
+  const match = String(seatText || '').match(/كرسي\s*(\d+)/i);
+  return match?.[1] ? Number(match[1]) : null;
+}
 
 function isValidUuid(val) {
   return UUID_REGEX.test(String(val || '').trim());
@@ -85,7 +104,7 @@ function playFeedbackTone(kind = 'success', enabled = true) {
       osc.frequency.exponentialRampToValueAtTime(1040, now + 0.16);
 
       gain.gain.setValueAtTime(0.001, now);
-      gain.gain.linearRampToValueAtTime(0.28, now + 0.015);
+      gain.gain.linearRampToValueAtTime(0.32, now + 0.015);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
 
       osc.connect(gain);
@@ -100,7 +119,7 @@ function playFeedbackTone(kind = 'success', enabled = true) {
       osc.frequency.setValueAtTime(420, now);
       osc.frequency.setValueAtTime(310, now + 0.11);
 
-      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.setValueAtTime(0.24, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
 
       osc.connect(gain);
@@ -235,6 +254,13 @@ export default function InvitationScannerModal({
   const [scanResult, setScanResult] = useState(null);
   const [recentLogs, setRecentLogs] = useState([]);
 
+  // خريطة الكراسي لترصيص مكان المدعو عند المسح
+  const [rowsCount, setRowsCount] = useState(3);
+  const [seatsPerRow, setSeatsPerRow] = useState(6);
+  const [eventSeatsMap, setEventSeatsMap] = useState({});
+  const [highlightedSeatNum, setHighlightedSeatNum] = useState(null);
+  const [activeSeatEventTitle, setActiveSeatEventTitle] = useState('');
+
   useEffect(() => {
     soundEnabledRef.current = soundEnabled;
   }, [soundEnabled]);
@@ -260,6 +286,59 @@ export default function InvitationScannerModal({
     'مستخدم';
 
   const actorLabel = `${scannerDisplayName} (${scannerRoleLabel})`;
+
+  const syncEventSeatsMap = useCallback(async (eventTitle, focusedInvite = null) => {
+    const cleanTitle = String(eventTitle || '').trim();
+    if (!cleanTitle || !supabase || typeof supabase.from !== 'function') return;
+
+    setActiveSeatEventTitle(cleanTitle);
+
+    const { data, error } = await supabase
+      .from('church_invitations')
+      .select('id, recipient_name, seat_or_zone, status, invite_tier')
+      .eq('event_title', cleanTitle);
+
+    if (error || !Array.isArray(data)) return;
+
+    const nextMap = {};
+    let maxSeat = 0;
+
+    data.forEach((row) => {
+      const seatNum = extractSeatNumber(row.seat_or_zone);
+      if (seatNum) {
+        if (seatNum > maxSeat) maxSeat = seatNum;
+        nextMap[seatNum] = {
+          name: row.recipient_name || 'مدعو',
+          checkedIn: row.status === 'checked_in',
+          vip: row.invite_tier === 'vip',
+          id: row.id
+        };
+      }
+    });
+
+    if (focusedInvite) {
+      const fSeat = extractSeatNumber(focusedInvite.seat_or_zone);
+      if (fSeat) {
+        if (fSeat > maxSeat) maxSeat = fSeat;
+        nextMap[fSeat] = {
+          name: focusedInvite.recipient_name || 'مدعو',
+          checkedIn: true,
+          vip: focusedInvite.invite_tier === 'vip',
+          id: focusedInvite.id
+        };
+        setHighlightedSeatNum(fSeat);
+      } else {
+        setHighlightedSeatNum(null);
+      }
+    }
+
+    if (maxSeat > 0) {
+      const neededRows = Math.min(6, Math.max(rowsCount, Math.ceil(maxSeat / seatsPerRow)));
+      setRowsCount(neededRows);
+    }
+
+    setEventSeatsMap(nextMap);
+  }, [rowsCount, seatsPerRow]);
 
   const applyContinuousFocusIfSupported = async (html5QrCode) => {
     try {
@@ -556,6 +635,7 @@ export default function InvitationScannerModal({
         scannedBy: invite.checked_in_by || scannerDisplayName,
         scannedByRole: invite.checked_in_by_role || scannerRoleLabel
       });
+      await syncEventSeatsMap(invite.event_title, invite);
       return;
     }
 
@@ -634,6 +714,8 @@ export default function InvitationScannerModal({
       scannedBy: scannerDisplayName,
       scannedByRole: scannerRoleLabel
     });
+
+    await syncEventSeatsMap(finalInvite.event_title, finalInvite);
 
     setRecentLogs((prev) => [
       {
@@ -924,6 +1006,31 @@ export default function InvitationScannerModal({
     onClose?.();
   };
 
+  const seatRowsArray = useMemo(() => {
+    const safeRows = Math.min(6, Math.max(1, Number(rowsCount) || 3));
+    const safeCols = Math.min(12, Math.max(2, Number(seatsPerRow) || 6));
+    let num = 1;
+    return Array.from({ length: safeRows }, (_, rIdx) => {
+      const seats = Array.from({ length: safeCols }, () => {
+        const seatNumber = num++;
+        return {
+          rowIndex: rIdx,
+          rowLabel: getRowLabel(rIdx),
+          seatNumber
+        };
+      });
+      return {
+        rowIndex: rIdx,
+        rowLabel: getRowLabel(rIdx),
+        seats
+      };
+    });
+  }, [rowsCount, seatsPerRow]);
+
+  const showSeatMap =
+    activeTab === 'invitations' &&
+    (Boolean(activeSeatEventTitle) || Object.keys(eventSeatsMap).length > 0);
+
   return (
     <div
       className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-3 sm:p-4"
@@ -951,6 +1058,14 @@ export default function InvitationScannerModal({
           </div>
 
           <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => playFeedbackTone('success', true)}
+              title="تجربة صوت التن"
+              className="px-2.5 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-950 rounded-xl font-bold text-[11px] cursor-pointer"
+            >
+              🔊 تن
+            </button>
             <button
               type="button"
               onClick={() => setSoundEnabled((s) => !s)}
@@ -1184,8 +1299,8 @@ export default function InvitationScannerModal({
                       {scanResult.invite.event_title || ''}
                     </span>
                     {scanResult.invite.seat_or_zone && (
-                      <span className="text-[11px] font-bold text-[#7a1c24] block mt-0.5">
-                        المكان / المقعد: {scanResult.invite.seat_or_zone}
+                      <span className="text-[11px] font-bold text-[#7a1c24] inline-flex items-center gap-1 mt-1 bg-[#f9ecee] px-2.5 py-1 rounded-lg">
+                        <Armchair size={13} /> المكان / المقعد: {scanResult.invite.seat_or_zone}
                       </span>
                     )}
                   </div>
@@ -1227,6 +1342,111 @@ export default function InvitationScannerModal({
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {showSeatMap && (
+          <div className="bg-[#fbfaf7] border border-gray-200 rounded-2xl p-3.5 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <Armchair size={15} className="text-[#7a1c24]" />
+                <strong className="text-gray-900">
+                  خريطة الكراسي وتسكين الحضور ({activeSeatEventTitle})
+                </strong>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] font-bold">
+                <label className="flex items-center gap-1">
+                  <span>صفوف:</span>
+                  <select
+                    className="px-1.5 py-0.5 border rounded bg-white"
+                    value={rowsCount}
+                    onChange={(e) => setRowsCount(Number(e.target.value))}
+                  >
+                    {[2, 3, 4, 5, 6].map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex items-center gap-1">
+                  <span>كراسي الصف:</span>
+                  <select
+                    className="px-1.5 py-0.5 border rounded bg-white"
+                    value={seatsPerRow}
+                    onChange={(e) => setSeatsPerRow(Number(e.target.value))}
+                  >
+                    {[4, 5, 6, 8, 10].map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 text-[10px] font-bold text-gray-600">
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3 h-3 rounded bg-white border border-slate-300 inline-block" /> متاح
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3 h-3 rounded bg-amber-100 border border-amber-300 inline-block" /> محجوز
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3 h-3 rounded bg-emerald-600 inline-block" /> حضر
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3 h-3 rounded bg-[#7a1c24] inline-block" /> كرسي الممسوح الآن
+              </span>
+            </div>
+
+            <div className="space-y-2 overflow-x-auto">
+              {seatRowsArray.map((row) => (
+                <div
+                  key={row.rowIndex}
+                  className="bg-white border border-slate-200 rounded-xl p-2 flex flex-col sm:flex-row sm:items-center gap-2"
+                >
+                  <span className="px-2 py-1 rounded-lg bg-slate-100 text-slate-800 font-black text-[10px] shrink-0 text-center sm:w-20">
+                    {row.rowLabel}
+                  </span>
+                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-1.5 flex-1">
+                    {row.seats.map((seat) => {
+                      const info = eventSeatsMap[seat.seatNumber];
+                      const isCurrent = highlightedSeatNum === seat.seatNumber;
+                      const isChecked = Boolean(info?.checkedIn);
+                      const isReserved = Boolean(info);
+
+                      return (
+                        <div
+                          key={seat.seatNumber}
+                          title={
+                            info
+                              ? `كرسي ${seat.seatNumber} — ${info.name}`
+                              : `${row.rowLabel} - كرسي ${seat.seatNumber}`
+                          }
+                          className={`py-1.5 px-1 rounded-lg border font-black text-[10px] flex flex-col items-center justify-center text-center ${
+                            isCurrent
+                              ? 'bg-[#7a1c24] border-[#7a1c24] text-white ring-2 ring-[#7a1c24]/40'
+                              : isChecked
+                                ? 'bg-emerald-600 border-emerald-700 text-white'
+                                : isReserved
+                                  ? 'bg-amber-100 border-amber-300 text-amber-950'
+                                  : 'bg-[#fbfaf7] border-slate-300 text-slate-800'
+                          }`}
+                        >
+                          <div className="flex items-center gap-0.5">
+                            <Armchair size={11} />
+                            <span>{seat.seatNumber}</span>
+                          </div>
+                          {info?.name && (
+                            <span className="truncate max-w-full text-[9px] font-bold">
+                              {info.name}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
