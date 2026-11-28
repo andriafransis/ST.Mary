@@ -16,6 +16,7 @@ import MonthlyAnalyticsAndRewards from '../components/MonthlyAnalyticsAndRewards
 import PriestInvitationModal from '../components/priest/PriestInvitationModal';
 import InvitationScannerModal from '../components/priest/InvitationScannerModal';
 import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
+import ChangePasswordBox from '../components/ChangePasswordBox';
 
 const STAGE_OPTIONS = [
   'حضانة',
@@ -1532,6 +1533,11 @@ export default function ServantDashboard({
           currentUser={servant}
           onRefresh={onRefresh}
         />
+        {servant && (
+          <div className="print:hidden">
+            <ChangePasswordBox user={servant} />
+          </div>
+        )}
       </div>
     );
   }
@@ -2537,6 +2543,12 @@ export default function ServantDashboard({
           </>
         )}
       </div>
+
+      {servant && (
+        <div className="print:hidden pt-1">
+          <ChangePasswordBox user={servant} />
+        </div>
+      )}
 
       {canScanInvitations && scannerOpen && (
         <InvitationScannerModal
