@@ -7,6 +7,9 @@ import {
   SECTION_DEFS,
   CONTENT_SPECS,
   HEADER_PRESETS,
+  MARY_SHAPES,
+  isHexColor,
+  buildThemeCss,
   PAGE_BG_PRESETS,
   DEFAULT_THEME,
   EMPTY_FORM,
@@ -14,6 +17,8 @@ import {
   readTheme,
   readSections,
   saveSections,
+  readSubSections,
+  saveSubSections,
   saveTheme,
   probeSchema,
   buildContentPayload,
@@ -86,6 +91,7 @@ export default function PublicEditor({ onViewPublic, focus = null, onFocusConsum
   const formRef = useRef(null);
 
   const [sectionDraft, setSectionDraft] = useState([]);
+  const [subDraft, setSubDraft] = useState([]);
   const [themeDraft, setThemeDraft] = useState(DEFAULT_THEME);
   const [savingMeta, setSavingMeta] = useState(false);
 
@@ -151,6 +157,7 @@ export default function PublicEditor({ onViewPublic, focus = null, onFocusConsum
   // مزامنة مسودات الأقسام والمظهر مع آخر بيانات محمّلة
   useEffect(() => {
     setSectionDraft(readSections(items).map(s => ({ ...s })));
+    setSubDraft(readSubSections(items).map(s => ({ ...s })));
     setThemeDraft(readTheme(items).theme);
   }, [items]);
 
@@ -325,6 +332,7 @@ export default function PublicEditor({ onViewPublic, focus = null, onFocusConsum
     setSavingMeta(true);
     try {
       const { error } = await saveSections(supabase, sectionDraft);
+      if (!error) { const r2 = await saveSubSections(supabase, subDraft); if (r2.error) return notify('تعذر حفظ عناوين القداسات/الرحلات: ' + r2.error.message, 'err'); }
       if (error) return notify('تعذر حفظ الأقسام: ' + error.message, 'err');
       await loadItems();
       notify('تم حفظ ترتيب الأقسام ✅');
@@ -333,7 +341,8 @@ export default function PublicEditor({ onViewPublic, focus = null, onFocusConsum
     }
   };
 
-  const resetSections = () => setSectionDraft(SECTION_DEFS.map(d => ({ ...d, title: d.defaultTitle, hidden: false, order: d.sort_order, cfgRow: null })));
+  const patchSub = (key, patch) => setSubDraft(prev => prev.map(s => (s.key === key ? { ...s, ...patch } : s)));
+  const resetSections = () => { setSectionDraft(SECTION_DEFS.map(d => ({ ...d, title: d.defaultTitle, hidden: false, order: d.sort_order, cfgRow: null }))); setSubDraft(prev => prev.map(d => ({ ...d, title: d.defaultTitle, hidden: false }))); }
 
   /* ───── المظهر ───── */
   const handleSaveTheme = async () => {
@@ -653,6 +662,18 @@ export default function PublicEditor({ onViewPublic, focus = null, onFocusConsum
               </div>
             ))}
           </div>
+          <div className="space-y-2">
+            <h4 className="text-xs font-black text-[#7a1c24]">عناوين القداسات والرحلات (داخل قسم المواعيد)</h4>
+            {subDraft.map(s => (
+              <div key={s.key} className={`p-3 rounded-2xl border flex flex-wrap items-center gap-3 ${s.hidden ? 'bg-gray-100 opacity-80' : 'bg-[#fbfaf7]'}`}>
+                <span className="text-lg shrink-0" aria-hidden>{s.icon}</span>
+                <input className={`${input} flex-1 min-w-[200px]`} value={s.title} onChange={e => patchSub(s.key, { title: e.target.value })} aria-label={`عنوان ${s.defaultTitle}`} />
+                <button type="button" onClick={() => patchSub(s.key, { hidden: !s.hidden })} className={`px-3 py-2 rounded-xl text-[11px] font-black inline-flex items-center gap-1 cursor-pointer ${s.hidden ? 'bg-gray-300 text-gray-700' : 'bg-emerald-100 text-emerald-800'}`}>
+                  {s.hidden ? <><EyeOff size={13} /> مخفي</> : <><Eye size={13} /> ظاهر</>}
+                </button>
+              </div>
+            ))}
+          </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" disabled={savingMeta} onClick={handleSaveSections} className="px-5 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-60"><Check size={15} /> {savingMeta ? 'جاري الحفظ...' : 'حفظ الأقسام'}</button>
             <button type="button" onClick={resetSections} className="px-4 py-2.5 border rounded-xl cursor-pointer hover:bg-gray-50">استرجاع الافتراضي</button>
@@ -669,15 +690,40 @@ export default function PublicEditor({ onViewPublic, focus = null, onFocusConsum
           </div>
 
           <div className="space-y-2">
-            <span className="block text-xs font-black text-gray-800">لون الواجهة والفوتر</span>
+            <span className="block text-xs font-black text-gray-800">ألوان جاهزة للواجهة والفوتر</span>
             <div className="flex flex-wrap gap-2">
-              {HEADER_PRESETS.map(p => (
-                <button key={p.id} type="button" onClick={() => setThemeDraft({ ...themeDraft, headerBg: p.value })} aria-pressed={themeDraft.headerBg === p.value}
-                  className={`px-3 py-2 rounded-2xl border-2 text-xs font-black inline-flex items-center gap-2 cursor-pointer transition ${themeDraft.headerBg === p.value ? 'border-amber-400 bg-amber-50' : 'border-gray-200 hover:border-gray-400'}`}>
-                  <span className="w-5 h-5 rounded-full border" style={{ background: p.swatch }} /> {p.label}
-                </button>
+              {HEADER_PRESETS.map(p => {
+                const on = !isHexColor(themeDraft.primary) && themeDraft.headerBg === p.value;
+                return (
+                  <button key={p.id} type="button" onClick={() => setThemeDraft({ ...themeDraft, headerBg: p.value, primary: '' })} aria-pressed={on}
+                    className={`px-3 py-2 rounded-2xl border-2 text-xs font-black inline-flex items-center gap-2 cursor-pointer transition ${on ? 'border-amber-400 bg-amber-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
+                    <span className="w-5 h-5 rounded-full border" style={{ background: p.swatch }} /> {p.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-[#fbfaf7] p-3.5 space-y-3">
+            <span className="block text-xs font-black text-gray-800">🎨 ألوان مخصصة (اختر أي لون تحبه)</span>
+            <div className="grid sm:grid-cols-2 gap-3">
+              {[
+                ['primary', 'اللون الأساسي (الواجهة والعناوين والأزرار)', '#7a1c24'],
+                ['accent', 'لون التمييز (الأزرار الذهبية والتفاصيل)', '#fbbf24']
+              ].map(([key, label, fallback]) => (
+                <div key={key} className="bg-white border rounded-xl p-2.5 space-y-1.5">
+                  <span className="block text-[11px] font-black text-gray-700">{label}</span>
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={isHexColor(themeDraft[key]) ? themeDraft[key] : fallback} onChange={e => setThemeDraft({ ...themeDraft, [key]: e.target.value })} aria-label={label} className="w-12 h-10 p-0.5 border rounded-lg cursor-pointer bg-white" />
+                    <input type="text" dir="ltr" value={themeDraft[key] || ''} placeholder="تلقائي" maxLength={7} onChange={e => setThemeDraft({ ...themeDraft, [key]: e.target.value.trim() })} className="flex-1 min-w-0 p-2 border rounded-lg text-xs font-bold text-left" />
+                    {themeDraft[key] ? (
+                      <button type="button" onClick={() => setThemeDraft({ ...themeDraft, [key]: '' })} className="px-2 py-2 text-[11px] font-black bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer">تلقائي</button>
+                    ) : null}
+                  </div>
+                </div>
               ))}
             </div>
+            <p className="text-[10px] text-gray-500">اللون المخصص بيغيّر الواجهة والفوتر والعناوين والأزرار كلها مرة واحدة، والتدرّج بيتحسب تلقائياً.</p>
           </div>
 
           <div className="space-y-2">
@@ -687,28 +733,56 @@ export default function PublicEditor({ onViewPublic, focus = null, onFocusConsum
                 <button key={c} type="button" onClick={() => setThemeDraft({ ...themeDraft, pageBg: c })} aria-label={`خلفية ${c}`} aria-pressed={themeDraft.pageBg === c}
                   className={`w-9 h-9 rounded-xl border-2 cursor-pointer ${themeDraft.pageBg === c ? 'border-amber-500 ring-2 ring-amber-300' : 'border-gray-300'}`} style={{ background: c }} />
               ))}
-              <input type="color" value={/^#[0-9a-f]{6}$/i.test(themeDraft.pageBg || '') ? themeDraft.pageBg : '#f6f4ef'} onChange={e => setThemeDraft({ ...themeDraft, pageBg: e.target.value })} className="w-9 h-9 rounded-xl border cursor-pointer" aria-label="لون مخصص" />
+              <input type="color" value={isHexColor(themeDraft.pageBg) ? themeDraft.pageBg : '#f6f4ef'} onChange={e => setThemeDraft({ ...themeDraft, pageBg: e.target.value })} aria-label="لون خلفية مخصص" className="w-10 h-10 p-0.5 border rounded-xl cursor-pointer bg-white" />
             </div>
           </div>
 
+          <div className="rounded-2xl border bg-[#fbfaf7] p-3.5 space-y-3">
+            <span className="block text-xs font-black text-gray-800">🕊️ صورة السيدة العذراء في الواجهة</span>
+            <div className="flex flex-wrap gap-2">
+              {MARY_SHAPES.map(sh => (
+                <button key={sh.id} type="button" onClick={() => setThemeDraft({ ...themeDraft, mary_shape: sh.id })} aria-pressed={(themeDraft.mary_shape || 'arch') === sh.id}
+                  className={`px-3 py-2 rounded-xl border-2 text-xs font-black cursor-pointer ${(themeDraft.mary_shape || 'arch') === sh.id ? 'border-amber-400 bg-amber-50' : 'border-gray-200 bg-white'}`}>{sh.label}</button>
+              ))}
+            </div>
+            <label className="block">
+              <span className="block text-[11px] font-black text-gray-700 mb-1">الكلمة اللي تظهر أسفل الصورة (سيبها فاضية لإخفائها)</span>
+              <input value={themeDraft.mary_caption ?? ''} onChange={e => setThemeDraft({ ...themeDraft, mary_caption: e.target.value })} maxLength={60} className="w-full p-2.5 border rounded-xl bg-white text-xs font-bold" />
+            </label>
+            <p className="text-[10px] text-gray-500">لتغيير الصورة نفسها: من تبويب "المحتوى" اختر النوع "صورة السيدة العذراء" وارفع الصورة.</p>
+          </div>
+
           <div className="grid sm:grid-cols-2 gap-2.5">
-            <Toggle checked={themeDraft.show_ticker !== false} onChange={v => setThemeDraft({ ...themeDraft, show_ticker: v })} label="شريط الأخبار المتحرك" hint="أسفل الواجهة الرئيسية" />
-            <Toggle checked={themeDraft.show_mary !== false} onChange={v => setThemeDraft({ ...themeDraft, show_mary: v })} label="أيقونة السيدة العذراء" hint="تظهر بجانب الترحيب لو مفيش فيديو" />
+            <Toggle checked={themeDraft.show_ticker !== false} onChange={v => setThemeDraft({ ...themeDraft, show_ticker: v })} label="شريط الأخبار المتحرك" hint="أعلى الواجهة" />
+            <Toggle checked={themeDraft.show_mary !== false} onChange={v => setThemeDraft({ ...themeDraft, show_mary: v })} label="صورة السيدة العذراء" hint="تظهر أعلى اسم الكنيسة" />
+            <Toggle checked={themeDraft.show_services !== false} onChange={v => setThemeDraft({ ...themeDraft, show_services: v })} label="قسم الخدمات الإلكترونية" hint="كروت المركز التعليمي ويوسف الرامي والدخول" />
             <Toggle checked={themeDraft.show_edu_btn !== false} onChange={v => setThemeDraft({ ...themeDraft, show_edu_btn: v })} label="زر المركز التعليمي" />
             <Toggle checked={themeDraft.show_joseph_btn !== false} onChange={v => setThemeDraft({ ...themeDraft, show_joseph_btn: v })} label="زر خدمة يوسف الرامي" />
             <Toggle checked={themeDraft.sticky_header !== false} onChange={v => setThemeDraft({ ...themeDraft, sticky_header: v })} label="تثبيت الشريط العلوي أثناء التمرير" />
           </div>
 
-          <div className="rounded-2xl overflow-hidden border">
-            <div className={`bg-linear-to-br ${themeDraft.headerBg} text-white p-5`}>
-              <span className="text-[11px] text-amber-200 font-black">✦ معاينة</span>
-              <strong className="block text-lg font-black mt-1">اسم الكنيسة</strong>
-              <span className="text-xs text-white/75">هكذا ستظهر الواجهة الرئيسية</span>
+          <div className="pp-root rounded-2xl overflow-hidden border" style={{ backgroundColor: themeDraft.pageBg || '#f6f4ef' }}>
+            <style>{buildThemeCss(themeDraft)}</style>
+            <div className={`pp-hdr bg-linear-to-br ${themeDraft.headerBg} text-white p-5 text-center space-y-2`}>
+              <span className="text-[11px] text-amber-200 font-black">✦ معاينة حيّة</span>
+              <strong className="block text-lg font-black">اسم الكنيسة</strong>
+              <span className="block text-xs text-white/75">هكذا ستظهر الواجهة الرئيسية</span>
+              <span className="inline-block px-4 py-2 rounded-xl bg-amber-400 text-[#4a0e13] text-xs font-black">مواعيد القداسات</span>
             </div>
-            <div className="p-4 text-xs text-gray-600" style={{ background: themeDraft.pageBg }}>خلفية الصفحة</div>
+            <div className="p-4 flex items-center gap-3">
+              <span className="w-10 h-10 rounded-xl bg-[#f9ecee] text-[#7a1c24] flex items-center justify-center font-black">4</span>
+              <div>
+                <strong className="block text-sm text-[#5c1319]">عنوان قسم</strong>
+                <span className="text-[11px] text-gray-600">خلفية الصفحة وألوان العناوين والكروت</span>
+              </div>
+              <span className="mr-auto px-3 py-1.5 rounded-lg bg-[#7a1c24] text-white text-[11px] font-black">زر</span>
+            </div>
           </div>
 
-          <button type="button" disabled={savingMeta} onClick={handleSaveTheme} className="px-5 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-60"><Check size={15} /> {savingMeta ? 'جاري الحفظ...' : 'حفظ المظهر'}</button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" disabled={savingMeta} onClick={handleSaveTheme} className="px-5 py-2.5 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-black cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-60"><Check size={15} /> {savingMeta ? 'جاري الحفظ...' : 'حفظ المظهر'}</button>
+            <button type="button" onClick={() => setThemeDraft({ ...DEFAULT_THEME })} className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl font-black cursor-pointer text-xs">↺ رجوع للمظهر الأصلي</button>
+          </div>
         </div>
       )}
 

@@ -6,7 +6,10 @@ import {
   SYSTEM_KINDS,
   readTheme,
   readSections,
+  readSubSections,
   probeSchema,
+  buildThemeCss,
+  MARY_SHAPES,
   sortContent,
   isItemLive,
   looksLikeSystemJson,
@@ -395,6 +398,9 @@ export default function PublicPage({
   /* ───── تجهيز البيانات ───── */
   const { theme } = useMemo(() => readTheme(items), [items]);
   const sections = useMemo(() => readSections(items), [items]);
+  const subSections = useMemo(() => readSubSections(items), [items]);
+  const massesMeta = subSections[0];
+  const tripsMeta = subSections[1];
   const adminOn = canEdit && editMode;
 
   const customCategories = useMemo(() => items.filter(i => i.kind === 'category_def'), [items]);
@@ -456,13 +462,26 @@ export default function PublicPage({
     return [...map.values()];
   }, [upcomingMasses]);
 
+  const pastMassGroups = useMemo(() => {
+    const map = new Map();
+    massRows
+      .filter(r => r.date && r.date.getTime() < startOfToday().getTime())
+      .sort((a, b) => combineDateTime(b.date, b.time) - combineDateTime(a.date, a.time))
+      .forEach(r => {
+        const k = r.date.getTime();
+        if (!map.has(k)) map.set(k, { date: r.date, rows: [] });
+        map.get(k).rows.push(r);
+      });
+    return [...map.values()];
+  }, [massRows]);
+  const pastMassCount = pastMassGroups.reduce((n, g) => n + g.rows.length, 0);
+
   const nextMass = useMemo(
     () => upcomingMasses.find(r => combineDateTime(r.date, r.time) >= now) || null,
     [upcomingMasses, now]
   );
 
-  const tripRows = useMemo(() => {
-    const today = startOfToday().getTime();
+  const allTripRows = useMemo(() => {
     const rows = [];
     publicTrips.forEach(tr => {
       const date = parseISODate(tr.trip_date);
@@ -487,10 +506,12 @@ export default function PublicPage({
         cost: 0, overnight: false, tag: 'إعلان رحلة', places: tr.location, times: s.date ? s.time : '', program: tr.body, url: tr.url
       });
     });
-    return rows
-      .filter(r => !r.date || r.date.getTime() >= today)
-      .sort((a, b) => (a.date ? a.date.getTime() : Infinity) - (b.date ? b.date.getTime() : Infinity));
+    return rows.sort((a, b) => (a.date ? a.date.getTime() : Infinity) - (b.date ? b.date.getTime() : Infinity));
   }, [publicTrips, priestPublicTrips, ofKind]);
+  const tripRows = useMemo(() => allTripRows.filter(r => !r.date || r.date.getTime() >= startOfToday().getTime()), [allTripRows]);
+  const pastTripRows = useMemo(() => allTripRows.filter(r => r.date && r.date.getTime() < startOfToday().getTime()).reverse(), [allTripRows]);
+  const [showPastTrips, setShowPastTrips] = useState(false);
+  const [showPastMasses, setShowPastMasses] = useState(false);
 
   const newsCards = useMemo(() => {
     const cards = newsItems.map(n => ({ type: 'news', id: `n${n.id}`, raw: n, ...getItemSchedule(n) }));
@@ -519,27 +540,19 @@ export default function PublicPage({
   /* ───── التنقل ───── */
   const navItems = useMemo(() => {
     const list = [];
-    const has = {
-      hanna_word: hannaWords.length > 0,
-      media: images.length + videos.length > 0,
-      news: newsCards.length > 0,
-      priest_bio: priestBios.length > 0,
-      history: histories.length > 0
-    };
     sections.forEach(s => {
       if (s.key === 'summary' || !sectionVisible(s.key)) return;
       if (s.key === 'masses_trips') {
-        if (massRows.length > 0) list.push({ anchor: 'sec-masses', label: NAV_FALLBACK['sec-masses'] });
-        if (tripRows.length > 0) list.push({ anchor: 'sec-trips', label: NAV_FALLBACK['sec-trips'] });
+        if (!massesMeta.hidden || adminOn) list.push({ anchor: 'sec-masses', full: massesMeta.title, label: massesMeta.title.length <= 22 ? massesMeta.title : NAV_FALLBACK['sec-masses'], icon: '⛪', tone: 'gold' });
+        if (!tripsMeta.hidden || adminOn) list.push({ anchor: 'sec-trips', full: tripsMeta.title, label: tripsMeta.title.length <= 22 ? tripsMeta.title : NAV_FALLBACK['sec-trips'], icon: '🚌' });
         return;
       }
-      if (!has[s.key] && !adminOn) return;
       const label = s.title.length <= 22 ? s.title : NAV_FALLBACK[s.anchor];
-      list.push({ anchor: s.anchor, label });
+      list.push({ anchor: s.anchor, full: s.title, label, icon: s.icon, tone: s.key === 'hanna_word' ? 'gold' : '' });
     });
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sections, hannaWords.length, images.length, videos.length, newsCards.length, priestBios.length, histories.length, massRows.length, tripRows.length, adminOn]);
+  }, [sections, massesMeta, tripsMeta, hannaWords.length, images.length, videos.length, newsCards.length, priestBios.length, histories.length, massRows.length, tripRows.length, adminOn]);
 
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return undefined;
@@ -708,7 +721,7 @@ export default function PublicPage({
     if (!sectionVisible(s.key)) return null;
 
     if (s.key === 'hanna_word') {
-      if (hannaWords.length === 0 && !adminOn) return null;
+      
       const [first, ...rest] = hannaWords;
       const embed = first ? toEmbedUrl(first.url) : '';
       const direct = first ? isDirectVideo(first.url) : false;
@@ -748,7 +761,7 @@ export default function PublicPage({
                 {direct && <video src={first.url} controls className="relative mt-6 w-full max-w-2xl mx-auto aspect-video rounded-2xl bg-black shadow-lg" />}
               </div>
             ) : (
-              <div className="p-6 rounded-2xl border border-dashed border-amber-300 bg-amber-50/50 text-sm text-amber-900">لم تُضف كلمة بعد — اضغط «إضافة» لنشر أول كلمة روحية.</div>
+              <div className="p-6 rounded-2xl border border-dashed border-amber-300 bg-amber-50/50 text-sm text-amber-900">لم تُضف كلمة بعد — ستظهر هنا الكلمة الروحية لأبونا حنا فؤاد فور نشرها.</div>
             )}
             {rest.length > 0 && (
               <details className="mt-3 group rounded-2xl bg-white border border-amber-200">
@@ -775,7 +788,7 @@ export default function PublicPage({
     }
 
     if (s.key === 'media') {
-      if (images.length + videos.length === 0 && !adminOn) return null;
+      
       const shown = mediaList.slice(0, mediaLimit);
       const imgOnly = mediaList.filter(m => m._t === 'image');
       return (
@@ -797,7 +810,7 @@ export default function PublicPage({
               </div>
             </SectionHeader>
             {mediaList.length === 0 ? (
-              <div className="p-6 rounded-2xl border border-dashed text-sm text-gray-500 text-center">لا توجد عناصر في هذا التصنيف.</div>
+              <div className="p-6 rounded-2xl border border-dashed text-sm text-gray-500 text-center">{images.length + videos.length === 0 ? 'لم تُضف صور أو فيديوهات للكنيسة حتى الآن.' : 'لا توجد عناصر في هذا التصنيف.'}</div>
             ) : (
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
                 {shown.map((m, i) => {
@@ -855,7 +868,7 @@ export default function PublicPage({
     }
 
     if (s.key === 'news') {
-      if (newsCards.length === 0 && !adminOn) return null;
+      
       return (
         <section key={s.key} id="sec-news" className="scroll-mt-32">
           <HiddenBanner k={s.key} />
@@ -883,8 +896,8 @@ export default function PublicPage({
     }
 
     if (s.key === 'masses_trips') {
-      const showMasses = massRows.length > 0 || adminOn;
-      const showTrips = tripRows.length > 0 || adminOn;
+      const showMasses = !massesMeta.hidden || adminOn;
+      const showTrips = !tripsMeta.hidden || adminOn;
       if (!showMasses && !showTrips) return null;
       return (
         <div key={s.key} className="space-y-3">
@@ -894,11 +907,11 @@ export default function PublicPage({
               <section id="sec-masses" className="scroll-mt-32">
                 <Reveal>
                   <div className="rounded-[2rem] bg-white border border-gray-200 shadow-sm p-5 md:p-7 h-full">
-                    <SectionHeader icon="⛪" title="مواعيد القداسات والصلوات" count={massRows.length}>
+                    <SectionHeader icon="⛪" title={massesMeta.title} count={massRows.length}>
                       <AddChip kind="mass" label="قداس / صلاة" />
                     </SectionHeader>
                     {massRows.length === 0 ? (
-                      <p className="text-sm text-gray-500">لم تُضف مواعيد بعد.</p>
+                      <p className="text-sm text-gray-500">لم تُضف مواعيد قداسات أو صلوات عامة بعد.</p>
                     ) : (
                       <div className="space-y-5 max-h-[34rem] overflow-y-auto pr-1">
                         {recurringMasses.length > 0 && (
@@ -916,6 +929,20 @@ export default function PublicPage({
                             {g.rows.map(renderMassRow)}
                           </div>
                         ))}
+                        {pastMassCount > 0 && (
+                          <div className="space-y-3 pt-1">
+                            <button type="button" onClick={() => setShowPastMasses(v => !v)} aria-expanded={showPastMasses} className="w-full px-4 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-black cursor-pointer inline-flex items-center justify-center gap-2 transition">
+                              <ChevronDown size={15} className={`transition ${showPastMasses ? 'rotate-180' : ''}`} />
+                              {showPastMasses ? 'إخفاء المواعيد السابقة' : `عرض المواعيد السابقة (${pastMassCount})`}
+                            </button>
+                            {showPastMasses && pastMassGroups.map(g => (
+                              <div key={`past-${g.date.getTime()}`} className="space-y-2 opacity-80">
+                                <h3 className="text-xs font-black text-gray-600 flex items-center gap-1.5"><Moon size={14} /> {formatDateFull(g.date)} <Pill className="bg-gray-200 text-gray-700">انتهى</Pill></h3>
+                                {g.rows.map(renderMassRow)}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -926,14 +953,15 @@ export default function PublicPage({
               <section id="sec-trips" className="scroll-mt-32">
                 <Reveal delay={80}>
                   <div className="rounded-[2rem] bg-white border border-gray-200 shadow-sm p-5 md:p-7 h-full">
-                    <SectionHeader icon="🚌" title="مكتب الرحلات والمؤتمرات" count={tripRows.length}>
+                    <SectionHeader icon="🚌" title={tripsMeta.title} count={tripRows.length}>
                       <AddChip kind="trip" label="إعلان رحلة" />
                     </SectionHeader>
-                    {tripRows.length === 0 ? (
+                    {tripRows.length === 0 && pastTripRows.length === 0 ? (
                       <p className="text-sm text-gray-500">لا توجد رحلات معلنة حالياً.</p>
                     ) : (
                       <div className="space-y-3 max-h-[34rem] overflow-y-auto pr-1">
-                        {tripRows.map(t => {
+                        {tripRows.length === 0 && <p className="text-sm text-gray-500">لا توجد رحلات قادمة حالياً.</p>}
+                        {(showPastTrips ? [...tripRows, ...pastTripRows] : tripRows).map(t => {
                           const open = openTrip === t.id;
                           const hasMore = Boolean(t.program || t.places || t.times);
                           return (
@@ -985,6 +1013,12 @@ export default function PublicPage({
                             </div>
                           );
                         })}
+                        {pastTripRows.length > 0 && (
+                          <button type="button" onClick={() => setShowPastTrips(v => !v)} aria-expanded={showPastTrips} className="w-full px-4 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-black cursor-pointer inline-flex items-center justify-center gap-2 transition">
+                            <ChevronDown size={15} className={`transition ${showPastTrips ? 'rotate-180' : ''}`} />
+                            {showPastTrips ? 'إخفاء الرحلات السابقة' : `عرض الرحلات السابقة (${pastTripRows.length})`}
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -997,7 +1031,7 @@ export default function PublicPage({
     }
 
     if (s.key === 'priest_bio') {
-      if (priestBios.length === 0 && !adminOn) return null;
+      
       return (
         <section key={s.key} id="sec-priests" className="scroll-mt-32">
           <HiddenBanner k={s.key} />
@@ -1006,7 +1040,7 @@ export default function PublicPage({
               <AddChip kind="priest_bio" label="أب كاهن" />
             </SectionHeader>
             {priestBios.length === 0 ? (
-              <div className="p-6 rounded-2xl border border-dashed text-sm text-gray-500">أضف آباء الكنيسة بصورهم وبياناتهم من المحرر.</div>
+              <div className="p-6 rounded-2xl border border-dashed text-sm text-gray-500">سيتم عرض آباء الكنيسة بصورهم وتاريخ سيامتهم وبياناتهم هنا.</div>
             ) : (
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {priestBios.map((pb, i) => {
@@ -1045,7 +1079,7 @@ export default function PublicPage({
     }
 
     if (s.key === 'history') {
-      if (histories.length === 0 && !adminOn) return null;
+      
       return (
         <section key={s.key} id="sec-history" className="scroll-mt-32">
           <HiddenBanner k={s.key} />
@@ -1054,7 +1088,7 @@ export default function PublicPage({
               <AddChip kind="history" label="نبذة" />
             </SectionHeader>
             {histories.length === 0 ? (
-              <div className="p-6 rounded-2xl border border-dashed text-sm text-gray-500">أضف تاريخ الكنيسة وسيرة شفيعها من المحرر.</div>
+              <div className="p-6 rounded-2xl border border-dashed text-sm text-gray-500">سيتم عرض تاريخ الكنيسة وسيرة شفيعها وحياة الكنيسة هنا.</div>
             ) : (
               <ol className="relative pr-6 md:pr-8 space-y-6 before:absolute before:right-[7px] md:before:right-[11px] before:top-2 before:bottom-2 before:w-0.5 before:bg-linear-to-b before:from-amber-400 before:to-[#7a1c24]/30">
                 {histories.map(h => (
@@ -1090,9 +1124,11 @@ export default function PublicPage({
   const heroMedia = featuredLive || featuredVideo;
   const heroEmbed = heroMedia ? toEmbedUrl(heroMedia.url) : '';
   const heroDirect = heroMedia ? isDirectVideo(heroMedia.url) : false;
+  const maryShape = MARY_SHAPES.find(x => x.id === theme.mary_shape) || MARY_SHAPES[0];
 
   return (
-    <div className="min-h-screen text-gray-900 flex flex-col" style={{ backgroundColor: theme.pageBg || '#f6f4ef' }} dir="rtl">
+    <div className="pp-root min-h-screen text-gray-900 flex flex-col" style={{ backgroundColor: theme.pageBg || '#f6f4ef' }} dir="rtl">
+      <style>{buildThemeCss(theme)}</style>
       <style>{`
         html { scroll-behavior: smooth; }
         .pp-reveal { opacity: 0; transform: translateY(22px); transition: opacity .7s ease, transform .7s ease; }
@@ -1115,7 +1151,7 @@ export default function PublicPage({
       `}</style>
 
       {/* ───── الشريط العلوي الثابت ───── */}
-      <div className={`${theme.sticky_header !== false ? 'sticky top-0' : ''} z-40 bg-linear-to-l ${theme.headerBg} text-white shadow-lg border-b border-amber-300/30`}>
+      <div className={`${theme.sticky_header !== false ? 'sticky top-0' : ''} z-40 pp-hdr bg-linear-to-l ${theme.headerBg} text-white shadow-lg border-b border-amber-300/30`}>
         <div className="max-w-6xl mx-auto px-3 md:px-5 min-h-14 py-1.5 grid grid-cols-[5.25rem_1fr_5.25rem] items-center gap-2 md:flex md:justify-between md:gap-3 md:py-0 md:h-14">
           <a href="#top" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="contents md:flex md:items-center md:gap-2.5 md:min-w-0">
             <span className="w-9 h-9 rounded-xl bg-white/10 border border-amber-300/50 flex items-center justify-center overflow-hidden shrink-0 justify-self-start col-start-1 row-start-1">
@@ -1150,7 +1186,7 @@ export default function PublicPage({
       </div>
 
       {navItems.length > 0 && (
-        <div className={`${theme.sticky_header !== false ? 'md:sticky md:top-14' : ''} z-30 bg-linear-to-l ${theme.headerBg} text-white border-b border-white/10 shadow-md`}>
+        <div className={`hidden md:block ${theme.sticky_header !== false ? 'md:sticky md:top-14' : ''} z-30 pp-hdr bg-linear-to-l ${theme.headerBg} text-white border-b border-white/10 shadow-md`}>
           <nav aria-label="أقسام الصفحة" className="bg-black/25 backdrop-blur">
             <div className="max-w-6xl mx-auto px-2 md:px-5 py-2 flex flex-wrap md:flex-nowrap items-center justify-center md:justify-start gap-1.5 md:overflow-x-auto pp-noscroll">
               {navItems.map(n => (
@@ -1176,7 +1212,7 @@ export default function PublicPage({
       )}
 
       {/* ───── الواجهة الرئيسية (Hero) ───── */}
-      <header id="top" className={`relative overflow-hidden bg-linear-to-br ${theme.headerBg} text-white`}>
+      <header id="top" className={`relative overflow-hidden pp-hdr bg-linear-to-br ${theme.headerBg} text-white`}>
         <div aria-hidden className="absolute inset-0 opacity-[0.07]" style={{ backgroundImage: CROSS_PATTERN, backgroundSize: '72px' }} />
         <div aria-hidden className="absolute -top-24 -left-24 w-96 h-96 rounded-full bg-amber-300/10 blur-3xl" />
         <div aria-hidden className="absolute -bottom-32 right-10 w-96 h-96 rounded-full bg-white/5 blur-3xl" />
@@ -1196,8 +1232,8 @@ export default function PublicPage({
         <div className="relative max-w-3xl mx-auto px-4 md:px-5 pt-8 md:pt-12 pb-24 md:pb-32 flex flex-col items-center">
           {theme.show_mary !== false && (
             <div className="relative pp-float mb-7 md:mb-9">
-              <div aria-hidden className="absolute -inset-3 rounded-t-[999px] rounded-b-[2.5rem] border border-amber-300/40" />
-              <div className="relative w-56 h-72 md:w-64 md:h-80 rounded-t-[999px] rounded-b-[2rem] overflow-hidden border-2 border-amber-300/80 shadow-2xl bg-[#2b0910] flex items-center justify-center">
+              <div aria-hidden className={`absolute -inset-3 ${maryShape.ring} border border-amber-300/40`} />
+              <div className={`relative ${maryShape.id === 'circle' ? 'w-60 h-60 md:w-72 md:h-72' : 'w-56 h-72 md:w-64 md:h-80'} ${maryShape.cls} overflow-hidden border-2 border-amber-300/80 shadow-2xl bg-[#2b0910] flex items-center justify-center`}>
                 {activeMaryUrl ? (
                   <img src={activeMaryUrl} alt="السيدة العذراء مريم" className="w-full h-full object-cover" />
                 ) : (
@@ -1206,7 +1242,7 @@ export default function PublicPage({
                     <span className="text-amber-300 font-black text-sm">السيدة العذراء مريم</span>
                   </div>
                 )}
-                <span className="absolute bottom-0 inset-x-0 bg-black/55 py-1 text-center text-[11px] font-black text-amber-200">✝ أم النور القديسة مريم</span>
+                {(theme.mary_caption ?? '').trim() && <span className="absolute bottom-0 inset-x-0 bg-black/55 py-1 text-center text-[11px] font-black text-amber-200">{theme.mary_caption}</span>}
               </div>
             </div>
           )}
@@ -1244,6 +1280,18 @@ export default function PublicPage({
                 </button>
               )}
             </div>
+
+            {(navItems.length > 0 || (onOpenEdu && theme.show_edu_btn !== false) || (onOpenJoseph && theme.show_joseph_btn !== false)) && (
+              <div className="md:hidden grid grid-cols-2 gap-2 w-full max-w-md mx-auto pt-0.5" aria-label="أقسام الصفحة">
+                {[
+                  ...navItems.map(n => ({ key: n.anchor, label: `${n.icon ? n.icon + ' ' : ''}${n.full || n.label}`, onClick: () => goTo(n.anchor), cls: n.tone === 'gold' ? 'bg-amber-300 hover:bg-amber-200 text-[#4a0e13] font-black shadow' : 'bg-white/15 hover:bg-white/25 border border-white/20 text-white font-bold' })),
+                  ...(onOpenEdu && theme.show_edu_btn !== false ? [{ key: 'edu', label: '🎓 المركز التعليمي', onClick: onOpenEdu, cls: 'bg-indigo-600 hover:bg-indigo-700 border border-indigo-300/40 text-white font-black shadow' }] : []),
+                  ...(onOpenJoseph && theme.show_joseph_btn !== false ? [{ key: 'joseph', label: '🕊️ خدمة يوسف الرامي', onClick: onOpenJoseph, cls: 'bg-slate-900/85 hover:bg-slate-900 border border-white/30 text-white font-black shadow' }] : [])
+                ].map((b, i, arr) => (
+                  <button key={b.key} type="button" onClick={b.onClick} className={`min-h-11 px-3 py-2 rounded-xl text-xs flex items-center justify-center text-center leading-snug cursor-pointer transition ${b.cls} ${arr.length % 2 === 1 && i === arr.length - 1 ? 'col-span-2' : ''}`}>{b.label}</button>
+                ))}
+              </div>
+            )}
 
             {nextMass && (
               <div className="inline-flex items-center gap-3 rounded-2xl bg-black/25 border border-white/15 backdrop-blur px-4 py-3 max-w-full">
@@ -1322,11 +1370,39 @@ export default function PublicPage({
           </div>
         )}
 
+        {(() => {
+          const services = [
+            onOpenEdu && theme.show_edu_btn !== false && { key: 'edu', icon: '🎓', title: 'المركز التعليمي', hint: 'الدروس والمراحل والمواد والتسجيل', onClick: onOpenEdu, cls: 'from-indigo-600 to-indigo-800' },
+            onOpenJoseph && theme.show_joseph_btn !== false && { key: 'joseph', icon: '🕊️', title: 'خدمة يوسف الرامي', hint: 'خدمة الراقدين والجنازات', onClick: onOpenJoseph, cls: 'from-slate-700 to-slate-900' },
+            !isLoggedIn && { key: 'login', icon: '👤', title: 'دخول المنظومة', hint: 'للخدام والمخدومين وأولياء الأمور', onClick: onOpenLogin, cls: 'from-[#7a1c24] to-[#5c1319]' },
+            isLoggedIn && onBackToApp && { key: 'app', icon: '🏠', title: 'العودة لحسابي', hint: 'لوحتك الشخصية والخدمات', onClick: onBackToApp, cls: 'from-[#7a1c24] to-[#5c1319]' }
+          ].filter(Boolean);
+          if (theme.show_services === false || services.length === 0) return null;
+          return (
+            <section id="sec-services" aria-label="الخدمات الإلكترونية" className="scroll-mt-32">
+              <Reveal>
+                <SectionHeader icon="🧭" title="الخدمات الإلكترونية" count={services.length} />
+                <div className={`grid gap-3 md:gap-4 ${services.length >= 3 ? 'sm:grid-cols-3' : services.length === 2 ? 'sm:grid-cols-2' : ''}`}>
+                  {services.map(sv => (
+                    <button key={sv.key} type="button" onClick={sv.onClick} className={`group text-right p-5 rounded-3xl text-white bg-linear-to-br ${sv.cls} shadow-lg hover:shadow-xl hover:-translate-y-1 transition cursor-pointer flex items-center gap-4`}>
+                      <span className="w-14 h-14 rounded-2xl bg-white/15 border border-white/25 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition">{sv.icon}</span>
+                      <span className="min-w-0">
+                        <strong className="block text-base font-black">{sv.title}</strong>
+                        <span className="block text-xs text-white/80 mt-0.5 leading-5">{sv.hint}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </Reveal>
+            </section>
+          );
+        })()}
+
         {sections.filter(s => s.key !== 'summary').map(renderSection)}
 
         {customCategories.map(cat => {
           const catItems = sortContent(visibleItems.filter(i => i.kind === cat.title));
-          if (catItems.length === 0 && !adminOn) return null;
+          
           return (
             <section key={cat.id} className="scroll-mt-32">
               <Reveal>
@@ -1377,7 +1453,7 @@ export default function PublicPage({
       </main>
 
       {/* ───── الفوتر ───── */}
-      <footer className={`relative overflow-hidden bg-linear-to-br ${theme.headerBg} text-white mt-6`}>
+      <footer className={`relative overflow-hidden pp-hdr bg-linear-to-br ${theme.headerBg} text-white mt-6`}>
         <div aria-hidden className="absolute inset-0 opacity-[0.05]" style={{ backgroundImage: CROSS_PATTERN, backgroundSize: '72px' }} />
         <div className="relative max-w-6xl mx-auto px-4 md:px-5 py-8 grid md:grid-cols-3 gap-6 items-center text-center md:text-right">
           <div className="space-y-1.5">
