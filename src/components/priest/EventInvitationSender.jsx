@@ -69,7 +69,7 @@ export default function EventInvitationSender({
   const [location, setLocation] = useState('');
   const [notes, setNotes] = useState('');
 
-  // إعداد رصّ الكراسي المرقمة (صفوف قدام مثل صفوف الأتوبيس)
+  // إعداد خريطة الكراسي المرقمة (صفوف ودكك وكراسي زي الأتوبيس)
   const [rowsCount, setRowsCount] = useState(3);
   const [seatsPerRow, setSeatsPerRow] = useState(6);
   const [selectedSeats, setSelectedSeats] = useState([]);
@@ -85,7 +85,6 @@ export default function EventInvitationSender({
   const [sentBatch, setSentBatch] = useState([]);
   const [copiedId, setCopiedId] = useState(null);
 
-  // جلب الكراسي المحجوزة لنفس المناسبة لتفادي التكرار
   useEffect(() => {
     let active = true;
     const cleanTitle = eventTitle.trim();
@@ -512,7 +511,6 @@ export default function EventInvitationSender({
             </div>
           </div>
 
-          {/* رصّ الكراسي المرقمة (صفوف قدام مثل صفوف الأتوبيس) */}
           <div className="bg-[#fbfaf7] border border-gray-200 rounded-2xl p-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
