@@ -9,6 +9,7 @@ import MasterCongregationSheet, { canExtractMasterSheet } from '../components/Ma
 import { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/ServiceGroupFeed';
 import NestedCardsBuilder, { loadAdminCardsConfig } from '../components/NestedCardsBuilder';
 import PermissionsPage from './PermissionsPage';
+import ChangePasswordBox from '../components/ChangePasswordBox';
 
 import ChurchIdentitySettings from '../components/admin/ChurchIdentitySettings';
 import AdminEventsSection from '../components/admin/AdminEventsSection';
@@ -668,6 +669,10 @@ export default function AdminDashboard({
               )}
             </div>
           </div>
+        )}
+
+        {!isSetup && effectiveUser && (
+          <ChangePasswordBox user={effectiveUser} />
         )}
 
         <div className={isSetup ? 'max-h-[calc(100vh-230px)] overflow-y-auto pr-1' : 'max-h-[calc(100vh-250px)] overflow-y-auto pr-1'}>
