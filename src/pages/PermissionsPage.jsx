@@ -349,15 +349,50 @@ function buildMergedUserFromPolicies(user, selectedPolicyKeys, allPolicies, pres
   };
 }
 
+const splitCsv = (v) => String(v || '').split(/[,،]/).map(x => x.trim()).filter(Boolean);
+
+function ChipMultiSelect({ options, selected, onChange, emptyText }) {
+  const sel = new Set(selected);
+  const all = [...new Set([...options, ...selected])];
+  if (all.length === 0) return <div className="text-[11px] text-gray-400">{emptyText || 'لا توجد خيارات'}</div>;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {all.map(name => {
+        const on = sel.has(name);
+        return (
+          <button
+            key={name}
+            type="button"
+            onClick={() => onChange(on ? selected.filter(x => x !== name) : [...selected, name])}
+            className={`px-2.5 py-1 rounded-full text-[11px] font-black border cursor-pointer transition ${on ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-gray-700 border-gray-300 hover:border-[#7a1c24]'}`}
+          >
+            {on ? '✓ ' : ''}{name}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function PermissionsPage({
   users = [],
   roleScreens = [],
   currentUser = null,
   initialUserId = null,
   initialTab = 'users',
+  services = [],
+  serviceGroups = [],
   onRefresh
 }) {
   const isAdmin = currentUser?.role === 'admin';
+
+  const serviceOptions = [...new Set([
+    ...(Array.isArray(serviceGroups) ? serviceGroups : []).map(g => g?.group_name).filter(Boolean),
+    ...(Array.isArray(serviceGroups) ? serviceGroups : []).flatMap(g => Array.isArray(g?.stages) ? g.stages : splitCsv(g?.stages)),
+    ...(Array.isArray(services) ? services : []).map(sv => sv?.stage_name).filter(Boolean)
+  ])];
+  const setSelectedServices = (arr) => setSelectedUser(prev => prev ? { ...prev, detailed_stage: arr.join(', '), service_stage: arr.join(', ') } : prev);
+  const setSelectedClasses = (arr) => setSelectedUser(prev => prev ? { ...prev, assigned_class: arr.join(', ') } : prev);
 
   const [tab, setTab] = useState(initialTab);
   const [saving, setSaving] = useState(false);
@@ -777,6 +812,10 @@ export default function PermissionsPage({
           send_invitations: invState.canSend,
           scan_invitations: invState.canScan
         },
+        extra_services: (() => {
+          const list = splitCsv(selectedUser.detailed_stage);
+          return list.length > 1 ? [...new Set([...(Array.isArray(selectedUser.permissions?.extra_services) ? selectedUser.permissions.extra_services : []), ...list])] : (selectedUser.permissions?.extra_services || []);
+        })(),
         policy_keys: policyKeys,
         template_key: policyKeys[0] || '',
         screen_permissions: normalizedMap,
@@ -787,6 +826,9 @@ export default function PermissionsPage({
         .from('church_users')
         .update({
           ...(selectedUser.role !== 'admin' ? { role: selectedUser.role } : {}),
+          detailed_stage: selectedUser.detailed_stage || '',
+          service_stage: selectedUser.detailed_stage || selectedUser.service_stage || '',
+          assigned_class: selectedUser.assigned_class || '',
           permissions: finalPerms
         })
         .eq('id', selectedUser.id);
@@ -1024,14 +1066,14 @@ export default function PermissionsPage({
       <div className="bg-white p-4 rounded-3xl border shadow-sm space-y-3">
         <div>
           <h2 className="text-base md:text-lg font-black text-[#7a1c24] flex items-center gap-2">
-            <Shield size={20} /> المركز الموحد للصلاحيات والأدوار وتعدد الجروبات (Multi-Group Policy)
+            <Shield size={20} /> مركز الصلاحيات والأدوار
           </h2>
           <p className="text-xs text-gray-500">
             إمكانية ربط الشخص بأكثر من جروب بوليسي في نفس الوقت وتطبيق فئات كاملة (مخدوم، ولي أمر، خادم، أمين خدمة، كاهن) دفعة واحدة.
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex gap-2 overflow-x-auto pb-1">
           <button type="button" onClick={() => setTab('users')} className={`px-4 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer ${tab === 'users' ? 'bg-[#7a1c24] text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
             <Users size={15} /> 👤 صلاحيات فرد معين
           </button>
@@ -1062,7 +1104,7 @@ export default function PermissionsPage({
                 <option key={k} value={k}>{v}</option>
               ))}
             </select>
-            <div className="space-y-1.5 max-h-[560px] overflow-y-auto">
+            <div className="space-y-1.5 max-h-64 lg:max-h-[560px] overflow-y-auto">
               {users
                 .filter((u) => u.role !== 'admin')
                 .filter((u) => userRoleFilter === 'all' || u.role === userRoleFilter)
@@ -1125,6 +1167,38 @@ export default function PermissionsPage({
                     </button>
                   </div>
                 </div>
+
+                <details open className="bg-indigo-50/50 border border-indigo-200 rounded-2xl p-3.5 space-y-2.5">
+                  <summary className="cursor-pointer font-black text-indigo-950 text-xs md:text-sm">🏫 الخدمات والفصول (من اللي ضافه الأدمن)</summary>
+                  <p className="text-[11px] text-indigo-900">علّم على الخدمات والفصول اللي الشخص يشوفها ويخدم فيها. أي خدمة أو فصل جديد يتضاف من شاشة الأدمن بيظهر هنا لوحده. اضغط «حفظ صلاحيات الشخص» بعد التعليم.</p>
+                  <div>
+                    <strong className="block text-[11px] font-black text-indigo-950 mb-1">الخدمات والاجتماعات</strong>
+                    <ChipMultiSelect
+                      options={serviceOptions}
+                      selected={splitCsv(selectedUser.detailed_stage || selectedUser.service_stage)}
+                      onChange={setSelectedServices}
+                      emptyText="مفيش خدمات متضافة لسه. ضيفها من شاشة الأدمن."
+                    />
+                  </div>
+                  <div>
+                    <strong className="block text-[11px] font-black text-indigo-950 mb-1">الفصول</strong>
+                    <ChipMultiSelect
+                      options={(Array.isArray(services) ? services : [])
+                        .filter(sv => splitCsv(selectedUser.detailed_stage || selectedUser.service_stage).length === 0
+                          || splitCsv(selectedUser.detailed_stage || selectedUser.service_stage).includes(sv.stage_name)
+                          || splitCsv(selectedUser.assigned_class).includes(sv.class_name))
+                        .map(sv => sv.class_name).filter(Boolean)}
+                      selected={splitCsv(selectedUser.assigned_class)}
+                      onChange={setSelectedClasses}
+                      emptyText="مفيش فصول للخدمات المختارة."
+                    />
+                  </div>
+                  {['servant', 'vice_head_servant', 'head_servant', 'meeting_servant'].includes(selectedUser.role)
+                    && splitCsv(selectedUser.detailed_stage || selectedUser.service_stage).length === 0
+                    && splitCsv(selectedUser.assigned_class).length === 0 && (
+                    <div className="text-[11px] font-black text-red-700">⚠️ خادم من غير خدمة أو فصل: مش هيشوف أي مخدومين.</div>
+                  )}
+                </details>
 
                 {/* تطبيق فئة كاملة دفعة واحدة */}
                 <div className="bg-slate-50 p-3.5 rounded-2xl border space-y-2">
