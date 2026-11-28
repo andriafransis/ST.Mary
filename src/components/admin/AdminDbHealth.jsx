@@ -17,6 +17,7 @@ export const APP_TABLES = [
   'edu_teachers', 'edu_teacher_attendance', 'edu_teacher_payouts', 'edu_subjects', 'edu_student_attendance', 'edu_lessons', 'edu_bookings',
   'whatsapp_templates', 'liturgy_books', 'katameros_readings', 'agpeya_prayers', 'synaxarium_entries',
   'user_sessions', 'activity_logs', 'push_subscriptions', 'site_visitor_stats', 'receipts', 'attendance_records',
+  'spiritual_tasks', 'spiritual_task_logs', 'spiritual_quizzes', 'spiritual_quiz_attempts', 'daily_verses',
   'v_parent_member_commitment'
 ];
 
