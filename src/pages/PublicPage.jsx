@@ -1482,6 +1482,17 @@ export default function PublicPage({
           </div>
         </div>
         <div className="relative border-t border-white/10 py-3 text-center text-[11px] text-white/60">✝ {churchTitle} — جميع الحقوق محفوظة</div>
+        {theme.show_credit !== false && (theme.credit_name || '').trim() && (
+          <div className="relative pb-5 -mt-1 text-center text-[11px] text-white/70" dir="ltr">
+            <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white/10 border border-white/15">
+              <span aria-hidden className="text-amber-300">✦</span>
+              <span className="tracking-wide">{(theme.credit_label || 'Created by').trim()}</span>
+              {isSafeHttpUrl(theme.credit_url)
+                ? <a href={theme.credit_url} target="_blank" rel="noreferrer" className="font-black text-amber-200 hover:text-amber-100 underline-offset-2 hover:underline">{theme.credit_name}</a>
+                : <strong className="font-black text-amber-200">{theme.credit_name}</strong>}
+            </span>
+          </div>
+        )}
       </footer>
 
       {/* ───── أدوات عائمة ───── */}

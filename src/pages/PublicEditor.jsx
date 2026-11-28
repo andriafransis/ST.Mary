@@ -774,6 +774,18 @@ export default function PublicEditor({ onViewPublic, focus = null, onFocusConsum
             ))}
           </div>
 
+          <div className="rounded-2xl border p-3.5 space-y-2.5 bg-[#fbfaf7]">
+            <Toggle checked={themeDraft.show_credit !== false} onChange={v => setThemeDraft({ ...themeDraft, show_credit: v })} label="سطر الحقوق أسفل الصفحة (Created by)" hint="يظهر في آخر الفوتر" />
+            <div className="grid sm:grid-cols-3 gap-2.5">
+              <label className="space-y-1 block"><span className="text-[11px] font-black text-gray-600">النص قبل الاسم</span>
+                <input value={themeDraft.credit_label ?? ''} placeholder="Created by" maxLength={30} onChange={e => setThemeDraft({ ...themeDraft, credit_label: e.target.value })} className="w-full p-2.5 border rounded-xl bg-white text-xs font-bold" dir="auto" /></label>
+              <label className="space-y-1 block"><span className="text-[11px] font-black text-gray-600">الاسم</span>
+                <input value={themeDraft.credit_name ?? ''} placeholder="Andrea Francis" maxLength={40} onChange={e => setThemeDraft({ ...themeDraft, credit_name: e.target.value })} className="w-full p-2.5 border rounded-xl bg-white text-xs font-bold" dir="auto" /></label>
+              <label className="space-y-1 block"><span className="text-[11px] font-black text-gray-600">رابط (اختياري)</span>
+                <input value={themeDraft.credit_url ?? ''} placeholder="https://..." onChange={e => setThemeDraft({ ...themeDraft, credit_url: e.target.value })} className="w-full p-2.5 border rounded-xl bg-white text-xs font-bold" dir="ltr" /></label>
+            </div>
+          </div>
+
           <div className="pp-root rounded-2xl overflow-hidden border" style={{ backgroundColor: themeDraft.pageBg || '#f6f4ef' }}>
             <style>{buildThemeCss(themeDraft)}</style>
             <div className={`pp-hdr bg-linear-to-br ${themeDraft.headerBg} text-white p-5 text-center space-y-2`}>
