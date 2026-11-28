@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { logActivity } from '../../lib/activityLogger';
 import { showMobileNotification } from '../../lib/mobileNotifications';
@@ -11,7 +11,8 @@ import {
   Phone,
   CheckCircle2,
   Copy,
-  Check
+  Check,
+  Armchair
 } from 'lucide-react';
 
 const EVENT_TYPES = [
@@ -21,6 +22,15 @@ const EVENT_TYPES = [
   'احتفالية',
   'يوبيل',
   'مناسبة خاصة'
+];
+
+const ROW_LABELS_AR = [
+  'الصف الأول',
+  'الصف الثاني',
+  'الصف الثالث',
+  'الصف الرابع',
+  'الصف الخامس',
+  'الصف السادس'
 ];
 
 const generateUniqueToken = () => {
@@ -37,6 +47,10 @@ const normalizePhoneWa = (phone = '') => {
   if (digits.length === 10 && digits.startsWith('1')) return '20' + digits;
   return digits;
 };
+
+function getRowLabel(rowIndex) {
+  return ROW_LABELS_AR[rowIndex] || `الصف ${rowIndex + 1}`;
+}
 
 export default function EventInvitationSender({
   currentUser,
@@ -55,6 +69,12 @@ export default function EventInvitationSender({
   const [location, setLocation] = useState('');
   const [notes, setNotes] = useState('');
 
+  // إعداد رصّ الكراسي المرقمة (صفوف قدام مثل صفوف الأتوبيس)
+  const [rowsCount, setRowsCount] = useState(3);
+  const [seatsPerRow, setSeatsPerRow] = useState(6);
+  const [selectedSeats, setSelectedSeats] = useState([]);
+  const [bookedSeatsMap, setBookedSeatsMap] = useState({});
+
   // 'all_parish' | 'service' | 'selected_users'
   const [audienceMode, setAudienceMode] = useState('all_parish');
   const [selectedServiceToken, setSelectedServiceToken] = useState('');
@@ -64,6 +84,42 @@ export default function EventInvitationSender({
   const [sending, setSending] = useState(false);
   const [sentBatch, setSentBatch] = useState([]);
   const [copiedId, setCopiedId] = useState(null);
+
+  // جلب الكراسي المحجوزة لنفس المناسبة لتفادي التكرار
+  useEffect(() => {
+    let active = true;
+    const cleanTitle = eventTitle.trim();
+    if (!cleanTitle || !supabase || typeof supabase.from !== 'function') {
+      setBookedSeatsMap({});
+      return;
+    }
+
+    supabase
+      .from('church_invitations')
+      .select('seat_or_zone, recipient_name')
+      .eq('event_title', cleanTitle)
+      .then(({ data }) => {
+        if (!active || !Array.isArray(data)) return;
+        const map = {};
+        data.forEach((row) => {
+          const seatText = String(row.seat_or_zone || '').trim();
+          if (!seatText) return;
+          const match = seatText.match(/كرسي\s*(\d+)/i);
+          if (match?.[1]) {
+            const num = Number(match[1]);
+            map[num] = row.recipient_name || 'محجوز';
+          }
+        });
+        setBookedSeatsMap(map);
+      })
+      .catch(() => {
+        if (active) setBookedSeatsMap({});
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [eventTitle]);
 
   const serviceOptions = useMemo(() => {
     const set = new Set();
@@ -114,6 +170,41 @@ export default function EventInvitationSender({
       .slice(0, 60);
   }, [users, currentUser?.id, userSearch]);
 
+  const formatSeatLabel = (seatObj) =>
+    `${getRowLabel(seatObj.rowIndex)} - كرسي ${seatObj.seatNumber}`;
+
+  const composeSeatZoneText = (seatsList, customLocation = location, customTier = inviteTier) => {
+    const cleanLoc = String(customLocation || '').trim();
+    if (Array.isArray(seatsList) && seatsList.length > 0) {
+      const seatsPart = seatsList.map(formatSeatLabel).join('، ');
+      return cleanLoc ? `${seatsPart} — ${cleanLoc}` : seatsPart;
+    }
+    return cleanLoc || (customTier === 'vip' ? 'منطقة VIP' : 'صحن الكنيسة / القاعة');
+  };
+
+  const handleToggleSeat = (seatObj) => {
+    if (bookedSeatsMap[seatObj.seatNumber]) return;
+
+    setSelectedSeats((prev) => {
+      const exists = prev.some((s) => s.seatNumber === seatObj.seatNumber);
+      const next = exists
+        ? prev.filter((s) => s.seatNumber !== seatObj.seatNumber)
+        : [...prev, seatObj].sort((a, b) => a.seatNumber - b.seatNumber);
+
+      if (next.length > 0) {
+        setSeatOrZone(composeSeatZoneText(next, location, inviteTier));
+      } else {
+        setSeatOrZone('');
+      }
+      return next;
+    });
+  };
+
+  const handleClearSeats = () => {
+    setSelectedSeats([]);
+    setSeatOrZone('');
+  };
+
   const toggleSelectUser = (uid) => {
     setSelectedUserIds((prev) =>
       prev.includes(uid) ? prev.filter((id) => id !== uid) : [...prev, uid]
@@ -129,7 +220,7 @@ export default function EventInvitationSender({
       inv.event_date ? `📅 التاريخ: ${inv.event_date}` : '',
       inv.event_time ? `⏰ الموعد: ${inv.event_time}` : '',
       inv.location ? `📍 المكان: ${inv.location}` : '',
-      inv.seat_or_zone ? `🪑 التسكين / المكان: ${inv.seat_or_zone}` : '',
+      inv.seat_or_zone ? `🪑 التسكين / الكرسي: ${inv.seat_or_zone}` : '',
       `🎫 كود الدعوة (QR): *${inv.qr_token}*`,
       inv.notes ? `📌 ملاحظات: ${inv.notes}` : ''
     ]
@@ -205,24 +296,30 @@ export default function EventInvitationSender({
 
     setSending(true);
     try {
-      const payloadRows = targetRecipients.map((person) => ({
-        event_type: eventType,
-        event_title: eventTitle.trim(),
-        invite_tier: inviteTier,
-        seat_or_zone:
-          seatOrZone.trim() ||
-          (inviteTier === 'vip' ? 'منطقة VIP' : 'صحن الكنيسة / القاعة'),
-        event_date: eventDate.trim(),
-        event_time: eventTime.trim(),
-        location: location.trim(),
-        notes: notes.trim(),
-        recipient_user_id: person.id,
-        recipient_name: person.full_name || 'مدعو',
-        recipient_phone: person.phone || '',
-        qr_token: generateUniqueToken(),
-        status: 'sent',
-        created_by: currentUser?.full_name || 'الأب الكاهن'
-      }));
+      const payloadRows = targetRecipients.map((person, idx) => {
+        const assignedSeat = selectedSeats[idx];
+        const rowSeatText = assignedSeat
+          ? composeSeatZoneText([assignedSeat], location, inviteTier)
+          : seatOrZone.trim() ||
+            (inviteTier === 'vip' ? 'منطقة VIP' : 'صحن الكنيسة / القاعة');
+
+        return {
+          event_type: eventType,
+          event_title: eventTitle.trim(),
+          invite_tier: inviteTier,
+          seat_or_zone: rowSeatText,
+          event_date: eventDate.trim(),
+          event_time: eventTime.trim(),
+          location: location.trim(),
+          notes: notes.trim(),
+          recipient_user_id: person.id,
+          recipient_name: person.full_name || 'مدعو',
+          recipient_phone: person.phone || '',
+          qr_token: generateUniqueToken(),
+          status: 'sent',
+          created_by: currentUser?.full_name || 'الأب الكاهن'
+        };
+      });
 
       const { data, error } = await supabase
         .from('church_invitations')
@@ -262,6 +359,27 @@ export default function EventInvitationSender({
     }
   };
 
+  const rowsArray = useMemo(() => {
+    const safeRows = Math.min(6, Math.max(1, Number(rowsCount) || 3));
+    const safeCols = Math.min(12, Math.max(2, Number(seatsPerRow) || 6));
+    let counter = 1;
+    return Array.from({ length: safeRows }, (_, rIdx) => {
+      const seats = Array.from({ length: safeCols }, () => {
+        const seatNumber = counter++;
+        return {
+          rowIndex: rIdx,
+          rowLabel: getRowLabel(rIdx),
+          seatNumber
+        };
+      });
+      return {
+        rowIndex: rIdx,
+        rowLabel: getRowLabel(rIdx),
+        seats
+      };
+    });
+  }, [rowsCount, seatsPerRow]);
+
   return (
     <div className="space-y-4 text-xs" dir="rtl">
       <div className="bg-white p-4 sm:p-5 rounded-3xl border border-gray-200 shadow-sm">
@@ -269,7 +387,7 @@ export default function EventInvitationSender({
           <Sparkles size={19} /> دعوات المناسبات (تدشين، مهرجان، احتفالية، يوبيل)
         </h2>
         <p className="text-gray-500 mt-0.5">
-          إرسال دعوات VIP أو عامة للشعب أو لفئة محددة مباشرة إلى النوتيفيكيشن مع QR Code وواتساب/موبايل
+          إرسال دعوات VIP أو عامة مع تحديد أرقام الكراسي والتسكين وQR Code وواتساب/موبايل
         </p>
       </div>
 
@@ -356,12 +474,12 @@ export default function EventInvitationSender({
             </div>
 
             <div>
-              <label className="block font-bold text-gray-700 mb-1">المكان / التسكين المخصص</label>
+              <label className="block font-bold text-gray-700 mb-1">المكان / الكرسي / التسكين</label>
               <input
                 placeholder={
                   inviteTier === 'vip'
-                    ? 'مثال: الصف الأول VIP / قاعة الضيوف'
-                    : 'مثال: صحن الكنيسة الرئيسي'
+                    ? 'مثال: الصف الأول - كرسي 1 — الكنيسة الكبرى'
+                    : 'مثال: الصف الثاني - كرسي 7 — صحن الكنيسة'
                 }
                 className="w-full p-2.5 border rounded-xl bg-[#fbfaf7] font-bold outline-none focus:border-[#7a1c24]"
                 value={seatOrZone}
@@ -373,10 +491,16 @@ export default function EventInvitationSender({
               <label className="block font-bold text-gray-700 mb-1">موقع الاحتفال والكلمة / التعليمات</label>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <input
-                  placeholder="عنوان أو مكان المناسبة"
+                  placeholder="عنوان أو مكان المناسبة (مثال: الكنيسة الكبرى)"
                   className="w-full p-2.5 border rounded-xl bg-[#fbfaf7] font-bold outline-none focus:border-[#7a1c24]"
                   value={location}
-                  onChange={(e) => setLocation(e.target.value)}
+                  onChange={(e) => {
+                    const nextLoc = e.target.value;
+                    setLocation(nextLoc);
+                    if (selectedSeats.length > 0) {
+                      setSeatOrZone(composeSeatZoneText(selectedSeats, nextLoc, inviteTier));
+                    }
+                  }}
                 />
                 <input
                   placeholder="نص الدعوة أو تعليمات الدخول للكشاف"
@@ -385,6 +509,114 @@ export default function EventInvitationSender({
                   onChange={(e) => setNotes(e.target.value)}
                 />
               </div>
+            </div>
+          </div>
+
+          {/* رصّ الكراسي المرقمة (صفوف قدام مثل صفوف الأتوبيس) */}
+          <div className="bg-[#fbfaf7] border border-gray-200 rounded-2xl p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Armchair size={16} className="text-[#7a1c24]" />
+                <strong className="text-gray-900">
+                  رصّ وتحديد الكراسي المرقمة ({selectedSeats.length} مختار)
+                </strong>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <label className="flex items-center gap-1 font-bold text-gray-700">
+                  <span>عدد الصفوف:</span>
+                  <select
+                    className="px-2 py-1 border rounded-lg bg-white font-bold"
+                    value={rowsCount}
+                    onChange={(e) => setRowsCount(Number(e.target.value))}
+                  >
+                    {[2, 3, 4, 5, 6].map((n) => (
+                      <option key={n} value={n}>{n} صفوف</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="flex items-center gap-1 font-bold text-gray-700">
+                  <span>كراسي كل صف:</span>
+                  <select
+                    className="px-2 py-1 border rounded-lg bg-white font-bold"
+                    value={seatsPerRow}
+                    onChange={(e) => setSeatsPerRow(Number(e.target.value))}
+                  >
+                    {[4, 5, 6, 8, 10].map((n) => (
+                      <option key={n} value={n}>{n} كراسي</option>
+                    ))}
+                  </select>
+                </label>
+
+                {selectedSeats.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearSeats}
+                    className="px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 font-bold cursor-pointer"
+                  >
+                    مسح الكراسي
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 text-[10px] font-bold text-gray-600">
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3.5 h-3.5 rounded bg-white border border-slate-300 inline-block" /> متاح
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3.5 h-3.5 rounded bg-[#7a1c24] inline-block" /> مختار
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3.5 h-3.5 rounded bg-amber-200 border border-amber-400 inline-block" /> محجوز مسبقاً
+              </span>
+            </div>
+
+            <div className="space-y-2.5 pt-1 overflow-x-auto">
+              {rowsArray.map((row) => (
+                <div
+                  key={row.rowIndex}
+                  className="bg-white border border-slate-200 rounded-2xl p-2.5 flex flex-col sm:flex-row sm:items-center gap-2"
+                >
+                  <span className="px-2.5 py-1 rounded-xl bg-slate-100 text-slate-800 font-black text-[11px] shrink-0 text-center sm:w-24">
+                    {row.rowLabel}
+                  </span>
+
+                  <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-1.5 flex-1">
+                    {row.seats.map((seat) => {
+                      const isBooked = Boolean(bookedSeatsMap[seat.seatNumber]);
+                      const isSelected = selectedSeats.some(
+                        (s) => s.seatNumber === seat.seatNumber
+                      );
+
+                      return (
+                        <button
+                          key={seat.seatNumber}
+                          type="button"
+                          disabled={isBooked}
+                          onClick={() => handleToggleSeat(seat)}
+                          title={
+                            isBooked
+                              ? `كرسي ${seat.seatNumber} محجوز لـ: ${bookedSeatsMap[seat.seatNumber]}`
+                              : `${row.rowLabel} - كرسي ${seat.seatNumber}`
+                          }
+                          className={`py-2 px-1.5 rounded-xl border font-black text-[11px] flex flex-col items-center justify-center transition ${
+                            isBooked
+                              ? 'bg-amber-100 border-amber-300 text-amber-900 cursor-not-allowed opacity-80'
+                              : isSelected
+                                ? 'bg-[#7a1c24] border-[#7a1c24] text-white shadow-xs cursor-pointer'
+                                : 'bg-[#fbfaf7] hover:bg-slate-100 border-slate-300 text-slate-800 cursor-pointer'
+                          }`}
+                        >
+                          <Armchair size={13} className="mb-0.5" />
+                          <span>{seat.seatNumber}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
@@ -510,9 +742,14 @@ export default function EventInvitationSender({
                 >
                   <div className="min-w-0">
                     <strong className="text-gray-900 block truncate">{inv.recipient_name}</strong>
-                    <span className="text-[11px] text-gray-500 font-mono">
+                    <span className="text-[11px] text-gray-500 font-mono block truncate">
                       {inv.invite_tier === 'vip' ? '👑 VIP' : 'عام'} • {inv.qr_token}
                     </span>
+                    {inv.seat_or_zone && (
+                      <span className="text-[10px] text-[#7a1c24] font-bold block truncate">
+                        🪑 {inv.seat_or_zone}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
