@@ -72,42 +72,26 @@ function isInvitationStrictlyMine(row, currentUser) {
 }
 
 export function buildInvitationQrPayload(inv = {}) {
-  const token = String(inv.qr_token || inv.code || inv.id || '').trim();
-  return JSON.stringify({
-    v: 1,
-    type: 'church_invitation',
-    attendance_mode: 'check_in',
-    token,
-    recipient_name: inv.recipient_name || '',
-    role_or_title: inv.recipient_role || inv.recipient_type || 'مدعو',
-    event_title: inv.event_title || '',
-    event_type: inv.event_type || '',
-    event_date: inv.event_date || '',
-    event_time: inv.event_time || '',
-    tier: inv.invite_tier === 'vip' ? 'vip' : 'general',
-    seat_or_zone: inv.seat_or_zone || inv.location || '',
-    status: inv.status || 'issued'
-  });
+  return String(inv?.qr_token || inv?.code || inv?.id || '').trim();
 }
 
 function RealQrCodeBox({ invite, size = 128 }) {
   const [qrUrl, setQrUrl] = useState('');
   const [copied, setCopied] = useState(false);
 
-  const token = String(invite?.qr_token || '').trim();
+  const token = buildInvitationQrPayload(invite);
 
   useEffect(() => {
     let active = true;
-    const payload = buildInvitationQrPayload(invite);
-    if (!payload || !token) {
+    if (!token) {
       setQrUrl('');
       return;
     }
 
-    QRCode.toDataURL(payload, {
-      errorCorrectionLevel: 'H',
-      margin: 3,
-      width: Math.max(280, size * 2),
+    QRCode.toDataURL(token, {
+      errorCorrectionLevel: 'M',
+      margin: 4,
+      width: Math.max(320, size * 2.5),
       color: {
         dark: '#0f172a',
         light: '#ffffff'
@@ -123,21 +107,7 @@ function RealQrCodeBox({ invite, size = 128 }) {
     return () => {
       active = false;
     };
-  }, [
-    token,
-    size,
-    invite?.recipient_name,
-    invite?.recipient_role,
-    invite?.recipient_type,
-    invite?.event_title,
-    invite?.event_type,
-    invite?.event_date,
-    invite?.event_time,
-    invite?.invite_tier,
-    invite?.seat_or_zone,
-    invite?.location,
-    invite?.status
-  ]);
+  }, [token, size]);
 
   const handleCopy = async () => {
     if (!token) return;
@@ -155,7 +125,9 @@ function RealQrCodeBox({ invite, size = 128 }) {
     const link = document.createElement('a');
     link.href = qrUrl;
     link.download = `QR-${token || 'invitation'}.png`;
+    document.body.appendChild(link);
     link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -226,7 +198,7 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
         : `دعوة جديدة: ${inv.event_title}`;
 
     const body = [
-      inv.seat_or_zone ? `المكان: ${inv.seat_or_zone}` : '',
+      inv.seat_or_zone ? `المكان / الكرسي: ${inv.seat_or_zone}` : '',
       inv.event_date ? `التاريخ: ${inv.event_date}` : '',
       inv.event_time ? `الموعد: ${inv.event_time}` : '',
       `كود: ${inv.qr_token}`
@@ -433,7 +405,7 @@ export default function ReceivedInvitationsSection({ currentUser, onCountChange 
 
                 <div className="bg-white/90 p-3 rounded-2xl border border-gray-200/80 space-y-1.5 text-[11px]">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-gray-500 font-bold">المكان / التسكين:</span>
+                    <span className="text-gray-500 font-bold">المكان / الكرسي / التسكين:</span>
                     <strong className="text-[#7a1c24] font-black text-xs inline-flex items-center gap-1">
                       <MapPin size={12} />
                       {[inv.seat_or_zone, inv.location].filter(Boolean).join(' — ') || 'يُحدد عند الدخول'}
