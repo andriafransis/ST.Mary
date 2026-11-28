@@ -4,7 +4,7 @@ import {
   requestMobileNotificationPermission,
   showMobileNotification
 } from '../lib/mobileNotifications';
-import { ArrowRight, BellRing, CheckCircle2, Fingerprint } from 'lucide-react';
+import { ArrowRight, BellRing, CheckCircle2, Fingerprint, User, Lock, Eye, EyeOff } from 'lucide-react';
 import { getBiometricOwnerId, disableBiometric } from '../lib/biometricLock';
 
 export const PENDING_APPROVAL_KEY = 'church_pending_approval_user';
@@ -20,6 +20,7 @@ export default function LoginPage({
 }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPass, setShowPass] = useState(false);
   const [bioReady, setBioReady] = useState(() => !!getBiometricOwnerId());
   const autoTried = useRef(false);
 
@@ -141,8 +142,14 @@ export default function LoginPage({
   };
 
   return (
-    <div className="min-h-screen bg-linear-to-br from-[#41090d] via-[#6f151c] to-[#1c0406] flex items-center justify-center p-4" dir="rtl">
-      <div className="bg-white rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl">
+    <div className="min-h-dvh bg-linear-to-br from-[#41090d] via-[#6f151c] to-[#1c0406] flex flex-col items-center justify-center p-4 gap-4" dir="rtl">
+      <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl overflow-hidden">
+        <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white px-6 pt-6 pb-8 text-center">
+          <div className="w-16 h-16 bg-white/15 border border-white/25 rounded-2xl flex items-center justify-center text-3xl font-black mx-auto mb-3">✝</div>
+          <h1 className="text-lg md:text-xl font-black text-amber-200">{churchName}</h1>
+          <p className="text-xs text-white/85 mt-1">تسجيل الدخول للآباء الكهنة والخدام والرعية</p>
+        </div>
+        <div className="p-5 md:p-7 -mt-4 bg-white rounded-t-3xl relative">
         {onBackToPublic && (
           <button
             type="button"
@@ -152,12 +159,6 @@ export default function LoginPage({
             <ArrowRight size={14} /> العودة لصفحة الكنيسة الرئيسية
           </button>
         )}
-
-        <div className="w-16 h-16 bg-[#f9ecee] text-[#7a1c24] border border-[#ead0d3] rounded-2xl flex items-center justify-center text-3xl font-black mx-auto mb-3 shadow-inner">
-          ✝
-        </div>
-        <h1 className="text-xl font-black text-center text-[#7a1c24]">{churchName}</h1>
-        <p className="text-xs text-gray-500 text-center mt-1 mb-6">تسجيل الدخول الموحد للآباء الكهنة، الخدام، والرعية</p>
 
         {/* كارت إشعار القبول الصريح باليوزر والباسورد */}
         {approvedNotice && (
@@ -230,31 +231,52 @@ export default function LoginPage({
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs font-bold text-gray-700">
           <div>
-            <label className="block mb-1">اسم المستخدم / Username</label>
-            <input
-              required
-              value={username}
-              onChange={e => setUsername(e.target.value)}
-              placeholder="اسم المستخدم"
-              className="w-full p-3 border rounded-xl outline-none focus:border-[#7a1c24]"
-            />
+            <label className="block mb-1">اسم المستخدم</label>
+            <div className="relative">
+              <User size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                required
+                value={username}
+                onChange={e => setUsername(e.target.value)}
+                placeholder="اسم المستخدم"
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                className="w-full pr-10 pl-3 py-3 border rounded-xl outline-none focus:border-[#7a1c24] focus:ring-2 focus:ring-[#7a1c24]/15 bg-gray-50 focus:bg-white"
+              />
+            </div>
           </div>
           <div>
-            <label className="block mb-1">كلمة المرور / Password</label>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full p-3 border rounded-xl outline-none focus:border-[#7a1c24]"
-            />
+            <label className="block mb-1">كلمة المرور</label>
+            <div className="relative">
+              <Lock size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type={showPass ? 'text' : 'password'}
+                required
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="••••••••"
+                autoComplete="current-password"
+                className="w-full pr-10 pl-11 py-3 border rounded-xl outline-none focus:border-[#7a1c24] focus:ring-2 focus:ring-[#7a1c24]/15 bg-gray-50 focus:bg-white"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPass(v => !v)}
+                aria-label={showPass ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#7a1c24] cursor-pointer"
+              >
+                {showPass ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
+            </div>
           </div>
           <button type="submit" className="w-full py-3 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl font-bold text-sm shadow transition cursor-pointer">
             تسجيل الدخول
           </button>
         </form>
+        </div>
       </div>
+      <p className="text-[11px] text-white/60 font-bold">Created by Andrea Francis</p>
     </div>
   );
 }
