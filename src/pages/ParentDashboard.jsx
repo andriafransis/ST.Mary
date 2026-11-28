@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
 import BellNotificationsPanel from '../components/priest/BellNotificationsPanel';
+import ChangePasswordBox from '../components/ChangePasswordBox';
 import {
   CalendarCheck,
   MessageSquareHeart,
@@ -787,6 +788,8 @@ export default function ParentDashboard({
           )}
         </div>
       </div>
+
+      {parent && <ChangePasswordBox user={parent} />}
 
       {linkRequests.length > 0 && activeTab !== 'linking' && (
         <div className="bg-emerald-50 border-2 border-emerald-300 px-4 py-2.5 rounded-2xl flex flex-wrap justify-between items-center gap-2">
