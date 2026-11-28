@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import AdminLogsAndWaWidget from '../components/AdminLogsAndWaWidget';
 import AdminChurchSettingsAndBurial from '../components/AdminChurchSettingsAndBurial';
-import AdminPageDesigner from '../components/AdminPageDesigner';
 import EducationalCenterManager from '../components/EducationalCenterManager';
 import JosephArimatheaManager from '../components/JosephArimatheaManager';
 import MasterCongregationSheet, { canExtractMasterSheet } from '../components/MasterCongregationSheet';
@@ -31,7 +30,7 @@ import {
 } from '../utils/churchHierarchy';
 import { RefreshCw, ArrowRight, Lock, X } from 'lucide-react';
 
-const SETUP_SUB_CARDS = ['users', 'roles_permissions', 'page_designer', 'settings', 'logs', 'nested_cards'];
+const SETUP_SUB_CARDS = ['users', 'roles_permissions', 'settings', 'logs', 'nested_cards'];
 
 export default function AdminDashboard({
   users = [], events = [], services = [], serviceGroups = [], caseCategories = [], customCards = [],
@@ -405,7 +404,6 @@ export default function AdminDashboard({
   const rawSetupCards = useMemo(() => [
     { id: 'users', icon: '👥', title: 'حسابات الكنيسة', desc: 'إدارة الكهنة، الخدام، الشمامسة، المخدومين، وأولياء الأمور ونقلهم فردي وجماعي', count: `${users.length} فرد`, color: 'border-red-200 bg-white' },
     { id: 'roles_permissions', icon: '🔐', title: 'الصلاحيات والأدوار', desc: 'إنشاء قوالب صلاحيات وتحديد مين يشوف ومين يعدل لكل شاشة ولكل فرد', count: `${roleTemplatesCount} قالب • موحّد`, color: 'border-emerald-300 bg-emerald-50/30' },
-    { id: 'page_designer', icon: '🎨', title: 'التصميم وتعديل الصفحات', desc: 'ترتيب الأقسام، إضافة ونشر الأخبار والقداسات والرحلات والفيديوهات والكهنة والروابط', count: 'تحكم كامل', color: 'border-pink-300 bg-pink-50/30' },
     { id: 'settings', icon: '⚙️', title: 'الإعدادات وهوية الكنيسة', desc: 'تغيير اسم الكنيسة، الشعار، رفع لوجو الكنيسة وصورة السيدة العذراء، وتليفون الطوارئ', count: 'تخصيص كامل', color: 'border-amber-300 bg-amber-50/40' },
     { id: 'nested_cards', icon: '🧩', title: 'إضافة وتعديل كروت', desc: 'كروت جوا كروت + صلاحية مكان الظهور (في شاشة كذا أم جوا كارت كذا) + صلاحية الأدوار', count: `${activeNestedRows.length} كارت مضاف`, color: 'border-rose-300 bg-rose-50/30' },
     ...(isAdmin ? [{ id: 'logs', icon: '📊', title: 'سجل النشاط واللوجات والواتساب', desc: 'مين دخل ومين مدخلش، الأجهزة، مدة الجلسة، وصلاحيات الواتساب للكهنة', count: 'للأدمن فقط', color: 'border-indigo-300 bg-indigo-50/40' }] : [])
@@ -553,14 +551,13 @@ export default function AdminDashboard({
     { id: 'events', label: '⛪ القداسات' },
     { id: 'nested_cards', label: '🧩 الكروت' },
     { id: 'roles_permissions', label: '🔐 الصلاحيات' },
-    { id: 'page_designer', label: '🎨 التصميم' },
     { id: 'settings', label: '⚙️ الهوية' }
   ];
 
   const renderQuickNavBar = () => (
     <div className="app-tabs bg-white px-3 py-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto print:hidden">
       {quickNavTabs.map(tab => {
-        const isCurrent = activeCard === tab.id || (tab.id === 'setup_hub' && isSetupChildCard && !['users', 'nested_cards', 'roles_permissions', 'page_designer', 'settings'].includes(activeCard));
+        const isCurrent = activeCard === tab.id || (tab.id === 'setup_hub' && isSetupChildCard && !['users', 'nested_cards', 'roles_permissions', 'settings'].includes(activeCard));
         return (
           <button
             key={tab.id}
@@ -682,7 +679,7 @@ export default function AdminDashboard({
             const HUB_GROUPS = isSetup
               ? [
                   { title: '👥 الأفراد والصلاحيات', accent: 'border-r-red-500', ids: ['users', 'roles_permissions'] },
-                  { title: '🎨 الصفحات والهوية والكروت', accent: 'border-r-pink-500', ids: ['page_designer', 'settings', 'nested_cards'] },
+                  { title: '⚙️ الهوية والكروت', accent: 'border-r-pink-500', ids: ['settings', 'nested_cards'] },
                   { title: '📊 المتابعة', accent: 'border-r-indigo-500', ids: ['logs'] }
                 ]
               : [
@@ -785,13 +782,6 @@ export default function AdminDashboard({
               initialUserId={permTargetUserId}
               onRefresh={() => { loadRoleTemplates(); if (onRefresh) onRefresh(); }}
             />
-          </div>
-        )}
-
-        {activeCard === 'page_designer' && (
-          <div className="space-y-3">
-            {renderTopBack('🎨 التصميم وتعديل الصفحات')}
-            <AdminPageDesigner currentUser={effectiveUser} onSaved={onRefresh} />
           </div>
         )}
 
