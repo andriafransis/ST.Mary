@@ -64,8 +64,8 @@ export async function showMobileNotification({
   body = '',
   badgeCount = null,
   tag = 'church-alert',
-  icon = '/pwa-192x192.png',
-  url = '/'
+  icon = `${import.meta.env?.BASE_URL || '/'}icon-192.png`,
+  url = import.meta.env?.BASE_URL || '/'
 }) {
   if (badgeCount !== null) {
     await updateAppIconBadge(badgeCount);

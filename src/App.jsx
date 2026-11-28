@@ -36,9 +36,39 @@ import ParentDashboard from './pages/ParentDashboard';
 import DeaconSchedule from './pages/DeaconSchedule';
 import CertificatesRegistry from './pages/CertificatesRegistry';
 import SocialStatusPage from './pages/SocialStatusPage';
+import { ensurePushSubscription, removePushSubscription } from './lib/pushSubscribe';
 import { LogOut, Bell, BellRing, GraduationCap, HeartHandshake, Menu, X, Check } from 'lucide-react';
 
 const SAVED_USER_KEY = 'church_app_logged_user_id';
+const USER_SNAPSHOT_KEY = 'church_app_user_snapshot';
+
+// نسخة من بيانات المستخدم (من غير كلمة المرور) عشان التطبيق يفتح على شاشته على طول زي الواتساب
+function readUserSnapshot() {
+  try {
+    const savedId = localStorage.getItem(SAVED_USER_KEY);
+    const raw = localStorage.getItem(USER_SNAPSHOT_KEY);
+    if (!savedId || !raw) return null;
+    const u = JSON.parse(raw);
+    if (!u || String(u.id) !== String(savedId)) return null;
+    if (u.status === 'pending' || u.status === 'rejected') return null;
+    return u;
+  } catch {
+    return null;
+  }
+}
+function writeUserSnapshot(user) {
+  try {
+    // eslint-disable-next-line no-unused-vars
+    const { password, ...safe } = user || {};
+    localStorage.setItem(USER_SNAPSHOT_KEY, JSON.stringify(safe));
+  } catch { /* ignore */ }
+}
+function clearSavedLogin() {
+  try {
+    localStorage.removeItem(SAVED_USER_KEY);
+    localStorage.removeItem(USER_SNAPSHOT_KEY);
+  } catch { /* ignore */ }
+}
 const PENDING_APPROVAL_KEY = 'church_pending_approval_user';
 const DEFAULT_CHURCH_NAME = 'كنيسة السيدة العذراء مريم بالمطرية';
 const DEFAULT_TAGLINE = 'مواعيد القداسات، مكتب الرحلات العامة، أخبار الكنيسة، والآباء الكهنة';
@@ -176,7 +206,7 @@ const isDuplicateUsernameError = (error) =>
   error?.code === '23505' || /duplicate key|unique constraint/i.test(error?.message || '');
 
 function AppInner() {
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => readUserSnapshot());
   const [authView, setAuthView] = useState('public');
   const [loginError, setLoginError] = useState('');
   const [registerMessage, setRegisterMessage] = useState('');
@@ -284,7 +314,13 @@ function AppInner() {
         const savedId = localStorage.getItem(SAVED_USER_KEY);
         if (savedId) {
           const matched = u.data.find(x => x.id === savedId && x.status !== 'pending' && x.status !== 'rejected');
-          if (matched) setCurrentUser(matched);
+          if (matched) {
+            setCurrentUser(matched);
+          } else {
+            // الحساب اتحذف أو اتعلّق أو اترفض فعلاً → نطلّعه. (لو النت واقع مش بنوصل هنا فيفضل داخل)
+            clearSavedLogin();
+            setCurrentUser(null);
+          }
         }
       }
       if (rs.data) setRoleScreens(rs.data);
@@ -531,7 +567,7 @@ function AppInner() {
               title: '✅ طلب انضمام جديد',
               body: `طلب جديد من: ${newUser.full_name}`,
               badgeCount: badgeCountRef.current + 1,
-              icon: churchLogoUrl || '/pwa-192x192.png'
+              icon: churchLogoUrl || `${import.meta.env.BASE_URL}icon-192.png`
             });
           }
         }
@@ -549,7 +585,7 @@ function AppInner() {
               title: `💌 دعوة جديدة: ${inv.event_type}`,
               body: `من ${inv.sender_name}: ${inv.title} (${inv.event_date})`,
               badgeCount: badgeCountRef.current + 1,
-              icon: churchLogoUrl || '/pwa-192x192.png'
+              icon: churchLogoUrl || `${import.meta.env.BASE_URL}icon-192.png`
             });
           }
         }
@@ -564,7 +600,7 @@ function AppInner() {
               title: '🕊️ حالة طارئة — خدمة يوسف الرامي',
               body: `المنتقل: ${row.deceased_name}`,
               badgeCount: badgeCountRef.current + 1,
-              icon: churchLogoUrl || '/pwa-192x192.png'
+              icon: churchLogoUrl || `${import.meta.env.BASE_URL}icon-192.png`
             });
           }
         }
@@ -580,7 +616,7 @@ function AppInner() {
               title: notif.title || '🔔 إشعار جديد من الكنيسة',
               body: notif.type === 'child_link_request' ? 'لديك طلب ربط ابن بانتظار موافقتك' : (notif.message || ''),
               badgeCount: badgeCountRef.current + 1,
-              icon: churchLogoUrl || '/pwa-192x192.png'
+              icon: churchLogoUrl || `${import.meta.env.BASE_URL}icon-192.png`
             });
           }
         }
@@ -602,7 +638,7 @@ function AppInner() {
           ? `لديك الآن (${notificationStats.total}) إشعارات بانتظار المتابعة`
           : 'ستصلك إشعارات الكنيسة فوراً مع الرقم الفعلي على أيقونة التطبيق',
         badgeCount: notificationStats.total,
-        icon: churchLogoUrl || '/pwa-192x192.png'
+        icon: churchLogoUrl || `${import.meta.env.BASE_URL}icon-192.png`
       });
     } else if (res === 'denied') {
       alert('تم حظر الإشعارات من المتصفح. يمكنك تفعيلها من إعدادات الموقع في Chrome.');
@@ -685,11 +721,24 @@ function AppInner() {
     fetchData();
   };
 
+  useEffect(() => {
+    if (currentUser?.id && notifPermission === 'granted') ensurePushSubscription(currentUser);
+  }, [currentUser?.id, notifPermission]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (currentUser?.id) {
+      writeUserSnapshot(currentUser);
+      // اطلب من المتصفح ما يمسحش بيانات الدخول (مهم للـ PWA على الموبايل)
+      try { navigator.storage?.persist?.(); } catch { /* ignore */ }
+    }
+  }, [currentUser]);
+
   const handleLogout = async () => {
+    await removePushSubscription();
     await endUserSession();
     // عشان صفحة الدخول متطلبش البصمة تلقائي ترجّعه تاني بعد الخروج على طول
     sessionStorage.setItem('church_skip_bio_auto', '1');
-    localStorage.removeItem(SAVED_USER_KEY);
+    clearSavedLogin();
     updateAppIconBadge(0, churchName);
     setCurrentUser(null);
     setAuthView('public');

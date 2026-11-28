@@ -14,6 +14,7 @@ export default defineConfig({
       workbox: {
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         cleanupOutdatedCaches: true,
+        importScripts: ['push-sw.js'],
         navigateFallback: '/ST.Mary/index.html',
         // الخط والأيقونات تفضل شغالة حتى لو النت ضعيف أو مقطوع
         runtimeCaching: [
