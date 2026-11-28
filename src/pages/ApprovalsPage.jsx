@@ -8,6 +8,44 @@ import {
 } from './PermissionsPage';
 import { CheckCircle2, XCircle, Clock, UserCheck, MessageCircle, X, ShieldCheck, Baby } from 'lucide-react';
 
+const splitCsv = (v) => String(v || '').split(/[,،]/).map(x => x.trim()).filter(Boolean);
+
+function ChipMultiSelect({ options, selected, onChange, disabled, emptyText }) {
+  const sel = new Set(selected);
+  const toggle = (name) => {
+    const next = sel.has(name) ? selected.filter(x => x !== name) : [...selected, name];
+    onChange(next);
+  };
+  const all = [...new Set([...options, ...selected])];
+  if (all.length === 0) return <div className="text-[11px] text-gray-400">{emptyText || 'لا توجد خيارات'}</div>;
+  return (
+    <div className={`flex flex-wrap gap-1.5 ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
+      {all.map(name => {
+        const on = sel.has(name);
+        return (
+          <button
+            key={name}
+            type="button"
+            onClick={() => toggle(name)}
+            className={`px-2.5 py-1 rounded-full text-[11px] font-black border cursor-pointer transition ${on ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-gray-700 border-gray-300 hover:border-[#7a1c24]'}`}
+          >
+            {on ? '✓ ' : ''}{name}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function InfoCell({ label, value }) {
+  return (
+    <div className="bg-gray-50 border rounded-xl px-2.5 py-1.5 min-w-0">
+      <span className="block text-[10px] text-gray-500 font-bold">{label}</span>
+      <span className="block text-xs font-black text-gray-900 truncate">{value || '—'}</span>
+    </div>
+  );
+}
+
 const FALLBACK_STAGE_OPTIONS = [
   'حضانة', 'أولى ابتدائي', 'ثانية ابتدائي', 'ثالثة ابتدائي', 'رابعة ابتدائي', 'خامسة ابتدائي', 'سادسة ابتدائي',
   'أولى إعدادي', 'ثانية إعدادي', 'ثالثة إعدادي',
@@ -276,6 +314,14 @@ export default function ApprovalsPage({ users = [], services = [], groups = [], 
         Object.assign(basePerms, matchedTpl.actions || {});
       }
 
+      const assignedStageList = splitCsv(assignedStage);
+      if (!isOutOfService && assignedStageList.length > 1) {
+        basePerms.extra_services = [...new Set([
+          ...(Array.isArray(basePerms.extra_services) ? basePerms.extra_services : []),
+          ...assignedStageList
+        ])];
+      }
+
       const updatePayload = {
         status: decision,
         role: decision === 'approved' ? assignedRole : user.role,
@@ -456,6 +502,17 @@ export default function ApprovalsPage({ users = [], services = [], groups = [], 
                       {selectedClass && !isOutOfService ? ` • 🏫 فصل: ${selectedClass}` : ''}
                     </p>
 
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5 pt-1">
+                      <InfoCell label="النوع" value={u.gender} />
+                      <InfoCell label="الوظيفة" value={u.job_title} />
+                      <InfoCell label="الأب" value={[u.father_full_name, u.father_phone].filter(Boolean).join(' - ')} />
+                      <InfoCell label="الأم" value={[u.mother_full_name, u.mother_phone].filter(Boolean).join(' - ')} />
+                      <InfoCell label="الدور المطلوب" value={(ROLES.find(r => r.key === (u.requested_role || u.role)) || {}).label || u.requested_role || u.role} />
+                      <InfoCell label="الخدمة المطلوبة" value={u.detailed_stage || u.service_stage} />
+                      <InfoCell label="الفصل المطلوب" value={u.assigned_class} />
+                      <InfoCell label="تاريخ الطلب" value={u.created_at ? new Date(u.created_at).toLocaleDateString('ar-EG') : ''} />
+                    </div>
+
                     {(u.children_names || alreadyLinkedChildren.length > 0 || chosenChildObj) && (
                       <p className="text-xs text-amber-950 bg-amber-50 px-2.5 py-1.5 rounded-xl border border-amber-200 inline-block">
                         👶 <strong>الأبناء والمرحلة:</strong>{' '}
@@ -469,7 +526,7 @@ export default function ApprovalsPage({ users = [], services = [], groups = [], 
                   </div>
                 </div>
 
-                <div className="bg-cyan-50/60 border border-cyan-200 rounded-2xl p-3 grid sm:grid-cols-3 gap-2 items-center">
+                <div className="bg-cyan-50/60 border border-cyan-200 rounded-2xl p-3 grid sm:grid-cols-2 gap-2 items-start">
                   <div>
                     <label className="block text-[11px] font-black text-cyan-950 mb-1">
                       هل معانا في الخدمة ولا لأ؟
@@ -486,24 +543,20 @@ export default function ApprovalsPage({ users = [], services = [], groups = [], 
                     </select>
                   </div>
 
-                  <div>
+                  <div className="sm:col-span-3">
                     <label className="block text-[11px] font-black text-cyan-950 mb-1">
-                      خدمة إيه؟ (من الداتابيز)
+                      الخدمات / الاجتماعات المربوطة (اختر أكثر من واحدة لو بيخدم في أكتر من مكان)
                     </label>
-                    <select
+                    <ChipMultiSelect
                       disabled={isOutOfService}
-                      className="w-full p-2 border rounded-xl bg-white text-xs font-bold disabled:bg-gray-100"
-                      value={isOutOfService ? '' : selectedStage}
-                      onChange={e => setStageOverrides({ ...stageOverrides, [u.id]: e.target.value })}
-                    >
-                      <option value="">{isOutOfService ? 'خارج الخدمة' : '-- اختر الخدمة أو الاجتماع --'}</option>
-                      {databaseServicesAndMeetings.map((s, idx) => (
-                        <option key={`${s}-${idx}`} value={s}>{s}</option>
-                      ))}
-                    </select>
+                      options={databaseServicesAndMeetings}
+                      selected={isOutOfService ? [] : splitCsv(selectedStage)}
+                      onChange={(arr) => setStageOverrides({ ...stageOverrides, [u.id]: arr.join(', ') })}
+                      emptyText="لا توجد خدمات في الداتابيز"
+                    />
                   </div>
 
-                  <div className="flex flex-col justify-end">
+                  <div className="flex flex-col justify-end sm:col-span-1">
                     <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border border-cyan-200 text-xs font-black text-teal-950">
                       <input
                         type="checkbox"
@@ -556,7 +609,7 @@ export default function ApprovalsPage({ users = [], services = [], groups = [], 
                   </div>
                 )}
 
-                <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-2 border-t items-center">
+                <div className="grid sm:grid-cols-3 gap-2 pt-2 border-t items-center">
                   <select
                     className="p-2 border rounded-xl bg-gray-50 text-xs font-bold"
                     value={selectedRole}
@@ -599,17 +652,33 @@ export default function ApprovalsPage({ users = [], services = [], groups = [], 
                     </select>
                   </div>
 
-                  <select
+                </div>
+
+                <div className="bg-indigo-50/50 border border-indigo-200 rounded-2xl p-3 space-y-1.5">
+                  <label className="block text-[11px] font-black text-indigo-950">
+                    الفصول اللي يشوفها / يخدم فيها {splitCsv(selectedStage).length > 0 ? '(الفصول التابعة للخدمات المختارة)' : '(كل الفصول)'}
+                  </label>
+                  <ChipMultiSelect
                     disabled={isOutOfService}
-                    className="p-2 border rounded-xl bg-gray-50 text-xs font-bold disabled:bg-gray-100"
-                    value={isOutOfService ? '' : selectedClass}
-                    onChange={e => setClassOverrides({ ...classOverrides, [u.id]: e.target.value })}
-                  >
-                    <option value="">{isOutOfService ? 'بدون فصل' : '-- اختر الفصل --'}</option>
-                    {services.map(srv => (
-                      <option key={srv.id} value={srv.class_name}>{srv.class_name} ({srv.stage_name})</option>
-                    ))}
-                  </select>
+                    options={services
+                      .filter(srv => splitCsv(selectedStage).length === 0 || splitCsv(selectedStage).includes(srv.stage_name) || splitCsv(selectedClass).includes(srv.class_name))
+                      .map(srv => srv.class_name)
+                      .filter(Boolean)}
+                    selected={isOutOfService ? [] : splitCsv(selectedClass)}
+                    onChange={(arr) => setClassOverrides({ ...classOverrides, [u.id]: arr.join(', ') })}
+                    emptyText="لا توجد فصول للخدمات المختارة"
+                  />
+                </div>
+
+                <div className="bg-emerald-50/60 border border-emerald-200 rounded-2xl p-3 text-xs font-bold text-emerald-950 space-y-1">
+                  <strong className="block text-[11px] font-black">📋 ملخص قبل القبول</strong>
+                  <div>الدور: <b>{(ROLES.find(r => r.key === selectedRole) || {}).label || selectedRole}</b>
+                    {selectedTplKey ? <> • القالب: <b>{(templates.find(t => t.key === selectedTplKey) || {}).label || selectedTplKey}</b></> : ' • بدون قالب صلاحيات'}</div>
+                  <div>الخدمات: <b>{isOutOfService ? 'خارج الخدمة' : (splitCsv(selectedStage).join(' ، ') || 'غير محدد')}</b></div>
+                  <div>الفصول: <b>{isOutOfService ? '—' : (splitCsv(selectedClass).join(' ، ') || 'غير محدد')}</b></div>
+                  {!isOutOfService && ['servant', 'vice_head_servant', 'head_servant', 'meeting_servant'].includes(selectedRole) && splitCsv(selectedStage).length === 0 && splitCsv(selectedClass).length === 0 && (
+                    <div className="text-red-700">⚠️ خادم من غير خدمة أو فصل: مش هيشوف أي مخدومين.</div>
+                  )}
                 </div>
 
                 <div className="flex justify-end gap-2 pt-1">

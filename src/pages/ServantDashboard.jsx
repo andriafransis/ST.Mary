@@ -686,7 +686,7 @@ export default function ServantDashboard({
   const [selectedScope, setSelectedScope] = useState(initialDefaultScope);
   const [selectedYearFilter, setSelectedYearFilter] = useState('');
   const [selectedClassFilter, setSelectedClassFilter] = useState('');
-  const [showAllChurchServices, setShowAllChurchServices] = useState(true);
+  const [showAllChurchServices, setShowAllChurchServices] = useState(isAdminUser || servantBoundMainGroups.length === 0);
   const [editMode, setEditMode] = useState(false);
 
   const [newGroupName, setNewGroupName] = useState('');
@@ -1778,6 +1778,7 @@ export default function ServantDashboard({
             <Layers size={15} className="text-[#7a1c24]" /> الخدمة والفصل المستهدف:
           </div>
           <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-bold">
+            {(isAdminUser || servantBoundMainGroups.length === 0) && (
             <button
               type="button"
               onClick={() => setShowAllChurchServices(true)}
@@ -1785,7 +1786,8 @@ export default function ServantDashboard({
             >
               كل الخدمات ({availableServicesList.length})
             </button>
-            {servantBoundMainGroups.length > 0 && (
+            )}
+            {isAdminUser && servantBoundMainGroups.length > 0 && (
               <button
                 type="button"
                 onClick={() => {
