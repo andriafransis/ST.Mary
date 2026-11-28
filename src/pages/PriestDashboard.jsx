@@ -163,6 +163,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
 
   const [bdayScope, setBdayScope] = useState('confessors');
   const [bdayTab, setBdayTab] = useState('week');
+  const [bdayOpen, setBdayOpen] = useState(false);
 
   const [confSubView, setConfSubView] = useState('menu');
   const [selectedConfessor, setSelectedConfessor] = useState(null);
@@ -1691,7 +1692,29 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
             </div>
           </div>
 
-          <div className="overflow-x-auto border rounded-2xl max-h-96 overflow-y-auto">
+          <div className="md:hidden space-y-2">
+            {filteredCommitments.length === 0 ? (
+              <div className="p-4 text-center text-gray-400 text-xs border rounded-2xl">لا توجد سجلات التزام مطابقة حالياً.</div>
+            ) : filteredCommitments.map(row => (
+              <div key={row.member_id} className="p-3 bg-white border rounded-2xl space-y-1.5 text-xs font-bold">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <strong className="text-sm font-black text-gray-900 block truncate">{row.member_name}</strong>
+                    <span className="text-gray-600">{row.service_stage || '—'} {row.assigned_class ? `(${row.assigned_class})` : ''}</span>
+                  </div>
+                  <span className="text-lg font-black text-[#7a1c24] shrink-0">{row.attendance_percentage ?? 0}%</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 items-center">
+                  <span className="px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-900">حضور {row.present_count ?? 0}</span>
+                  <span className="px-2 py-0.5 rounded-lg bg-rose-50 text-rose-800">غياب {row.absent_count ?? 0}</span>
+                  <span className="px-2 py-0.5 rounded-lg bg-gray-100 text-gray-700">تأخير {row.late_count ?? 0}</span>
+                  <span className="px-2 py-0.5 rounded-lg bg-gray-100 text-gray-700">مبكر {row.early_leave_count ?? 0}</span>
+                  <span className={`px-2.5 py-0.5 rounded-xl text-[11px] font-black ${row.commitment_code === 'high_commitment' ? 'bg-emerald-100 text-emerald-900' : row.commitment_code === 'high_absence' ? 'bg-rose-100 text-rose-900' : 'bg-amber-100 text-amber-950'}`}>{row.commitment_status}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="hidden md:block overflow-x-auto border rounded-2xl max-h-96 overflow-y-auto">
             <table className="w-full text-right border-collapse text-xs">
               <thead className="sticky top-0">
                 <tr className="bg-[#7a1c24] text-white font-black">
@@ -1829,7 +1852,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
           />
           <PriestTodayPanel items={[
             { key: 'conf', icon: '🙏', value: confessionSlots.filter(sl => sl.slot_date === todayISO).length, label: 'جلسات اعتراف النهاردة', onClick: () => { setSelectedNestedParentKey(null); setActiveCard('confessions'); setConfSubView('menu'); } },
-            { key: 'bday', icon: '🎂', value: weekBirthdays.length, label: 'أعياد ميلاد الأسبوع', onClick: () => setBdayTab('week') },
+            { key: 'bday', icon: '🎂', value: weekBirthdays.length, label: 'أعياد ميلاد الأسبوع', onClick: () => { setBdayTab('week'); setBdayOpen(true); } },
             { key: 'inv', icon: '💌', value: pendingInvitesCount, label: 'دعوات بانتظار الرد', alert: pendingInvitesCount > 0, onClick: () => { setSelectedNestedParentKey(null); setActiveCard('personal'); } },
             { key: 'req', icon: '📩', value: pendingHiddenReqsCount, label: 'طلبات الأسر المستترة', alert: pendingHiddenReqsCount > 0, onClick: () => { setSelectedNestedParentKey(null); setActiveCard('cases'); } },
             totalJosephAlerts > 0 ? { key: 'jos', icon: '🕊️', value: totalJosephAlerts, label: 'يوسف الرامي بحاجة للمتابعة', alert: true, onClick: () => { setSelectedNestedParentKey(null); setActiveCard('joseph_arimathea'); } } : null
@@ -1848,6 +1871,8 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                 </div>
               </div>
 
+              <button type="button" onClick={() => setBdayOpen(o => !o)} className="px-3 py-1.5 rounded-xl text-xs font-black border bg-white text-amber-950 border-amber-300 cursor-pointer">{(bdayOpen || weekBirthdays.some(b => b.daysLeft === 0)) ? 'إخفاء ▲' : 'عرض التفاصيل ▼'}</button>
+              {(bdayOpen || weekBirthdays.some(b => b.daysLeft === 0)) && (
               <div className="flex flex-wrap gap-1.5 items-center">
                 <button type="button" onClick={() => setBdayTab('week')} className={`px-3 py-1.5 rounded-xl text-xs font-black border cursor-pointer ${bdayTab === 'week' ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-amber-950 border-amber-300'}`}>🎂 هذا الأسبوع ({weekBirthdays.length})</button>
                 <button type="button" onClick={() => setBdayTab('month')} className={`px-3 py-1.5 rounded-xl text-xs font-black border cursor-pointer ${bdayTab === 'month' ? 'bg-[#7a1c24] text-white border-[#7a1c24]' : 'bg-white text-amber-950 border-amber-300'}`}>📅 كل شهر {currentMonthName} ({monthBirthdays.length})</button>
@@ -1856,14 +1881,15 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                   <option value="all">كل شعب الكنيسة</option>
                 </select>
               </div>
+              )}
             </div>
 
-            {displayedBdays.length === 0 ? (
+            {(bdayOpen || weekBirthdays.some(bb => bb.daysLeft === 0)) && (displayedBdays.length === 0 ? (
               <div className="bg-white/80 p-3 rounded-2xl border border-amber-200 text-xs text-amber-900 text-center">
                 لا توجد أعياد ميلاد مسجلة في هذه الفترة ({bdayTab === 'week' ? 'الأسبوع الحالي' : `شهر ${currentMonthName}`}).
               </div>
             ) : (
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {displayedBdays.map(b => {
                   const isToday = b.daysLeft === 0;
                   return (
@@ -1885,7 +1911,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                   );
                 })}
               </div>
-            )}
+            ))}
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 md:gap-4">
