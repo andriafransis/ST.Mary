@@ -609,7 +609,7 @@ export function BusVisualizerSection({
 
       {selectedSeatModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-60">
-          <div className="bg-white rounded-3xl w-full max-w-lg p-5 space-y-3.5 font-bold max-h-[92vh] overflow-y-auto text-sm">
+          <div className="bg-white rounded-3xl w-full max-w-lg p-5 space-y-3.5 font-bold max-h-[92dvh] overflow-y-auto text-sm">
             <div className="flex justify-between items-center border-b pb-2.5">
               <h4 className="text-base font-black text-[#7a1c24]">
                 {selectedSeatModal.isSupervisor ? '🎖️ تسكين مشرف الأتوبيس' : `💺 مقعد رقم (${selectedSeatModal.seat.number})`}

@@ -1321,7 +1321,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
 
       {activeDynamicCard && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl w-full max-w-2xl p-6 space-y-4 text-xs font-bold max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-2xl p-6 space-y-4 text-xs font-bold max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between border-b pb-3">
               <div>
                 <h3 className="text-sm md:text-base font-black text-[#7a1c24]">
@@ -1816,7 +1816,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
           </div>
         </div>
 
-        <div ref={scrollBoxRef} className="max-h-[calc(100vh-250px)] overflow-y-auto pr-1 space-y-4">
+        <div ref={scrollBoxRef} className="max-h-[calc(100dvh-250px)] overflow-y-auto pr-1 space-y-4">
           <div className="bg-linear-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-3xl p-4 shadow-sm space-y-3">
             <div className="flex flex-wrap justify-between items-center gap-2">
               <div className="flex items-center gap-2">
@@ -1920,7 +1920,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     <div className="space-y-3 text-sm md:text-base">
       {renderQuickNavBar()}
 
-      <div ref={scrollBoxRef} className="max-h-[calc(100vh-195px)] overflow-y-auto pr-1 space-y-4">
+      <div ref={scrollBoxRef} className="max-h-[calc(100dvh-195px)] overflow-y-auto pr-1 space-y-4">
         {renderNestedCardsSection(activeCard, selectedNestedParentKey)}
 
         {activeCard === 'service_hub' && (() => {
@@ -2268,7 +2268,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
 
                   {showAddConfessor && (
                     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-                      <div className="bg-white rounded-3xl w-full max-w-xl p-6 space-y-3 font-bold max-h-[92vh] overflow-y-auto">
+                      <div className="bg-white rounded-3xl w-full max-w-xl p-6 space-y-3 font-bold max-h-[92dvh] overflow-y-auto">
                         <div className="flex justify-between items-center border-b pb-2"><h3 className="text-base font-black text-[#7a1c24]">إضافة معترف جديد</h3><button type="button" onClick={() => setShowAddConfessor(false)} className="p-1.5 bg-gray-100 rounded-lg"><X size={18} /></button></div>
                         <div className="grid grid-cols-2 gap-2">
                           <button type="button" onClick={() => { setAddConfOrigin('inside'); setNewConfessor({ ...emptyNewConf, is_church_member: true }); }} className={`p-3 rounded-2xl border-2 text-xs md:text-sm font-black cursor-pointer ${addConfOrigin === 'inside' ? 'bg-blue-50 border-blue-600 text-blue-950' : 'bg-white border-gray-200 text-gray-700'}`}>🏠 من داخل الكنيسة (بحث بالداتابيز)</button>
@@ -2626,7 +2626,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
 
               {viewBusItem && (
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-                  <div className="bg-white rounded-3xl w-full max-w-4xl p-6 space-y-4 font-bold max-h-[92vh] overflow-y-auto">
+                  <div className="bg-white rounded-3xl w-full max-w-4xl p-6 space-y-4 font-bold max-h-[92dvh] overflow-y-auto">
                     <div className="flex justify-between items-center border-b pb-3">
                       <div>
                         <h3 className="text-lg font-black text-purple-950">🚌 إدارة الأتوبيسات والأقساط: {viewBusItem.title}</h3>
@@ -2928,7 +2928,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
 
               {inspectFamilyAttachments && (
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-                  <div className="bg-white rounded-3xl w-full max-w-2xl p-6 space-y-4 font-bold max-h-[90vh] overflow-y-auto text-sm">
+                  <div className="bg-white rounded-3xl w-full max-w-2xl p-6 space-y-4 font-bold max-h-[90dvh] overflow-y-auto text-sm">
                     <div className="flex justify-between items-center border-b pb-3">
                       <div><h3 className="text-base font-black text-indigo-950">📎 مرفقات أسرة: {inspectFamilyAttachments.head_name}</h3><p className="text-xs text-gray-500">بطاقة • عقد إيجار • تحاليل وأشعة • إيصالات</p></div>
                       <button type="button" onClick={() => setInspectFamilyAttachments(null)} className="p-2 bg-gray-100 rounded-xl cursor-pointer"><X size={18} /></button>

@@ -452,7 +452,7 @@ export default function PriestInvitationModal({
 
   return (
     <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50">
-      <div className="bg-[#fbfaf7] rounded-3xl w-full max-w-3xl p-4 sm:p-6 max-h-[92vh] overflow-y-auto shadow-2xl">
+      <div className="bg-[#fbfaf7] rounded-3xl w-full max-w-3xl p-4 sm:p-6 max-h-[92dvh] overflow-y-auto shadow-2xl">
         {content}
       </div>
     </div>

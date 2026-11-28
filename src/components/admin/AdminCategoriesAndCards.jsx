@@ -43,7 +43,7 @@ export function AdminCategoriesSection({
         </form>
       )}
 
-      <div className="max-h-[45vh] overflow-y-auto pr-1 grid sm:grid-cols-2 md:grid-cols-4 gap-2.5">
+      <div className="max-h-[45dvh] overflow-y-auto pr-1 grid sm:grid-cols-2 md:grid-cols-4 gap-2.5">
         {caseCategories.map(cat => (
           <div key={cat.id} className="bg-white p-3.5 rounded-2xl border flex justify-between items-center shadow-2xs">
             <div><span className="text-xl ml-2">{cat.icon}</span><strong className="text-sm">{cat.name}</strong></div>
@@ -98,7 +98,7 @@ export function AdminPriestCustomCardsSection({
         </form>
       )}
 
-      <div className="max-h-[45vh] overflow-y-auto pr-1 grid md:grid-cols-2 gap-2.5">
+      <div className="max-h-[45dvh] overflow-y-auto pr-1 grid md:grid-cols-2 gap-2.5">
         {customCards.map(cc => {
           const targetPriest = priestsList.find(p => p.id === cc.priest_id);
           return (

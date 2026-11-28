@@ -59,7 +59,7 @@ export default function AdminEventsSection({
         </form>
       )}
 
-      <div className="max-h-[45vh] overflow-y-auto pr-1 grid gap-2">
+      <div className="max-h-[45dvh] overflow-y-auto pr-1 grid gap-2">
         {events.map(ev => (
           <div key={ev.id} className="bg-white p-3 rounded-2xl border flex justify-between items-center shadow-2xs gap-2">
             <div>

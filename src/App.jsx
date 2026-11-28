@@ -155,6 +155,26 @@ function isNotificationForUser(notif, user) {
   return false;
 }
 
+const USERNAME_TAKEN_MSG = 'اسم المستخدم هذا مستخدم من قبل، اختر اسماً آخر.';
+
+// يتأكد إن اسم المستخدم مش موجود عند حد تاني (excludeId = حساب الشخص نفسه عند التعديل)
+async function isUsernameTaken(username, excludeId = null) {
+  const clean = String(username || '').trim().toLowerCase();
+  if (!clean || !supabase || typeof supabase.from !== 'function') return false;
+  try {
+    let q = supabase.from('church_users').select('id').eq('username', clean).limit(1);
+    if (excludeId) q = q.neq('id', excludeId);
+    const { data, error } = await q;
+    if (error) return false; // لو الفحص فشل، قاعدة البيانات نفسها هتمنع التكرار
+    return Array.isArray(data) && data.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+const isDuplicateUsernameError = (error) =>
+  error?.code === '23505' || /duplicate key|unique constraint/i.test(error?.message || '');
+
 function AppInner() {
   const [currentUser, setCurrentUser] = useState(null);
   const [authView, setAuthView] = useState('public');
@@ -196,6 +216,7 @@ function AppInner() {
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
   );
   const [showNotifSummary, setShowNotifSummary] = useState(false);
+  const [publicEditorFocus, setPublicEditorFocus] = useState(null);
   const [showBioOffer, setShowBioOffer] = useState(false);
 
   const todayISO = new Date().toISOString().split('T')[0];
@@ -768,6 +789,10 @@ function AppInner() {
       ...newUserData,
       status: newUserData.status || 'pending'
     });
+    if (await isUsernameTaken(payload.username)) {
+      setLoginError(USERNAME_TAKEN_MSG);
+      return false;
+    }
     const { data, error } = await supabase.from('church_users').insert([payload]).select().single();
     if (!error && data) {
       setUsers(prev => [...prev, data]);
@@ -790,24 +815,32 @@ function AppInner() {
       setRegisterMessage(`✅ تم إرسال طلب الاشتراك بنجاح${guardianLabel} وهو قيد مراجعة الإدارة. سيصلك إشعار باليوزر والباسورد فور القبول.`);
       return true;
     } else {
-      setLoginError('خطأ في تسجيل الاشتراك: ' + (error?.message || 'تأكد من عدم تكرار اسم الدخول'));
+      setLoginError(
+        isDuplicateUsernameError(error)
+          ? USERNAME_TAKEN_MSG
+          : 'خطأ في تسجيل الاشتراك: ' + (error?.message || 'حاول مرة أخرى')
+      );
       return false;
     }
   };
 
   const handleAddUser = async (u) => {
-    const { data, error } = await supabase.from('church_users').insert([buildUserPayload(u)]).select().single();
+    const payload = buildUserPayload(u);
+    if (await isUsernameTaken(payload.username)) return alert(USERNAME_TAKEN_MSG);
+    const { data, error } = await supabase.from('church_users').insert([payload]).select().single();
     if (!error && data) { setUsers([...users, data]); alert('تم الحفظ بنجاح!'); }
-    else alert('خطأ: ' + (error?.message || 'تأكد من عدم تكرار اسم الدخول'));
+    else alert(isDuplicateUsernameError(error) ? USERNAME_TAKEN_MSG : 'خطأ: ' + (error?.message || 'حاول مرة أخرى'));
   };
 
   const handleUpdateUser = async (updated) => {
-    const { data, error } = await supabase.from('church_users').update(buildUserPayload(updated)).eq('id', updated.id).select().single();
+    const updatePayload = buildUserPayload(updated);
+    if (await isUsernameTaken(updatePayload.username, updated.id)) return alert(USERNAME_TAKEN_MSG);
+    const { data, error } = await supabase.from('church_users').update(updatePayload).eq('id', updated.id).select().single();
     if (!error && data) {
       setUsers(users.map(item => (item.id === updated.id ? data : item)));
       if (currentUser?.id === updated.id) setCurrentUser(data);
       alert('تم التعديل بنجاح!');
-    } else alert('خطأ في التعديل: ' + error?.message);
+    } else alert(isDuplicateUsernameError(error) ? USERNAME_TAKEN_MSG : 'خطأ في التعديل: ' + error?.message);
   };
 
   const handleDeleteUser = async (id) => {
@@ -981,7 +1014,9 @@ function AppInner() {
 
   const handleAddMemberByServant = async (m) => {
     const { siblings, ...userData } = m;
-    const { data: memberData, error } = await supabase.from('church_users').insert([buildUserPayload(userData)]).select().single();
+    const memberPayload = buildUserPayload(userData);
+    if (await isUsernameTaken(memberPayload.username)) return alert(USERNAME_TAKEN_MSG);
+    const { data: memberData, error } = await supabase.from('church_users').insert([memberPayload]).select().single();
     if (!error && memberData) {
       if (siblings?.length > 0) {
         const sibs = siblings.map(s => ({
@@ -993,7 +1028,7 @@ function AppInner() {
       }
       setUsers([...users, memberData]);
       alert('تم حفظ المخدوم بنجاح!');
-    } else alert('خطأ: ' + error?.message);
+    } else alert(isDuplicateUsernameError(error) ? USERNAME_TAKEN_MSG : 'خطأ: ' + error?.message);
   };
 
   const handleSaveActivity = async (memberId, actForm) => {
@@ -1187,8 +1222,9 @@ function AppInner() {
           isLoggedIn={true}
           canEdit={canEditPublic}
           churchName={churchName}
-          onOpenEditor={() => {
+          onOpenEditor={(focus) => {
             if (!canEditPublic) return alert('التعديل متاح للأدمن أو الكاهن فقط');
+            setPublicEditorFocus(focus || null);
             setExtraScreen('');
             setActiveScreen('public_editor');
           }}
@@ -1332,7 +1368,7 @@ function AppInner() {
               </button>
 
               {showNotifSummary && (
-                <div className="absolute left-0 top-12 w-80 sm:w-96 bg-white text-gray-900 rounded-2xl shadow-2xl border border-amber-300 p-3.5 space-y-2 z-50 text-xs max-h-[75vh] overflow-y-auto">
+                <div className="absolute left-0 top-12 w-80 sm:w-96 bg-white text-gray-900 rounded-2xl shadow-2xl border border-amber-300 p-3.5 space-y-2 z-50 text-xs max-h-[75dvh] overflow-y-auto">
                   <div className="flex justify-between items-center border-b pb-2">
                     <strong className="text-[#7a1c24] font-black">
                       🔔 الإشعارات الحالية ({notificationStats.total})
@@ -1651,7 +1687,11 @@ function AppInner() {
           )}
 
           {!extraScreen && currentScr === 'public_editor' && canEditPublic && (
-            <PublicEditor onViewPublic={() => { setExtraScreen(''); setActiveScreen('public_page'); }} />
+            <PublicEditor
+              focus={publicEditorFocus}
+              onFocusConsumed={() => setPublicEditorFocus(null)}
+              onViewPublic={() => { setExtraScreen(''); setActiveScreen('public_page'); }}
+            />
           )}
 
           {!extraScreen && currentScr === 'deacons' && (

@@ -1064,7 +1064,7 @@ export default function MemberDashboard({
         </button>
       </div>
 
-      <div className="max-h-[calc(100vh-260px)] overflow-y-auto pr-1 space-y-3">
+      <div className="max-h-[calc(100dvh-260px)] overflow-y-auto pr-1 space-y-3">
         {activeTab === 'my_invites' && (
           <ReceivedInvitationsSection
             currentUser={member}

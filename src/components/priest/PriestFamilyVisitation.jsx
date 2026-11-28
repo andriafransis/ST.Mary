@@ -1988,7 +1988,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
       {linkModalFam && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-55 print:hidden">
-          <div className="bg-white rounded-3xl w-full max-w-xl p-5 sm:p-6 space-y-3 font-bold max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-xl p-5 sm:p-6 space-y-3 font-bold max-h-[90dvh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-2.5">
               <div>
                 <h3 className="text-sm sm:text-base font-black text-[#7a1c24]">
@@ -2067,7 +2067,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
       {showForm && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 print:hidden">
-          <div className="bg-white rounded-3xl w-full max-w-4xl p-5 sm:p-6 space-y-4 font-bold max-h-[92vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-4xl p-5 sm:p-6 space-y-4 font-bold max-h-[92dvh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="text-sm sm:text-base font-black text-[#7a1c24]">
                 {editingSavedId ? '✏️ تعديل ملف الأسرة' : '➕ إضافة أسرة جديدة وتحديد صلاتها'}
@@ -2354,7 +2354,7 @@ export default function PriestFamilyVisitation({ priest, users: passedUsers = nu
 
       {selectedFamily && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 print:hidden">
-          <div className="bg-white rounded-3xl w-full max-w-3xl p-5 sm:p-6 space-y-4 font-bold max-h-[92vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-3xl p-5 sm:p-6 space-y-4 font-bold max-h-[92dvh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
               <div>
                 <h3 className="text-base font-black text-[#7a1c24]">{selectedFamily.family_title}</h3>

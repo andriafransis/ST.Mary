@@ -214,7 +214,7 @@ function Lightbox({ list, index, onClose, onIndex }) {
         </>
       )}
       <figure className="max-w-5xl w-full max-h-full flex flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
-        <img src={item.url} alt={item.title} className="max-h-[78vh] max-w-full rounded-2xl object-contain shadow-2xl" />
+        <img src={item.url} alt={item.title} className="max-h-[78dvh] max-w-full rounded-2xl object-contain shadow-2xl" />
         <figcaption className="text-center text-white space-y-0.5">
           <strong className="block text-base">{item.title}</strong>
           {item.body && <span className="block text-sm text-white/75">{item.body}</span>}
@@ -919,7 +919,14 @@ export default function PublicPage({
                           const hasMore = Boolean(t.program || t.places || t.times);
                           return (
                             <div key={t.id} className="rounded-2xl border border-purple-200 bg-linear-to-br from-purple-50/70 to-white overflow-hidden">
-                              <button type="button" onClick={() => hasMore && setOpenTrip(open ? null : t.id)} className={`w-full text-right p-4 flex items-start gap-3 ${hasMore ? 'cursor-pointer' : 'cursor-default'}`} aria-expanded={open}>
+                              <div
+                                role="button"
+                                tabIndex={hasMore ? 0 : -1}
+                                aria-expanded={open}
+                                onClick={() => hasMore && setOpenTrip(open ? null : t.id)}
+                                onKeyDown={(e) => { if (hasMore && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpenTrip(open ? null : t.id); } }}
+                                className={`w-full text-right p-4 flex items-start gap-3 ${hasMore ? 'cursor-pointer' : 'cursor-default'}`}
+                              >
                                 <DateTile date={t.date} />
                                 <div className="min-w-0 flex-1 space-y-1.5">
                                   <div className="flex flex-wrap items-center gap-1.5">
@@ -938,7 +945,7 @@ export default function PublicPage({
                                   {t.raw && <EditChip item={t.raw} />}
                                   {hasMore && <ChevronDown size={18} className={`text-purple-700 transition ${open ? 'rotate-180' : ''}`} />}
                                 </div>
-                              </button>
+                              </div>
                               {open && (
                                 <div className="px-4 pb-4 space-y-2 text-xs text-gray-700">
                                   {t.places && <p>⛪ <strong>الوجهة / الزيارات:</strong> {t.places}</p>}
@@ -1080,6 +1087,7 @@ export default function PublicPage({
         .pp-skel { background: linear-gradient(90deg,#ece8df 25%,#f6f3ec 37%,#ece8df 63%); background-size: 400% 100%; animation: ppShimmer 1.6s ease infinite; }
         .pp-noscroll::-webkit-scrollbar { display: none; }
         .pp-noscroll { scrollbar-width: none; }
+        @media print { .pp-reveal { opacity: 1 !important; transform: none !important; } }
         @media (prefers-reduced-motion: reduce) {
           html { scroll-behavior: auto; }
           .pp-reveal { opacity: 1; transform: none; transition: none; }
@@ -1150,6 +1158,19 @@ export default function PublicPage({
         <div aria-hidden className="absolute inset-0 opacity-[0.07]" style={{ backgroundImage: CROSS_PATTERN, backgroundSize: '72px' }} />
         <div aria-hidden className="absolute -top-24 -left-24 w-96 h-96 rounded-full bg-amber-300/10 blur-3xl" />
         <div aria-hidden className="absolute -bottom-32 right-10 w-96 h-96 rounded-full bg-white/5 blur-3xl" />
+        {theme.show_ticker !== false && tickerItems.length > 0 && (
+          <div className="relative bg-black/40 border-b border-white/10 py-2 overflow-hidden text-xs md:text-sm font-bold text-amber-200" aria-label="شريط الأخبار">
+            <div className="pp-marquee">
+              {[0, 1].map(copy => (
+                <div key={copy} className="flex items-center shrink-0" aria-hidden={copy === 1}>
+                  {tickerItems.map((t, i) => (
+                    <span key={`${copy}-${i}`} className="px-6 whitespace-nowrap">{t}<span className="mr-6 text-amber-400/60">◆</span></span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="relative max-w-6xl mx-auto px-4 md:px-5 pt-8 md:pt-14 pb-20 md:pb-28 grid lg:grid-cols-12 gap-8 items-center">
           <div className="lg:col-span-7 space-y-5">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-amber-300/30 text-amber-200 text-xs font-black">
@@ -1243,19 +1264,6 @@ export default function PublicPage({
           </div>
         </div>
 
-        {theme.show_ticker !== false && tickerItems.length > 0 && (
-          <div className="relative bg-black/40 border-t border-white/10 py-2 overflow-hidden text-xs md:text-sm font-bold text-amber-200" aria-label="شريط الأخبار">
-            <div className="pp-marquee">
-              {[0, 1].map(copy => (
-                <div key={copy} className="flex items-center shrink-0" aria-hidden={copy === 1}>
-                  {tickerItems.map((t, i) => (
-                    <span key={`${copy}-${i}`} className="px-6 whitespace-nowrap">{t}<span className="mr-6 text-amber-400/60">◆</span></span>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </header>
 
       {/* ───── شريط الأرقام ───── */}
@@ -1371,7 +1379,7 @@ export default function PublicPage({
 
       {/* ───── أدوات عائمة ───── */}
       {canEdit && (
-        <div className="fixed bottom-4 left-4 z-40 flex items-center gap-2">
+        <div style={{ bottom: 'max(1rem, env(safe-area-inset-bottom))' }} className="fixed left-4 z-40 flex items-center gap-2">
           <button
             type="button"
             onClick={() => setEditMode(v => !v)}

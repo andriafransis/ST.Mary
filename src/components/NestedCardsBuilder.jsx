@@ -1494,7 +1494,7 @@ export default function NestedCardsBuilder({
 
       {nestedModalOpen && isAdmin && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[92dvh] overflow-y-auto">
             <div className="flex items-center justify-between border-b pb-2">
               <h3 className="text-sm font-black text-[#7a1c24]">
                 {editingNestedId ? '✏️ تعديل الكارت وصلاحيات ظهوره' : '➕ إضافة كارت جديد'}
@@ -1767,7 +1767,7 @@ export default function NestedCardsBuilder({
 
       {liveModalOpen && isAdmin && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[92dvh] overflow-y-auto">
             <div className="flex items-center justify-between border-b pb-2">
               <h3 className="text-sm font-black text-[#7a1c24] flex items-center gap-1.5">
                 <ArrowLeftRight size={15} /> تعديل ونقل الكارت وصلاحياته
@@ -1963,7 +1963,7 @@ export default function NestedCardsBuilder({
 
       {activeBuilderCard && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl w-full max-w-2xl p-6 space-y-4 text-xs font-bold max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-2xl p-6 space-y-4 text-xs font-bold max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between border-b pb-3">
               <div>
                 <h3 className="text-sm md:text-base font-black text-[#7a1c24]">

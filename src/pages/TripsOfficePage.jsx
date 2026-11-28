@@ -759,7 +759,7 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
 
         {viewRegsTrip && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-3xl w-full max-w-2xl p-5 space-y-3 max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-3xl w-full max-w-2xl p-5 space-y-3 max-h-[90dvh] overflow-y-auto">
               <div className="flex justify-between items-center border-b pb-3">
                 <div>
                   <h3 className="text-base font-black text-[#7a1c24]">✋ المشتركين من التطبيق — {viewRegsTrip.title}</h3>
@@ -802,7 +802,7 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
 
         {viewBusTrip && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-3xl w-full max-w-3xl p-5 space-y-3 max-h-[92vh] overflow-y-auto">
+            <div className="bg-white rounded-3xl w-full max-w-3xl p-5 space-y-3 max-h-[92dvh] overflow-y-auto">
               <div className="flex justify-between items-center border-b pb-3">
                 <div>
                   <h3 className="text-lg font-black text-[#7a1c24]">🚌 الأتوبيسات والمقاعد — {viewBusTrip.title}</h3>
@@ -831,7 +831,7 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
 
         {viewRoomsTrip && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-3xl w-full max-w-3xl p-5 space-y-4 max-h-[92vh] overflow-y-auto">
+            <div className="bg-white rounded-3xl w-full max-w-3xl p-5 space-y-4 max-h-[92dvh] overflow-y-auto">
               <div className="flex justify-between items-center border-b pb-3">
                 <div>
                   <h3 className="text-lg font-black text-[#7a1c24] flex items-center gap-2"><BedDouble size={20} /> حجز الأوض والغرف — {viewRoomsTrip.title}</h3>

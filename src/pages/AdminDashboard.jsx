@@ -17,6 +17,7 @@ import {
   AdminPriestCustomCardsSection
 } from '../components/admin/AdminCategoriesAndCards';
 import AdminUsersSection from '../components/admin/AdminUsersSection';
+import PriestInvitationsTab from '../components/priest/PriestInvitationsTab';
 import UserFormModal from '../components/admin/UserFormModal';
 import TransferUsersModal from '../components/admin/TransferUsersModal';
 import AdminServicesSection from '../components/admin/AdminServicesSection';
@@ -413,6 +414,7 @@ export default function AdminDashboard({
   const rawAdminCards = useMemo(() => [
     { id: 'setup_hub', icon: '🛠️', title: 'الإعدادات SETUP', desc: 'حسابات الكنيسة، الصلاحيات، التصميم، الإعدادات، إضافة وتعديل كروت، وسجل النشاط', count: `${rawSetupCards.length} كروت`, color: 'border-rose-300 bg-rose-50/40' },
     ...(canExtractSheet ? [{ id: 'master_sheet', icon: '📋', title: 'شيت التسلسل والافتقاد والترحيم', desc: 'سحب الشيت الرسمي بالترقيم التسلسلي للخدام والمخدومين والرعايا + حالة الافتقاد وذكرى الترحيم + تصدير وطباعة (أدمن / أب كاهن / أمين خدمة)', count: `${users.length} مسجل`, color: 'border-teal-300 bg-teal-50/30' }] : []),
+    { id: 'event_invitations', icon: '🎟️', title: 'دعوات المناسبات (QR) والكراسي', desc: 'إرسال دعوات بالـ QR وتحديد كرسي كل مدعو، ومسح الدعوات وتسجيل الحضور', count: 'دعوات + كراسي', color: 'border-rose-200 bg-white' },
     { id: 'events', icon: '⛪', title: 'مواعيد القداسات والاجتماعات', desc: 'إضافة وتعديل مواعيد القداسات، العشيات، والاجتماعات العامة', count: `${events.length} موعد`, color: 'border-amber-200 bg-white' },
     { id: 'services', icon: '🏫', title: 'الخدمات والاجتماعات والفصول', desc: 'تصفح متدرج بالكروت: الخدمة ← السنة الدراسية ← الفصول، مع الإضافة والتعديل والنقل من جوه الكروت', count: `${dbServiceGroups.length} خدمة • ${services.length} فصل`, color: 'border-blue-200 bg-white' },
     { id: 'edu_center', icon: '🎓', title: 'المركز التعليمي', desc: 'جدول الدروس، المراحل، المواد، الأسعار، حضور الطلاب والمدرسين، وشيت المحاسبة', count: 'إدارة الدروس', color: 'border-indigo-200 bg-white' },
@@ -670,7 +672,7 @@ export default function AdminDashboard({
           </div>
         )}
 
-        <div className={isSetup ? 'max-h-[calc(100vh-230px)] overflow-y-auto pr-1' : 'max-h-[calc(100vh-250px)] overflow-y-auto pr-1'}>
+        <div className={isSetup ? 'max-h-[calc(100dvh-230px)] overflow-y-auto pr-1' : 'max-h-[calc(100dvh-250px)] overflow-y-auto pr-1'}>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {cardsList.map(c => (
               <button key={c.id} type="button" onClick={() => handleLaunchAdminOrSetupCard(c)} className={`${c.color} border-2 p-4 rounded-2xl text-right shadow-2xs hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-2.5 cursor-pointer`}>
@@ -712,7 +714,7 @@ export default function AdminDashboard({
     <div className="space-y-3">
       {renderQuickNavBar()}
 
-      <div className="max-h-[calc(100vh-195px)] overflow-y-auto pr-1 space-y-3">
+      <div className="max-h-[calc(100dvh-195px)] overflow-y-auto pr-1 space-y-3">
         {activeCard === 'nested_cards' && (
           <div className="space-y-3">
             {renderTopBack('🧩 إضافة وتعديل كروت (كروت جوا كروت وصلاحيات الظهور)')}
@@ -792,6 +794,13 @@ export default function AdminDashboard({
               onGoToPermissions={(userId) => { setPermTargetUserId(userId); setActiveCard('roles_permissions'); }}
               onDeleteUser={onDeleteUser}
             />
+          </div>
+        )}
+
+        {activeCard === 'event_invitations' && (
+          <div className="space-y-3">
+            {renderTopBack('🎟️ دعوات المناسبات (QR) والكراسي')}
+            <PriestInvitationsTab currentUser={effectiveUser} users={users} services={services} />
           </div>
         )}
 

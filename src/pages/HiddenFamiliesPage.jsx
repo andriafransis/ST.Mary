@@ -477,7 +477,7 @@ export default function HiddenFamiliesPage({ currentUser, users = [], onRefresh 
       </div>
 
       {/* محتوى الشاشة داخل Scroll منظم */}
-      <div className="max-h-[calc(100vh-255px)] overflow-y-auto pr-1 space-y-3">
+      <div className="max-h-[calc(100dvh-255px)] overflow-y-auto pr-1 space-y-3">
         {tab === 'list' && (
           <div className="space-y-3">
             <div className="bg-white p-3 rounded-2xl border flex flex-wrap items-center gap-2">
@@ -834,7 +834,7 @@ export default function HiddenFamiliesPage({ currentUser, users = [], onRefresh 
       {/* مودال عرض التفاصيل والمرفقات */}
       {inspectFamily && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl w-full max-w-xl p-6 space-y-3 text-xs font-bold max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-xl p-6 space-y-3 text-xs font-bold max-h-[90dvh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-2">
               <h3 className="text-base font-black text-[#7a1c24]">
                 ملف الأسرة: {inspectFamily.head_name} (#{inspectFamily.case_number})

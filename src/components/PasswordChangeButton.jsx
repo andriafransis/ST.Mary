@@ -48,7 +48,7 @@ export default function PasswordChangeButton({ user, variant = 'plain', label = 
             onClick={() => setOpen(false)}
           >
             <div
-              className="bg-white rounded-3xl w-full max-w-md max-h-[92vh] overflow-y-auto p-4 sm:p-5 space-y-3 text-xs font-bold shadow-xl"
+              className="bg-white rounded-3xl w-full max-w-md max-h-[92dvh] overflow-y-auto p-4 sm:p-5 space-y-3 text-xs font-bold shadow-xl"
               dir="rtl"
               onClick={(e) => e.stopPropagation()}
             >

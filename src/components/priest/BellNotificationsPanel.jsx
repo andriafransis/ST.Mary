@@ -1001,7 +1001,7 @@ export default function BellNotificationsPanel({
 
       {open && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-start justify-center p-4 pt-16 z-80">
-          <div className="bg-white text-gray-900 rounded-3xl w-full max-w-xl p-5 space-y-4 shadow-2xl max-h-[82vh] overflow-y-auto">
+          <div className="bg-white text-gray-900 rounded-3xl w-full max-w-xl p-5 space-y-4 shadow-2xl max-h-[82dvh] overflow-y-auto">
             <div className="flex flex-wrap justify-between items-center border-b pb-3 gap-2">
               <div className="flex items-center gap-2">
                 <Bell className="text-[#7a1c24]" size={20} />

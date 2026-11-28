@@ -363,7 +363,7 @@ export default function ServiceGroupFeed({ currentUser, services = [], groups = 
       {/* مودال إرسال تنبيه الجروب على الواتساب */}
       {waAlertModal && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50">
-          <div className="bg-white rounded-3xl w-full max-w-xl p-5 sm:p-6 space-y-4 text-xs font-bold max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-xl p-5 sm:p-6 space-y-4 text-xs font-bold max-h-[90dvh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-2.5">
               <div>
                 <h3 className="text-sm sm:text-base font-black text-green-800 flex items-center gap-1.5">

@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Armchair, Settings2, X, Check } from 'lucide-react';
+import {
+  DEFAULT_LAYOUT,
+  LAYOUT_KEY,
+  buildSeats,
+  normalizeLayout,
+  parseSeatNumber,
+  seatLabel
+} from '../../lib/seatLayout';
 
 // ─────────────────────────────────────────────────────────────
 // خريطة كراسي الكنيسة: تحديد كرسي لكل مدعو
@@ -8,58 +16,7 @@ import { Armchair, Settings2, X, Check } from 'lucide-react';
 // مثال: "كرسي 7 • يمين • صف 1"
 // ─────────────────────────────────────────────────────────────
 
-const LAYOUT_KEY = 'church_seat_layout';
-const DEFAULT_LAYOUT = { rows: 2, seatsRight: 5, seatsLeft: 5 };
-
-const clampInt = (v, min, max, fallback) => {
-  const n = parseInt(v, 10);
-  if (Number.isNaN(n)) return fallback;
-  return Math.min(max, Math.max(min, n));
-};
-
-const normalizeLayout = (raw) => {
-  let obj = raw;
-  if (typeof raw === 'string') {
-    try {
-      obj = JSON.parse(raw);
-    } catch {
-      obj = null;
-    }
-  }
-  if (!obj || typeof obj !== 'object') return { ...DEFAULT_LAYOUT };
-  return {
-    rows: clampInt(obj.rows, 1, 30, DEFAULT_LAYOUT.rows),
-    seatsRight: clampInt(obj.seatsRight, 0, 20, DEFAULT_LAYOUT.seatsRight),
-    seatsLeft: clampInt(obj.seatsLeft, 0, 20, DEFAULT_LAYOUT.seatsLeft)
-  };
-};
-
-// يستخرج رقم الكرسي من النص المحفوظ (يرجع null لو النص مكتوب يدوياً)
-export const parseSeatNumber = (label = '') => {
-  const m = String(label || '').match(/كرسي\s*(\d+)/);
-  return m ? parseInt(m[1], 10) : null;
-};
-
-const buildSeats = (layout) => {
-  const seats = [];
-  let n = 1;
-  for (let row = 1; row <= layout.rows; row += 1) {
-    const right = [];
-    const left = [];
-    for (let i = 0; i < layout.seatsRight; i += 1) {
-      right.push({ number: n, row, side: 'يمين' });
-      n += 1;
-    }
-    for (let i = 0; i < layout.seatsLeft; i += 1) {
-      left.push({ number: n, row, side: 'شمال' });
-      n += 1;
-    }
-    seats.push({ row, right, left });
-  }
-  return seats;
-};
-
-const seatLabel = (seat) => `كرسي ${seat.number} • ${seat.side} • صف ${seat.row}`;
+export { parseSeatNumber };
 
 export default function SeatMapPicker({
   value = '',

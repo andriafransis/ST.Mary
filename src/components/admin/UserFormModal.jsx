@@ -735,7 +735,7 @@ export default function UserFormModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50" dir="rtl">
-      <div className="bg-white rounded-3xl w-full max-w-xl p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto text-gray-900">
+      <div className="bg-white rounded-3xl w-full max-w-xl p-6 space-y-3 text-xs font-bold max-h-[92dvh] overflow-y-auto text-gray-900">
         <div className="flex items-center justify-between border-b pb-2.5">
           <h3 className="font-extrabold text-sm text-[#7a1c24]">
             {isEditing

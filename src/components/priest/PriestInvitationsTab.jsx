@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { logActivity } from '../../lib/activityLogger';
 import EventInvitationSender from './EventInvitationSender';
+import { canSendChurchInvitations } from '../../lib/permissions';
 import InvitationScannerModal from './InvitationScannerModal';
 import SeatMapPicker from './SeatMapPicker';
 import {
@@ -35,6 +36,7 @@ export default function PriestInvitationsTab({
   services = []
 }) {
   const isPriestOrAdmin = ['admin', 'priest'].includes(currentUser?.role);
+  const canSendInvites = canSendChurchInvitations(currentUser);
   const canScanQr = [
     'admin',
     'priest',
@@ -220,7 +222,7 @@ export default function PriestInvitationsTab({
         </div>
       </div>
 
-      {isPriestOrAdmin ? (
+      {canSendInvites ? (
         <EventInvitationSender
           currentUser={currentUser}
           users={users}
@@ -230,7 +232,7 @@ export default function PriestInvitationsTab({
       ) : (
         <div className="bg-amber-50 border border-amber-300 text-amber-950 p-4 rounded-3xl font-bold flex flex-wrap items-center justify-between gap-3">
           <span>
-            إرسال الدعوات خاص بالأب الكاهن، ودور الكشافة والخدام هو مسح الـ QR Code وتنظيم دخول المدعوين.
+            إرسال الدعوات خاص بالأب الكاهن وأمين الخدمة ومساعده، ودورك هو مسح الـ QR Code وتنظيم دخول المدعوين.
           </span>
           {canScanQr && (
             <button
@@ -374,24 +376,24 @@ export default function PriestInvitationsTab({
                               <MessageCircle size={12} /> واتساب
                             </a>
                           )}
+                          {canSendInvites && (
+                            <button
+                              type="button"
+                              onClick={() => setEditingInvite({ ...inv })}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-lg font-bold cursor-pointer"
+                            >
+                              <Pencil size={12} /> تعديل
+                            </button>
+                          )}
                           {isPriestOrAdmin && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => setEditingInvite({ ...inv })}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-lg font-bold cursor-pointer"
-                              >
-                                <Pencil size={12} /> تعديل
-                              </button>
-                              <button
-                                type="button"
-                                disabled={deletingId === rowKey}
-                                onClick={() => handleDeleteInvite(inv)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg font-bold cursor-pointer"
-                              >
-                                <Trash2 size={12} /> {deletingId === rowKey ? '...' : 'حذف'}
-                              </button>
-                            </>
+                            <button
+                              type="button"
+                              disabled={deletingId === rowKey}
+                              onClick={() => handleDeleteInvite(inv)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg font-bold cursor-pointer"
+                            >
+                              <Trash2 size={12} /> {deletingId === rowKey ? '...' : 'حذف'}
+                            </button>
                           )}
                         </div>
                       </td>
@@ -406,7 +408,7 @@ export default function PriestInvitationsTab({
 
       {editingInvite && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4 z-55">
-          <div className="bg-white rounded-3xl w-full max-w-lg max-h-[92vh] overflow-y-auto p-5 space-y-3 text-xs font-bold">
+          <div className="bg-white rounded-3xl w-full max-w-lg max-h-[92dvh] overflow-y-auto p-5 space-y-3 text-xs font-bold">
             <div className="flex justify-between items-center border-b pb-2">
               <h3 className="font-black text-sm text-[#7a1c24]">
                 تعديل دعوة: {editingInvite.recipient_name} ({editingInvite.qr_token})

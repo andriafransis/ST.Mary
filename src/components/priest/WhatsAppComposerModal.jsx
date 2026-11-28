@@ -186,7 +186,7 @@ export default function WhatsAppComposerModal({
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-80">
-      <div className="bg-white rounded-3xl w-full max-w-2xl p-6 space-y-4 font-bold max-h-[92vh] overflow-y-auto text-sm">
+      <div className="bg-white rounded-3xl w-full max-w-2xl p-6 space-y-4 font-bold max-h-[92dvh] overflow-y-auto text-sm">
         <div className="flex justify-between items-center border-b pb-3">
           <div>
             <h3 className="text-lg font-black text-green-800 flex items-center gap-2">

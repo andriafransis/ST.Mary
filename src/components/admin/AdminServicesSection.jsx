@@ -680,7 +680,7 @@ export default function AdminServicesSection({
 
       {servicesSubTab === 'assign_groups' && (
         <div className="space-y-3">
-          <div className="max-h-[54vh] overflow-y-auto pr-1 grid md:grid-cols-2 gap-3">
+          <div className="max-h-[54dvh] overflow-y-auto pr-1 grid md:grid-cols-2 gap-3">
             {effectiveGroups.map((grp, idx) => {
               const groupKey = String(grp.id || grp.group_name || idx);
               const hierarchy = buildServiceHierarchy(grp.group_name, effectiveGroups, services);

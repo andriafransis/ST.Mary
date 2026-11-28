@@ -1584,7 +1584,7 @@ export default function JosephArimatheaManager({
       {renderBackgroundAudio()}
 
       {liveToast && (
-        <div className="fixed bottom-6 left-6 z-50 bg-[#4a0e13] text-white border-2 border-amber-400 p-4 rounded-2xl shadow-2xl max-w-sm space-y-2 animate-bounce print:hidden">
+        <div style={{ bottom: 'max(1.5rem, env(safe-area-inset-bottom))' }} className="fixed left-6 z-50 bg-[#4a0e13] text-white border-2 border-amber-400 p-4 rounded-2xl shadow-2xl max-w-sm space-y-2 animate-bounce print:hidden">
           <div className="flex justify-between items-start gap-2">
             <strong className="text-amber-300 text-xs font-black flex items-center gap-1.5">
               <BellRing size={15} className="animate-spin text-amber-400" /> {liveToast.title}
@@ -3401,7 +3401,7 @@ export default function JosephArimatheaManager({
                   <span className="font-bold text-xs text-gray-700">صورة إيصال التحويل المرفقة</span>
                   <button onClick={() => setViewingImage(null)} className="text-gray-500 font-bold text-sm">✕ إغلاق</button>
                 </div>
-                <img src={viewingImage} alt="Receipt" className="max-h-[70vh] mx-auto rounded-2xl object-contain border" />
+                <img src={viewingImage} alt="Receipt" className="max-h-[70dvh] mx-auto rounded-2xl object-contain border" />
                 <a
                   href={viewingImage}
                   target="_blank"

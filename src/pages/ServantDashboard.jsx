@@ -15,6 +15,7 @@ import { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/Serv
 import MonthlyAnalyticsAndRewards from '../components/MonthlyAnalyticsAndRewards';
 import PriestInvitationModal from '../components/priest/PriestInvitationModal';
 import InvitationScannerModal from '../components/priest/InvitationScannerModal';
+import PriestInvitationsTab from '../components/priest/PriestInvitationsTab';
 import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
 
 const STAGE_OPTIONS = [
@@ -1550,7 +1551,7 @@ export default function ServantDashboard({
     { id: 'trips', label: '🚌 الرحلات', badge: myServiceTripsForServant.length + generalTripsForServant.length },
     { id: 'analytics', label: '📊 تحليلات ومكافآت الشهر' },
     { id: 'birthdays', label: `🎂 أعياد الميلاد (${activeBirthdayList.length})` },
-    ...(canSendInvites ? [{ id: 'invite', label: '💌 دعوة لأبونا لمناسبة' }] : [])
+    ...(canSendInvites ? [{ id: 'invite', label: '💌 دعوة لأبونا لمناسبة' }, { id: 'event_invites', label: '🎟️ دعوات المناسبات (QR)' }] : [])
   ];
 
   return (
@@ -2081,7 +2082,7 @@ export default function ServantDashboard({
         </div>
       )}
 
-      <div ref={scrollBoxRef} className="max-h-[calc(100vh-270px)] overflow-y-auto pr-1 space-y-3">
+      <div ref={scrollBoxRef} className="max-h-[calc(100dvh-270px)] overflow-y-auto pr-1 space-y-3">
         {activeTab === 'my_invites' && (
           <ReceivedInvitationsSection
             currentUser={servant}
@@ -2254,6 +2255,10 @@ export default function ServantDashboard({
               </div>
             )}
           </div>
+        )}
+
+        {activeTab === 'event_invites' && canSendInvites && (
+          <PriestInvitationsTab currentUser={servant} users={users} services={services} />
         )}
 
         {activeTab === 'invite' && canSendInvites && (
@@ -2741,7 +2746,7 @@ export default function ServantDashboard({
 
       {showAddModal && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50">
-          <div className="bg-white rounded-3xl w-full max-w-xl p-4 sm:p-6 space-y-3 text-xs font-bold max-h-[92vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl w-full max-w-xl p-4 sm:p-6 space-y-3 text-xs font-bold max-h-[92dvh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-2">
               <h3 className="font-extrabold text-sm text-[#7a1c24]">إضافة مخدوم جديد لفصل: {selectedClassFilter || selectedYearFilter || selectedScope}</h3>
               <button type="button" onClick={() => setShowAddModal(false)} className="p-1.5 bg-gray-100 rounded-xl cursor-pointer"><X size={16} /></button>

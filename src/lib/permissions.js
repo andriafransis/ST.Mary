@@ -403,11 +403,16 @@ export function getScreenAccess(user, screenKey, roleScreens = [], policies = []
   return getDetailedScreenPermissions(user, screenKey, roleScreens, policies);
 }
 
-// صلاحية إرسال الدعوات: للأدمن، أو الكاهن، أو أمين الخدمة، أو أي خادم/مستخدم مُفعّل له الصلاحية
+// صلاحية إرسال الدعوات: للأدمن، أو الكاهن، أو أمين الخدمة ومساعده، أو أي خادم/مستخدم مُفعّل له الصلاحية
 export function canSendChurchInvitations(user, policies = []) {
   if (!user) return false;
   if (user.permissions?.read_only === true) return false;
-  if (user.role === 'admin' || user.role === 'priest' || user.role === 'head_servant') {
+  if (
+    user.role === 'admin' ||
+    user.role === 'priest' ||
+    user.role === 'head_servant' ||
+    user.role === 'vice_head_servant'
+  ) {
     return true;
   }
 
@@ -438,6 +443,7 @@ export function canScanChurchInvitations(user, policies = []) {
     user.role === 'admin' ||
     user.role === 'priest' ||
     user.role === 'head_servant' ||
+    user.role === 'vice_head_servant' ||
     user.role === 'meeting_servant'
   ) {
     return true;

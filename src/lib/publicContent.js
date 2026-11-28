@@ -11,6 +11,24 @@ export const SYSTEM_KINDS = ['theme_config', 'section_config', 'category_def', '
 // ───────────── أنواع المحتوى (نفس مواصفات المحرر) ─────────────
 export const CONTENT_SPECS = [
   {
+    value: 'hanna_word',
+    label: '✝ كلمة روحية (كلمة قدس أبونا / تأمل / رسالة)',
+    domain: 'كلمة الأب • نص وصورة أو فيديو',
+    titleLabel: 'عنوان الكلمة *',
+    titlePlaceholder: 'مثال: كلمة قدس أبونا لهذا الأسبوع',
+    dateLabel: 'تاريخ الكلمة',
+    timeLabel: 'مناسبة أو تعليق قصير',
+    timePlaceholder: 'مثال: بمناسبة صوم الميلاد',
+    locationLabel: 'المصدر / المكان',
+    locationPlaceholder: 'مثال: عظة الأحد',
+    urlLabel: 'صورة الأب أو فيديو الكلمة (اختياري)',
+    urlPlaceholder: 'https://... رابط يوتيوب أو ارفع صورة',
+    bodyLabel: 'نص الكلمة *',
+    bodyPlaceholder: 'اكتب الكلمة أو التأمل بالكامل...',
+    mediaType: 'image_or_url',
+    acceptMedia: 'image/*,video/*'
+  },
+  {
     value: 'livestream',
     label: '📺 بث مباشر (ميعاد + رابط يوتيوب / فيسبوك / مباشر)',
     domain: 'بث مباشر • ميعاد ورابط',

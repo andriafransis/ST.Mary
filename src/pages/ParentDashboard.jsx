@@ -839,7 +839,7 @@ export default function ParentDashboard({
         </div>
       )}
 
-      <div className="max-h-[calc(100vh-265px)] overflow-y-auto pr-1 space-y-4">
+      <div className="max-h-[calc(100dvh-265px)] overflow-y-auto pr-1 space-y-4">
         {activeTab === 'my_invites' && (
           <ReceivedInvitationsSection
             currentUser={parent}

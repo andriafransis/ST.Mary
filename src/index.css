@@ -1,28 +1,102 @@
-@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap');
 @import "tailwindcss";
 
+/* ───────── أساس عام ───────── */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-padding-top: 5rem;
+}
+
 html, body {
-  font-family: 'Cairo', system-ui, sans-serif;
+  font-family: 'Cairo', system-ui, Tahoma, sans-serif;
   background-color: #f6f4ef;
   color: #1f2429;
   margin: 0;
   padding: 0;
   overflow-x: hidden;
   -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+/* مساحات آمنة (النوتش / الحواف) لما التطبيق يتفتح كتطبيق على الموبايل */
+body {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  min-height: 100dvh;
+}
+
+/* ارتفاع الشاشة الحقيقي على الموبايل (من غير ما شريط المتصفح يقص) */
+.min-h-screen { min-height: 100dvh; }
+.h-screen { height: 100dvh; }
+
+/* ضغطة واحدة بدل تأخير الضغطتين + إزالة تكبير الضغط المزدوج على الأزرار */
+button, [role="button"], a, select, label, summary {
+  touch-action: manipulation;
+}
+button:not(:disabled), [role="button"] { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+/* مؤشر تركيز واضح للكيبورد */
+:focus-visible {
+  outline: 2px solid #c8962a;
+  outline-offset: 2px;
+}
+
+/* صور وفيديو ما تتخطاش عرض الشاشة */
+img, video, canvas, svg { max-width: 100%; }
+img { height: auto; }
 
 /* إخفاء السكرول بار في شريط التابات على الموبايل مع بقاء السحب شغال */
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ───────── النوافذ المنبثقة ───────── */
+/* لما أي نافذة تفتح: الصفحة اللي وراها ما تتحركش */
+body:has(.fixed.inset-0) { overflow: hidden; }
+
+/* النافذة نفسها: ما تعدّيش ارتفاع الشاشة، وتسكرول من جوّاها (الكلاسات الصريحة بتغلب القاعدة دي) */
+@layer base {
+  .fixed.inset-0 {
+    overscroll-behavior: contain;
+    padding-top: max(0.75rem, env(safe-area-inset-top));
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+  .fixed.inset-0 > :first-child:not([class*="max-h"]) {
+    max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
 }
 
+/* ───────── الموبايل ───────── */
 /* منع تكبير الشاشة التلقائي على الآيفون عند الضغط على الحقول */
-@media (max-width: 640px) {
-  input, select, textarea {
+@media (max-width: 640px), (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea {
     font-size: 16px !important;
   }
+}
+
+/* الخطوط الصغيرة جداً بتبقى مقروءة على الموبايل */
+@media (max-width: 640px) {
+  .text-\[8px\], .text-\[9px\] { font-size: 11px; }
+  .text-\[10px\] { font-size: 11.5px; }
+  .text-\[11px\] { font-size: 12px; }
+}
+
+/* حركة أقل لمن يفضّل ذلك */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* الطباعة */
+@media print {
+  body:has(.fixed.inset-0) { overflow: visible !important; }
+  #boot-splash { display: none; }
 }

@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { logActivity } from '../../lib/activityLogger';
 import { showMobileNotification } from '../../lib/mobileNotifications';
+import { canSendChurchInvitations } from '../../lib/permissions';
+import { buildFlatRows, useSeatLayout } from '../../lib/seatLayout';
+import SeatLayoutControls from './SeatLayoutControls';
 import {
   Send,
   Crown,
@@ -58,7 +61,8 @@ export default function EventInvitationSender({
   services = [],
   onCreated
 }) {
-  const canCreateInvites = ['admin', 'priest'].includes(currentUser?.role);
+  const canCreateInvites = canSendChurchInvitations(currentUser);
+  const canEditSeatLayout = ['admin', 'priest'].includes(currentUser?.role);
 
   const [eventType, setEventType] = useState('تدشين الكنيسة');
   const [eventTitle, setEventTitle] = useState('');
@@ -70,8 +74,7 @@ export default function EventInvitationSender({
   const [notes, setNotes] = useState('');
 
   // إعداد خريطة الكراسي المرقمة (صفوف ودكك وكراسي زي الأتوبيس)
-  const [rowsCount, setRowsCount] = useState(3);
-  const [seatsPerRow, setSeatsPerRow] = useState(6);
+  const [seatLayout, saveLayout] = useSeatLayout();
   const [selectedSeats, setSelectedSeats] = useState([]);
   const [bookedSeatsMap, setBookedSeatsMap] = useState({});
 
@@ -170,7 +173,7 @@ export default function EventInvitationSender({
   }, [users, currentUser?.id, userSearch]);
 
   const formatSeatLabel = (seatObj) =>
-    `${getRowLabel(seatObj.rowIndex)} - كرسي ${seatObj.seatNumber}`;
+    seatObj.label || `${getRowLabel(seatObj.rowIndex)} - كرسي ${seatObj.seatNumber}`;
 
   const composeSeatZoneText = (seatsList, customLocation = location, customTier = inviteTier) => {
     const cleanLoc = String(customLocation || '').trim();
@@ -279,7 +282,7 @@ export default function EventInvitationSender({
     e.preventDefault();
 
     if (!canCreateInvites) {
-      alert('🔒 إنشاء وإرسال الدعوات متاح للأب الكاهن والسوبر أدمن فقط.');
+      alert('🔒 إنشاء وإرسال الدعوات متاح للأب الكاهن والسوبر أدمن وأمين الخدمة ومساعده (أو من لديه الصلاحية).');
       return;
     }
 
@@ -358,26 +361,7 @@ export default function EventInvitationSender({
     }
   };
 
-  const rowsArray = useMemo(() => {
-    const safeRows = Math.min(6, Math.max(1, Number(rowsCount) || 3));
-    const safeCols = Math.min(12, Math.max(2, Number(seatsPerRow) || 6));
-    let counter = 1;
-    return Array.from({ length: safeRows }, (_, rIdx) => {
-      const seats = Array.from({ length: safeCols }, () => {
-        const seatNumber = counter++;
-        return {
-          rowIndex: rIdx,
-          rowLabel: getRowLabel(rIdx),
-          seatNumber
-        };
-      });
-      return {
-        rowIndex: rIdx,
-        rowLabel: getRowLabel(rIdx),
-        seats
-      };
-    });
-  }, [rowsCount, seatsPerRow]);
+  const rowsArray = useMemo(() => buildFlatRows(seatLayout), [seatLayout]);
 
   return (
     <div className="space-y-4 text-xs" dir="rtl">
@@ -521,32 +505,6 @@ export default function EventInvitationSender({
               </div>
 
               <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                <label className="flex items-center gap-1 font-bold text-gray-700">
-                  <span>عدد الصفوف:</span>
-                  <select
-                    className="px-2 py-1 border rounded-lg bg-white font-bold"
-                    value={rowsCount}
-                    onChange={(e) => setRowsCount(Number(e.target.value))}
-                  >
-                    {[2, 3, 4, 5, 6].map((n) => (
-                      <option key={n} value={n}>{n} صفوف</option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="flex items-center gap-1 font-bold text-gray-700">
-                  <span>كراسي كل صف:</span>
-                  <select
-                    className="px-2 py-1 border rounded-lg bg-white font-bold"
-                    value={seatsPerRow}
-                    onChange={(e) => setSeatsPerRow(Number(e.target.value))}
-                  >
-                    {[4, 5, 6, 8, 10].map((n) => (
-                      <option key={n} value={n}>{n} كراسي</option>
-                    ))}
-                  </select>
-                </label>
-
                 {selectedSeats.length > 0 && (
                   <button
                     type="button"
@@ -558,6 +516,8 @@ export default function EventInvitationSender({
                 )}
               </div>
             </div>
+
+            <SeatLayoutControls layout={seatLayout} onSave={saveLayout} canEdit={canEditSeatLayout} />
 
             <div className="flex flex-wrap items-center gap-3 text-[10px] font-bold text-gray-600">
               <span className="inline-flex items-center gap-1">

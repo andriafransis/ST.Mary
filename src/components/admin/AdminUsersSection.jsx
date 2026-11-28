@@ -97,7 +97,7 @@ export default function AdminUsersSection({
           <p className="text-xs text-gray-500">لا يتم عرض كل الحسابات دفعة واحدة للحفاظ على سرعة وخصوصية لوحة الإدارة.</p>
         </div>
       ) : (
-        <div className="max-h-[54vh] overflow-y-auto pr-1 grid gap-2.5">
+        <div className="max-h-[54dvh] overflow-y-auto pr-1 grid gap-2.5">
           {filteredUsers.length === 0 ? (
             <div className="bg-white p-8 rounded-2xl border text-center text-xs text-gray-400">لا توجد نتائج مطابقة</div>
           ) : (

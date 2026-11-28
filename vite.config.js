@@ -13,6 +13,25 @@ export default defineConfig({
       includeAssets: ['icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'favicon-32x32.png'],
       workbox: {
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        cleanupOutdatedCaches: true,
+        navigateFallback: '/ST.Mary/index.html',
+        // الخط والأيقونات تفضل شغالة حتى لو النت ضعيف أو مقطوع
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+            handler: 'StaleWhileRevalidate',
+            options: { cacheName: 'google-fonts-css' },
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts-files',
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
       },
       manifest: {
         id: '/ST.Mary/',
@@ -23,6 +42,7 @@ export default defineConfig({
         description: 'منظومة إدارة الكنيسة والخدمات والاعترافات',
         theme_color: '#7a1c24',
         background_color: '#f6f4ef',
+        categories: ['lifestyle', 'productivity'],
         display: 'standalone',
         dir: 'rtl',
         lang: 'ar',

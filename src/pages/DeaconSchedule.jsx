@@ -357,7 +357,7 @@ export default function DeaconSchedule({ deacons = [], currentUser, canEdit = fa
     if (!activeDynamicCard) return null;
     return (
       <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50" dir="rtl">
-        <div className="bg-white rounded-3xl w-full max-w-2xl p-6 space-y-4 text-xs font-bold max-h-[90vh] overflow-y-auto">
+        <div className="bg-white rounded-3xl w-full max-w-2xl p-6 space-y-4 text-xs font-bold max-h-[90dvh] overflow-y-auto">
           <div className="flex items-center justify-between border-b pb-3">
             <div>
               <h3 className="text-sm md:text-base font-black text-[#7a1c24]">

@@ -139,7 +139,7 @@ export default function TransferUsersModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-3xl w-full max-w-lg p-6 space-y-3 text-xs font-bold max-h-[90dvh] overflow-y-auto">
         <div className="flex items-center justify-between border-b pb-2">
           <h3 className="font-black text-sm text-[#7a1c24] flex items-center gap-1.5">
             <ArrowLeftRight size={16} />

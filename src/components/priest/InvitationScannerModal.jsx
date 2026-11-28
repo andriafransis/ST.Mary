@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
 import { supabase } from '../../lib/supabase';
+import { buildFlatRows, useSeatLayout } from '../../lib/seatLayout';
 import {
   ScanLine,
   CheckCircle2,
@@ -255,8 +256,7 @@ export default function InvitationScannerModal({
   const [recentLogs, setRecentLogs] = useState([]);
 
   // خريطة الكراسي لترصيص مكان المدعو عند المسح
-  const [rowsCount, setRowsCount] = useState(3);
-  const [seatsPerRow, setSeatsPerRow] = useState(6);
+  const [seatLayout] = useSeatLayout();
   const [eventSeatsMap, setEventSeatsMap] = useState({});
   const [highlightedSeatNum, setHighlightedSeatNum] = useState(null);
   const [activeSeatEventTitle, setActiveSeatEventTitle] = useState('');
@@ -332,13 +332,8 @@ export default function InvitationScannerModal({
       }
     }
 
-    if (maxSeat > 0) {
-      const neededRows = Math.min(6, Math.max(rowsCount, Math.ceil(maxSeat / seatsPerRow)));
-      setRowsCount(neededRows);
-    }
-
     setEventSeatsMap(nextMap);
-  }, [rowsCount, seatsPerRow]);
+  }, []);
 
   const applyContinuousFocusIfSupported = async (html5QrCode) => {
     try {
@@ -1006,26 +1001,7 @@ export default function InvitationScannerModal({
     onClose?.();
   };
 
-  const seatRowsArray = useMemo(() => {
-    const safeRows = Math.min(6, Math.max(1, Number(rowsCount) || 3));
-    const safeCols = Math.min(12, Math.max(2, Number(seatsPerRow) || 6));
-    let num = 1;
-    return Array.from({ length: safeRows }, (_, rIdx) => {
-      const seats = Array.from({ length: safeCols }, () => {
-        const seatNumber = num++;
-        return {
-          rowIndex: rIdx,
-          rowLabel: getRowLabel(rIdx),
-          seatNumber
-        };
-      });
-      return {
-        rowIndex: rIdx,
-        rowLabel: getRowLabel(rIdx),
-        seats
-      };
-    });
-  }, [rowsCount, seatsPerRow]);
+  const seatRowsArray = useMemo(() => buildFlatRows(seatLayout), [seatLayout]);
 
   const showSeatMap =
     activeTab === 'invitations' &&
@@ -1036,7 +1012,7 @@ export default function InvitationScannerModal({
       className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-3 sm:p-4"
       dir="rtl"
     >
-      <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl p-4 sm:p-5 space-y-4 text-xs max-h-[94vh] overflow-y-auto">
+      <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl p-4 sm:p-5 space-y-4 text-xs max-h-[94dvh] overflow-y-auto">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
           <div className="flex items-center gap-2.5 text-[#7a1c24]">
             <div className="p-2.5 rounded-2xl bg-[#f9ecee]">
@@ -1354,32 +1330,9 @@ export default function InvitationScannerModal({
                   خريطة الكراسي وتسكين الحضور ({activeSeatEventTitle})
                 </strong>
               </div>
-              <div className="flex items-center gap-2 text-[10px] font-bold">
-                <label className="flex items-center gap-1">
-                  <span>صفوف:</span>
-                  <select
-                    className="px-1.5 py-0.5 border rounded bg-white"
-                    value={rowsCount}
-                    onChange={(e) => setRowsCount(Number(e.target.value))}
-                  >
-                    {[2, 3, 4, 5, 6].map((n) => (
-                      <option key={n} value={n}>{n}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="flex items-center gap-1">
-                  <span>كراسي الصف:</span>
-                  <select
-                    className="px-1.5 py-0.5 border rounded bg-white"
-                    value={seatsPerRow}
-                    onChange={(e) => setSeatsPerRow(Number(e.target.value))}
-                  >
-                    {[4, 5, 6, 8, 10].map((n) => (
-                      <option key={n} value={n}>{n}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+              <span className="text-[10px] font-bold text-gray-600">
+                {seatLayout.rows} صف • {seatLayout.rows * (seatLayout.seatsRight + seatLayout.seatsLeft)} كرسي
+              </span>
             </div>
 
             <div className="flex flex-wrap items-center gap-3 text-[10px] font-bold text-gray-600">

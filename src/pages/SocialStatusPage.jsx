@@ -196,7 +196,7 @@ export default function SocialStatusPage({ users = [], currentUser, canEdit = fa
 
       {editing && canEdit && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <form onSubmit={handleSave} className="bg-white rounded-3xl p-5 w-full max-w-md space-y-3 font-bold max-h-[90vh] overflow-y-auto">
+          <form onSubmit={handleSave} className="bg-white rounded-3xl p-5 w-full max-w-md space-y-3 font-bold max-h-[90dvh] overflow-y-auto">
             <div className="flex justify-between items-center">
               <h3 className="text-sm font-black text-[#7a1c24]">✏️ {editing.full_name}</h3>
               <button type="button" onClick={() => setEditing(null)} className="p-1 cursor-pointer"><X size={18} /></button>

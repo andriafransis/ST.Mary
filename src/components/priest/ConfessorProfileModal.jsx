@@ -246,7 +246,7 @@ export default function ConfessorProfileModal({
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 md:p-4 z-55">
-      <div className="bg-white rounded-3xl w-full max-w-3xl p-5 md:p-6 space-y-4 font-bold max-h-[93vh] overflow-y-auto text-sm">
+      <div className="bg-white rounded-3xl w-full max-w-3xl p-5 md:p-6 space-y-4 font-bold max-h-[93dvh] overflow-y-auto text-sm">
         <div className="flex flex-wrap justify-between items-start gap-2 border-b pb-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
