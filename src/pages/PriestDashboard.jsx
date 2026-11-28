@@ -638,7 +638,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5">
           {matching.map(nc => {
             const subCount = allowedNestedCards.filter(x => x.parent_key === nc.key).length;
             const entriesCount = customEntries.filter(en => String(en.card_id) === String(nc.id)).length;
@@ -647,7 +647,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                 key={nc.key}
                 type="button"
                 onClick={() => handleOpenNestedCard(nc)}
-                className="bg-white border-2 border-amber-200 hover:border-[#7a1c24] p-4 rounded-2xl text-right shadow-2xs hover:shadow-md transition flex flex-col justify-between gap-2 cursor-pointer"
+                className="bg-white border-2 border-amber-200 hover:border-[#7a1c24] p-3 md:p-4 rounded-2xl text-right shadow-2xs hover:shadow-md transition flex flex-col justify-between gap-2 cursor-pointer"
               >
                 <div className="flex justify-between items-start w-full">
                   <span className="text-2xl">{nc.icon || '🗂️'}</span>
@@ -829,7 +829,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     ];
 
     return (
-      <div className="bg-white px-3 py-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto print:hidden mb-3">
+      <div className="app-tabs bg-white px-3 py-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto print:hidden mb-3">
         {tabs.map(t => (
           <button
             key={t.id}
@@ -1320,8 +1320,8 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
       />
 
       {activeDynamicCard && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl w-full max-w-2xl p-6 space-y-4 text-xs font-bold max-h-[90dvh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
+          <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-2xl p-4 md:p-6 space-y-4 text-xs font-bold max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between border-b pb-3">
               <div>
                 <h3 className="text-sm md:text-base font-black text-[#7a1c24]">
@@ -1468,13 +1468,13 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     return (
       <div className="space-y-4 text-sm md:text-base">
         {!selectedStage ? (
-          <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
             {stagesMap.map(st => (
               <button
                 type="button"
                 key={st}
                 onClick={() => { setSelectedStage(st); setServiceSubCard('menu'); }}
-                className="bg-white p-5 rounded-3xl border-2 hover:border-[#7a1c24] text-right shadow-sm space-y-2 cursor-pointer"
+                className="bg-white p-3.5 md:p-5 rounded-3xl border-2 hover:border-[#7a1c24] text-right shadow-sm space-y-2 cursor-pointer"
               >
                 <span className="text-3xl">📖</span>
                 <h3 className="text-lg font-black">{st}</h3>
@@ -1498,16 +1498,16 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
             </div>
 
             {serviceSubCard === 'menu' && (
-              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <button type="button" onClick={() => setServiceSubCard('leaders')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-3xl block">👑</span><strong className="text-base block">القيادات</strong></button>
-                <button type="button" onClick={() => setServiceSubCard('classes')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-3xl block">🏫</span><strong className="text-base block">الفصول والمخدومين ({stageClasses.length})</strong></button>
-                <button type="button" onClick={() => setServiceSubCard('servants')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-3xl block">👥</span><strong className="text-base block">الخدام ({stageServants.length})</strong></button>
-                <button type="button" onClick={() => setServiceSubCard('visitations')} className="bg-white border-2 p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-3xl block">🕊️</span><strong className="text-base block">افتقاد {selectedStage} ({stageVisitations.length})</strong></button>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+                <button type="button" onClick={() => setServiceSubCard('leaders')} className="bg-white border-2 p-3.5 md:p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-3xl block">👑</span><strong className="text-base block">القيادات</strong></button>
+                <button type="button" onClick={() => setServiceSubCard('classes')} className="bg-white border-2 p-3.5 md:p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-3xl block">🏫</span><strong className="text-base block">الفصول والمخدومين ({stageClasses.length})</strong></button>
+                <button type="button" onClick={() => setServiceSubCard('servants')} className="bg-white border-2 p-3.5 md:p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-3xl block">👥</span><strong className="text-base block">الخدام ({stageServants.length})</strong></button>
+                <button type="button" onClick={() => setServiceSubCard('visitations')} className="bg-white border-2 p-3.5 md:p-5 rounded-3xl text-right space-y-2 hover:border-[#7a1c24] cursor-pointer"><span className="text-3xl block">🕊️</span><strong className="text-base block">افتقاد {selectedStage} ({stageVisitations.length})</strong></button>
               </div>
             )}
 
             {serviceSubCard === 'leaders' && (
-              <div className="bg-white p-5 rounded-3xl border grid md:grid-cols-2 gap-3">
+              <div className="bg-white p-3.5 md:p-5 rounded-3xl border grid md:grid-cols-2 gap-3">
                 <div className="p-4 bg-[#fbfaf7] rounded-2xl border"><span className="text-gray-500 block">أمين الخدمة:</span><strong className="text-base">{stageClasses[0]?.head_servant_name || 'غير محدد'}</strong></div>
                 <div className="p-4 bg-[#fbfaf7] rounded-2xl border"><span className="text-gray-500 block">مساعد الأمين:</span><strong className="text-base">{stageClasses[0]?.vice_head_name || 'غير محدد'}</strong></div>
               </div>
@@ -1595,8 +1595,8 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
         )}
 
         {inspectMember && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-3xl w-full max-w-md p-6 space-y-2 text-sm">
+          <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-md p-4 md:p-6 space-y-2 text-sm max-h-[90dvh] overflow-y-auto">
               <div className="flex justify-between border-b pb-2">
                 <strong className="text-lg text-[#7a1c24]">{inspectMember.full_name}</strong>
                 <button type="button" onClick={() => setInspectMember(null)}><X size={18} /></button>
@@ -1633,7 +1633,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     return (
       <div className="space-y-4 text-sm md:text-base">
         <div className="grid lg:grid-cols-2 gap-4">
-          <form onSubmit={handleGrantReward} className="bg-white p-5 rounded-3xl border space-y-3 font-bold shadow-2xs">
+          <form onSubmit={handleGrantReward} className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-3 font-bold shadow-2xs">
             <h3 className="text-base font-black text-[#7a1c24] flex items-center gap-1.5"><Gift size={18} /> منح عرض / خصم رحلة أو مكافأة حضور</h3>
             <div className="grid sm:grid-cols-2 gap-2">
               <select className="p-2.5 border rounded-xl bg-[#fbfaf7]" value={rewardForm.member_id} onChange={e => setRewardForm({ ...rewardForm, member_id: e.target.value })}>
@@ -1656,7 +1656,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
             <button type="submit" className="px-5 py-2.5 bg-[#7a1c24] text-white rounded-xl font-black text-xs cursor-pointer">+ تسجيل المكافأة / العرض</button>
           </form>
 
-          <form onSubmit={handleAddMemberNote} className="bg-white p-5 rounded-3xl border space-y-3 font-bold shadow-2xs">
+          <form onSubmit={handleAddMemberNote} className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-3 font-bold shadow-2xs">
             <h3 className="text-base font-black text-[#7a1c24] flex items-center gap-1.5"><ClipboardCheck size={18} /> تسجيل ملاحظة متابعة (تظهر لولي الأمر أو داخلية)</h3>
             <div className="grid sm:grid-cols-2 gap-2">
               <select className="p-2.5 border rounded-xl bg-[#fbfaf7]" value={noteForm.member_id} onChange={e => setNoteForm({ ...noteForm, member_id: e.target.value })}>
@@ -1678,7 +1678,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
           </form>
         </div>
 
-        <div className="bg-white p-5 rounded-3xl border space-y-3 shadow-2xs">
+        <div className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-3 shadow-2xs">
           <div className="flex flex-wrap justify-between items-center gap-2">
             <h3 className="text-base font-black text-gray-900 flex items-center gap-1.5"><Award size={18} className="text-[#7a1c24]" /> مؤشر الالتزام والكفاءة والغياب والتأخير ({filteredCommitments.length})</h3>
             <div className="flex flex-wrap gap-2">
@@ -1699,7 +1699,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
               </thead>
               <tbody className="divide-y font-bold">
                 {filteredCommitments.length === 0 ? (
-                  <tr><td colSpan={6} className="p-6 text-center text-gray-400">لا توجد سجلات التزام مطابقة حالياً.</td></tr>
+                  <tr><td colSpan={6} className="p-4 md:p-6 text-center text-gray-400">لا توجد سجلات التزام مطابقة حالياً.</td></tr>
                 ) : (
                   filteredCommitments.map(row => (
                     <tr key={row.member_id} className="hover:bg-[#fbfaf7]">
@@ -1803,10 +1803,13 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
           </div>
         )}
 
-        <div className="bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-5 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
+        <div className="app-hero bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-4 md:p-5 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
           <div>
-            <h2 className="text-xl font-black text-amber-200">مكتب رعاية: {priest.full_name}</h2>
+            <h2 className="text-lg md:text-xl font-black text-amber-200">مكتب رعاية: {priest.full_name}</h2>
             <p className="text-sm text-white/85 mt-1">اختر الكارت للدخول إلى التفاصيل الكاملة</p>
+            <div className="flex flex-wrap gap-1.5 mt-2.5">
+              <span className="app-chip">👥 أعضاء الكنيسة <b>{users.length}</b></span>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {renderBellPanel()}
@@ -1816,7 +1819,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
           </div>
         </div>
 
-        <div ref={scrollBoxRef} className="max-h-[calc(100dvh-250px)] overflow-y-auto pr-1 space-y-4">
+        <div ref={scrollBoxRef} className="space-y-4">
           <div className="bg-linear-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-3xl p-4 shadow-sm space-y-3">
             <div className="flex flex-wrap justify-between items-center gap-2">
               <div className="flex items-center gap-2">
@@ -1871,7 +1874,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 md:gap-4">
             {effectiveCards.map(c => (
               <button
                 type="button"
@@ -1881,28 +1884,28 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                   setActiveCard(c.id);
                   if (c.id === 'service_hub') setActiveServiceCard(null);
                 }}
-                className={`${c.color} border-2 p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer`}
+                className={`${c.color} border-2 p-3 md:p-5 rounded-2xl md:rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-2 md:gap-3 cursor-pointer`}
               >
                 <div className="flex justify-between items-start w-full">
-                  <span className="text-4xl">{c.icon}</span>
+                  <span className="text-2xl md:text-4xl">{c.icon}</span>
                   <span className="px-3 py-1 bg-[#f9ecee] text-[#7a1c24] rounded-full text-xs font-black">{c.count}</span>
                 </div>
                 <div>
-                  <h3 className="text-lg font-black text-gray-900">{c.title}</h3>
-                  <p className="text-sm text-gray-600 mt-1">{c.desc}</p>
+                  <h3 className="text-sm md:text-lg font-black text-gray-900">{c.title}</h3>
+                  <p className="hidden md:block text-sm text-gray-600 mt-1">{c.desc}</p>
                 </div>
               </button>
             ))}
 
             {customCards.map(cc => (
-              <button type="button" key={cc.id} onClick={() => setActiveCard('custom:' + cc.id)} className="bg-amber-50/50 border-2 border-amber-300 p-5 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer">
+              <button type="button" key={cc.id} onClick={() => setActiveCard('custom:' + cc.id)} className="bg-amber-50/50 border-2 border-amber-300 p-3 md:p-5 rounded-2xl md:rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-2 md:gap-3 cursor-pointer">
                 <div className="flex justify-between items-start w-full">
-                  <span className="text-4xl">{cc.card_icon || '📌'}</span>
+                  <span className="text-2xl md:text-4xl">{cc.card_icon || '📌'}</span>
                   <span className="px-3 py-1 bg-amber-200 text-amber-950 rounded-full text-xs font-black">كارت مضاف</span>
                 </div>
                 <div>
-                  <h3 className="text-lg font-black text-gray-900">{cc.card_title}</h3>
-                  <p className="text-sm text-gray-700 mt-1">{cc.description || 'سجل مضاف من الأدمن'}</p>
+                  <h3 className="text-sm md:text-lg font-black text-gray-900">{cc.card_title}</h3>
+                  <p className="hidden md:block text-sm text-gray-700 mt-1">{cc.description || 'سجل مضاف من الأدمن'}</p>
                 </div>
               </button>
             ))}
@@ -1920,7 +1923,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
     <div className="space-y-3 text-sm md:text-base">
       {renderQuickNavBar()}
 
-      <div ref={scrollBoxRef} className="max-h-[calc(100dvh-195px)] overflow-y-auto pr-1 space-y-4">
+      <div ref={scrollBoxRef} className="space-y-4">
         {renderNestedCardsSection(activeCard, selectedNestedParentKey)}
 
         {activeCard === 'service_hub' && (() => {
@@ -1977,7 +1980,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                     const Icon = card.icon;
                     const tabKey = serviceTabMap[card.id];
                     return (
-                      <button key={card.id} type="button" onClick={() => setActiveServiceCard(tabKey)} className={`${card.color} border-2 p-6 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-4 cursor-pointer`}>
+                      <button key={card.id} type="button" onClick={() => setActiveServiceCard(tabKey)} className={`${card.color} border-2 p-4 md:p-6 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-4 cursor-pointer`}>
                         <div className="flex justify-between items-start w-full">
                           <span className="p-3 bg-[#f9ecee] text-[#7a1c24] rounded-2xl flex items-center gap-1">
                             {card.emoji && <span className="text-lg">{card.emoji}</span>}
@@ -2091,7 +2094,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
               {confSubView === 'menu' && (
                 <div className="grid sm:grid-cols-3 gap-4">
                   {confMenuCards.map(mc => (
-                    <button key={mc.id} type="button" onClick={() => setConfSubView(mc.view)} className={`bg-white border-2 ${mc.color} hover:border-[#7a1c24] p-6 rounded-3xl text-right shadow-sm space-y-2 transition cursor-pointer`}>
+                    <button key={mc.id} type="button" onClick={() => setConfSubView(mc.view)} className={`bg-white border-2 ${mc.color} hover:border-[#7a1c24] p-4 md:p-6 rounded-3xl text-right shadow-sm space-y-2 transition cursor-pointer`}>
                       <span className="text-4xl block">{mc.icon}</span>
                       <h3 className="text-lg font-black text-gray-900">{mc.title}</h3>
                       <p className="text-sm text-gray-600">{mc.desc}</p>
@@ -2122,7 +2125,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                       </div>
                     </div>
 
-                    <form onSubmit={handleSaveSlot} className="bg-white p-5 rounded-3xl border space-y-3 font-bold shadow-sm">
+                    <form onSubmit={handleSaveSlot} className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-3 font-bold shadow-sm">
                       <h3 className="text-base font-black text-[#7a1c24]">{editingSlotId ? 'تعديل جلسة الاعتراف' : 'إضافة مواعيد اعتراف'}</h3>
                       <div className="grid grid-cols-2 gap-2">
                         <button type="button" onClick={() => selectPeriod('صباحية')} className={`p-3 rounded-xl border-2 flex items-center justify-center gap-1 cursor-pointer ${slotForm.period === 'صباحية' ? 'bg-amber-50 border-amber-500 text-amber-950' : 'bg-white border-gray-200'}`}><Sun size={16} /> صباحية (7-12)</button>
@@ -2211,7 +2214,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                     <input placeholder="بحث بالاسم أو التليفون..." className="flex-1 min-w-[200px] p-2 border rounded-xl text-xs" value={confessorSearchFilter} onChange={e => setConfessorSearchFilter(e.target.value)} />
                   </div>
 
-                  <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
                     {filteredConfessors.map(m => {
                       const note = spiritualNotes.find(n => n.member_id === m.id);
                       const kids = userChildren.filter(k => k.parent_user_id === m.id);
@@ -2267,8 +2270,8 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                   </div>
 
                   {showAddConfessor && (
-                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-                      <div className="bg-white rounded-3xl w-full max-w-xl p-6 space-y-3 font-bold max-h-[92dvh] overflow-y-auto">
+                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
+                      <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-xl p-4 md:p-6 space-y-3 font-bold max-h-[92dvh] overflow-y-auto">
                         <div className="flex justify-between items-center border-b pb-2"><h3 className="text-base font-black text-[#7a1c24]">إضافة معترف جديد</h3><button type="button" onClick={() => setShowAddConfessor(false)} className="p-1.5 bg-gray-100 rounded-lg"><X size={18} /></button></div>
                         <div className="grid grid-cols-2 gap-2">
                           <button type="button" onClick={() => { setAddConfOrigin('inside'); setNewConfessor({ ...emptyNewConf, is_church_member: true }); }} className={`p-3 rounded-2xl border-2 text-xs md:text-sm font-black cursor-pointer ${addConfOrigin === 'inside' ? 'bg-blue-50 border-blue-600 text-blue-950' : 'bg-white border-gray-200 text-gray-700'}`}>🏠 من داخل الكنيسة (بحث بالداتابيز)</button>
@@ -2498,7 +2501,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                 </div>
               )}
 
-              <form onSubmit={handleSavePersonal} className="bg-white p-5 rounded-3xl border space-y-3 font-bold">
+              <form onSubmit={handleSavePersonal} className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-3 font-bold">
                 <div className="grid md:grid-cols-3 gap-2.5">
                   <div>
                     <label className="block text-xs text-gray-700 mb-1">نوع المناسبة / النشاط *</label>
@@ -2591,7 +2594,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                 const remainingSum = peopleSum.reduce((sum, x) => sum + x.totalRemaining, 0);
 
                 return (
-                  <div key={p.id} className="bg-white p-5 rounded-2xl border space-y-2.5 shadow-2xs">
+                  <div key={p.id} className="bg-white p-3.5 md:p-5 rounded-2xl border space-y-2.5 shadow-2xs">
                     <div className="flex flex-wrap justify-between items-start gap-2">
                       <div className="space-y-1.5">
                         <div className="flex flex-wrap items-center gap-2">
@@ -2625,8 +2628,8 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
               })}
 
               {viewBusItem && (
-                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-                  <div className="bg-white rounded-3xl w-full max-w-4xl p-6 space-y-4 font-bold max-h-[92dvh] overflow-y-auto">
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
+                  <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-4xl p-4 md:p-6 space-y-4 font-bold max-h-[92dvh] overflow-y-auto">
                     <div className="flex justify-between items-center border-b pb-3">
                       <div>
                         <h3 className="text-lg font-black text-purple-950">🚌 إدارة الأتوبيسات والأقساط: {viewBusItem.title}</h3>
@@ -2735,7 +2738,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                           setCasesSubView(cc.view);
                         }
                       }}
-                      className={`bg-white border-2 ${cc.color} hover:border-[#7a1c24] p-6 rounded-3xl text-right shadow-sm space-y-2 transition cursor-pointer`}
+                      className={`bg-white border-2 ${cc.color} hover:border-[#7a1c24] p-4 md:p-6 rounded-3xl text-right shadow-sm space-y-2 transition cursor-pointer`}
                     >
                       <span className="text-4xl block">{cc.icon}</span>
                       <h3 className="text-lg font-black text-gray-900">{cc.title}</h3>
@@ -2751,7 +2754,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                   {!selectedCategoryName ? (
                     <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
                       {categoryNames.map(cat => (
-                        <button type="button" key={cat.id} onClick={() => setSelectedCategoryName(cat.name)} className="bg-white p-5 rounded-3xl border-2 hover:border-[#7a1c24] text-right shadow-sm space-y-1.5 cursor-pointer">
+                        <button type="button" key={cat.id} onClick={() => setSelectedCategoryName(cat.name)} className="bg-white p-3.5 md:p-5 rounded-3xl border-2 hover:border-[#7a1c24] text-right shadow-sm space-y-1.5 cursor-pointer">
                           <span className="text-3xl">{cat.icon || '📂'}</span><h3 className="text-lg font-black">{cat.name}</h3>
                           <p className="text-sm text-gray-600">{families.filter(f => f.poverty_level === cat.name).length} أسرة</p>
                         </button>
@@ -2795,7 +2798,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                   {families.filter(f => (searchCatFilter === 'all' || f.poverty_level === searchCatFilter) && (!caseSearch.trim() || JSON.stringify(f).toLowerCase().includes(caseSearch.toLowerCase()))).map(f => {
                     const atts = familyAttachments.filter(a => a.family_id === f.id);
                     return (
-                      <div key={f.id} className="bg-white p-5 rounded-3xl border space-y-2 shadow-2xs">
+                      <div key={f.id} className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-2 shadow-2xs">
                         <div className="flex flex-wrap justify-between items-start gap-2">
                           <div>
                             <span className="px-2.5 py-0.5 bg-amber-100 text-amber-950 rounded-lg text-xs font-black ml-2">#{f.case_number}</span>
@@ -2822,7 +2825,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
               {casesSubView === 'add' && (
                 <div className="space-y-4">
                   <button type="button" onClick={() => { setEditingFamId(null); setFamForm(emptyFam); setCasesSubView('menu'); }} className="px-4 py-2 bg-white border rounded-xl font-bold text-sm">← رجوع لكروت بحث الحالة</button>
-                  <form onSubmit={handleSaveFamily} className="bg-white p-5 rounded-3xl border space-y-4 font-bold">
+                  <form onSubmit={handleSaveFamily} className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-4 font-bold">
                     <h3 className="text-base font-black text-[#7a1c24]">{editingFamId ? 'تعديل ملف الأسرة' : 'إضافة ملف أسرة جديدة'}</h3>
 
                     <div className="bg-[#fbfaf7] p-3.5 rounded-2xl border space-y-2.5">
@@ -2927,8 +2930,8 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
               )}
 
               {inspectFamilyAttachments && (
-                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-                  <div className="bg-white rounded-3xl w-full max-w-2xl p-6 space-y-4 font-bold max-h-[90dvh] overflow-y-auto text-sm">
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
+                  <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-2xl p-4 md:p-6 space-y-4 font-bold max-h-[90dvh] overflow-y-auto text-sm">
                     <div className="flex justify-between items-center border-b pb-3">
                       <div><h3 className="text-base font-black text-indigo-950">📎 مرفقات أسرة: {inspectFamilyAttachments.head_name}</h3><p className="text-xs text-gray-500">بطاقة • عقد إيجار • تحاليل وأشعة • إيصالات</p></div>
                       <button type="button" onClick={() => setInspectFamilyAttachments(null)} className="p-2 bg-gray-100 rounded-xl cursor-pointer"><X size={18} /></button>
@@ -2942,7 +2945,7 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
                     </div>
                     <div className="space-y-2.5">
                       {familyAttachments.filter(a => a.family_id === inspectFamilyAttachments.id).length === 0 ? (
-                        <div className="p-6 text-center text-gray-400 border rounded-2xl text-xs">لا توجد مرفقات محفوظة لهذه الأسرة حتى الآن.</div>
+                        <div className="p-4 md:p-6 text-center text-gray-400 border rounded-2xl text-xs">لا توجد مرفقات محفوظة لهذه الأسرة حتى الآن.</div>
                       ) : familyAttachments.filter(a => a.family_id === inspectFamilyAttachments.id).map(att => (
                         <div key={att.id} className="p-3 bg-[#fbfaf7] rounded-2xl border flex flex-wrap justify-between items-center gap-2 text-xs">
                           <div>
