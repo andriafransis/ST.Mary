@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { logActivity } from '../../lib/activityLogger';
 import EventInvitationSender from './EventInvitationSender';
 import InvitationScannerModal from './InvitationScannerModal';
+import SeatMapPicker from './SeatMapPicker';
 import {
   MailPlus,
   ScanLine,
@@ -405,7 +406,7 @@ export default function PriestInvitationsTab({
 
       {editingInvite && (
         <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4 z-55">
-          <div className="bg-white rounded-3xl w-full max-w-md p-5 space-y-3 text-xs font-bold">
+          <div className="bg-white rounded-3xl w-full max-w-lg max-h-[92vh] overflow-y-auto p-5 space-y-3 text-xs font-bold">
             <div className="flex justify-between items-center border-b pb-2">
               <h3 className="font-black text-sm text-[#7a1c24]">
                 تعديل دعوة: {editingInvite.recipient_name} ({editingInvite.qr_token})
@@ -456,15 +457,14 @@ export default function PriestInvitationsTab({
                 </div>
               </div>
 
-              <div>
-                <label className="block mb-1 text-gray-700">المكان / الكرسي / التسكين</label>
-                <input
-                  placeholder="مثال: الصف الأول - كرسي 1"
-                  className="w-full p-2.5 border rounded-xl bg-[#fbfaf7]"
-                  value={editingInvite.seat_or_zone || ''}
-                  onChange={(e) => setEditingInvite({ ...editingInvite, seat_or_zone: e.target.value })}
-                />
-              </div>
+              <SeatMapPicker
+                value={editingInvite.seat_or_zone || ''}
+                onChange={(seat) => setEditingInvite({ ...editingInvite, seat_or_zone: seat })}
+                eventTitle={editingInvite.event_title}
+                eventDate={editingInvite.event_date}
+                excludeId={editingInvite.id}
+                canEditLayout={isPriestOrAdmin}
+              />
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
