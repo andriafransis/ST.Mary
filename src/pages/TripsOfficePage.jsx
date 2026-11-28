@@ -424,7 +424,7 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
   if (activeCard === 'hub') {
     return (
       <div className="space-y-4 text-xs md:text-sm" dir="rtl">
-        <div className="bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-6 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
+        <div className="app-hero bg-linear-to-r from-[#5c1319] to-[#7a1c24] text-white p-4 md:p-6 rounded-3xl shadow flex flex-wrap justify-between items-center gap-3">
           <div>
             <h2 className="text-xl font-black text-amber-200 flex items-center gap-2">
               <Bus size={24} /> رحلات الكنيسة ومكتب الرحلات العام
@@ -444,20 +444,20 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 md:gap-4">
           {canAddTrips && (
             <button
               type="button"
               onClick={() => openAddScreen('منتظمة')}
-              className="bg-amber-50 border-2 border-amber-300 p-6 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer"
+              className="bg-amber-50 border-2 border-amber-300 p-4 md:p-6 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer"
             >
               <div className="flex justify-between items-start w-full">
-                <span className="text-4xl">➕</span>
+                <span className="text-2xl md:text-4xl">➕</span>
                 <span className="px-3 py-1 bg-[#7a1c24] text-white rounded-full text-xs font-black">جديد</span>
               </div>
               <div>
-                <h3 className="text-lg font-black text-[#7a1c24]">إضافة رحلة جديدة</h3>
-                <p className="text-xs text-gray-700 mt-1">رحلة يوم واحد أو مبيت، مع تحديد المصدر والأتوبيسات والمقاعد والحسابات</p>
+                <h3 className="text-sm md:text-lg font-black text-[#7a1c24]">إضافة رحلة جديدة</h3>
+                <p className="hidden md:block text-xs text-gray-700 mt-1">رحلة يوم واحد أو مبيت، مع تحديد المصدر والأتوبيسات والمقاعد والحسابات</p>
               </div>
             </button>
           )}
@@ -469,15 +469,15 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
                 key={cat.id}
                 type="button"
                 onClick={() => setActiveCard(cat.id)}
-                className="bg-white border-2 border-gray-200 p-6 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer"
+                className="bg-white border-2 border-gray-200 p-4 md:p-6 rounded-3xl text-right shadow-sm hover:shadow-md hover:border-[#7a1c24] transition flex flex-col justify-between gap-3 cursor-pointer"
               >
                 <div className="flex justify-between items-start w-full">
-                  <span className="text-4xl">{cat.icon}</span>
+                  <span className="text-2xl md:text-4xl">{cat.icon}</span>
                   <span className="px-3 py-1 bg-[#f9ecee] text-[#7a1c24] rounded-full text-xs font-black">{count} رحلة</span>
                 </div>
                 <div>
-                  <h3 className="text-lg font-black text-gray-900">{cat.title}</h3>
-                  <p className="text-xs text-gray-600 mt-1">{cat.desc}</p>
+                  <h3 className="text-sm md:text-lg font-black text-gray-900">{cat.title}</h3>
+                  <p className="hidden md:block text-xs text-gray-600 mt-1">{cat.desc}</p>
                 </div>
               </button>
             );
@@ -493,7 +493,7 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
       <div className="space-y-4 text-xs md:text-sm" dir="rtl">
         {renderTopBack(editingId ? '✏️ تعديل الرحلة' : '➕ إضافة رحلة جديدة')}
 
-        <form onSubmit={handleSave} className="bg-white p-5 rounded-3xl border shadow-sm space-y-4 font-bold">
+        <form onSubmit={handleSave} className="bg-white p-3.5 md:p-5 rounded-3xl border shadow-sm space-y-4 font-bold">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <button
               type="button"
@@ -679,7 +679,7 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
               const srcInfo = getTripSourceInfo(t);
 
               return (
-                <div key={t.id} className="bg-white p-5 rounded-3xl border space-y-2.5 shadow-2xs">
+                <div key={t.id} className="bg-white p-3.5 md:p-5 rounded-3xl border space-y-2.5 shadow-2xs">
                   <div className="flex flex-wrap justify-between items-start gap-2">
                     <div className="space-y-1 flex-1 min-w-[260px]">
                       <div className="flex flex-wrap items-center gap-2">
@@ -758,8 +758,8 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
         )}
 
         {viewRegsTrip && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-3xl w-full max-w-2xl p-5 space-y-3 max-h-[90dvh] overflow-y-auto">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-2xl p-3.5 md:p-5 space-y-3 max-h-[90dvh] overflow-y-auto">
               <div className="flex justify-between items-center border-b pb-3">
                 <div>
                   <h3 className="text-base font-black text-[#7a1c24]">✋ المشتركين من التطبيق — {viewRegsTrip.title}</h3>
@@ -801,8 +801,8 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
         )}
 
         {viewBusTrip && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-3xl w-full max-w-3xl p-5 space-y-3 max-h-[92dvh] overflow-y-auto">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-3xl p-3.5 md:p-5 space-y-3 max-h-[92dvh] overflow-y-auto">
               <div className="flex justify-between items-center border-b pb-3">
                 <div>
                   <h3 className="text-lg font-black text-[#7a1c24]">🚌 الأتوبيسات والمقاعد — {viewBusTrip.title}</h3>
@@ -830,8 +830,8 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
         )}
 
         {viewRoomsTrip && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-3xl w-full max-w-3xl p-5 space-y-4 max-h-[92dvh] overflow-y-auto">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
+            <div className="bg-white rounded-t-3xl sm:rounded-3xl w-full max-w-3xl p-3.5 md:p-5 space-y-4 max-h-[92dvh] overflow-y-auto">
               <div className="flex justify-between items-center border-b pb-3">
                 <div>
                   <h3 className="text-lg font-black text-[#7a1c24] flex items-center gap-2"><BedDouble size={20} /> حجز الأوض والغرف — {viewRoomsTrip.title}</h3>
@@ -861,7 +861,7 @@ export default function TripsOfficePage({ currentUser, users = [] }) {
               )}
 
               {(viewRoomsTrip.rooms || []).length === 0 ? (
-                <div className="p-6 bg-gray-50 rounded-2xl border text-center text-gray-500">لم تُضف أوض لهذه الرحلة بعد.</div>
+                <div className="p-4 md:p-6 bg-gray-50 rounded-2xl border text-center text-gray-500">لم تُضف أوض لهذه الرحلة بعد.</div>
               ) : (
                 <div className="grid sm:grid-cols-2 gap-3">
                   {viewRoomsTrip.rooms.map(rm => (

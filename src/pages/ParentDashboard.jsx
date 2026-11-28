@@ -726,7 +726,7 @@ export default function ParentDashboard({
         </div>
       )}
 
-      <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-3">
+      <div className="app-hero bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base sm:text-xl font-black text-amber-200">
@@ -739,6 +739,9 @@ export default function ParentDashboard({
           <p className="text-xs text-white/85 mt-1">
             متابعة الأبناء في الكنيسة: الحضور السنوي، الالتزام، الاعتراف، العروض، وملاحظات الأب الكاهن
           </p>
+          <div className="flex flex-wrap gap-1.5 mt-2.5">
+            <span className="app-chip">👨‍👩‍👧 الأبناء المرتبطين <b>{effectiveChildrenList.length}</b></span>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 sm:flex items-center gap-2 shrink-0">
@@ -804,7 +807,7 @@ export default function ParentDashboard({
         </div>
       )}
 
-      <div className="bg-white p-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto font-black">
+      <div className="app-tabs bg-white p-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto font-black">
         {tabsList.map((tab) => (
           <button
             key={tab.id}
@@ -839,7 +842,7 @@ export default function ParentDashboard({
         </div>
       )}
 
-      <div className="max-h-[calc(100dvh-265px)] overflow-y-auto pr-1 space-y-4">
+      <div className="space-y-4">
         {activeTab === 'my_invites' && (
           <ReceivedInvitationsSection
             currentUser={parent}
@@ -880,7 +883,7 @@ export default function ParentDashboard({
             </div>
 
             {displayedParentTrips.length === 0 ? (
-              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+              <div className="p-4 md:p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
                 {tripSubTab === 'general'
                   ? 'لا توجد رحلات عامة معلنة من مكتب الرحلات حالياً.'
                   : 'لا توجد رحلات خاصة بفصول أو مراحل أبنائك حالياً.'}
@@ -942,7 +945,7 @@ export default function ParentDashboard({
         {activeTab === 'children' && (
           <>
             {effectiveChildrenList.length === 0 ? (
-              <div className="bg-amber-50/70 border border-amber-200 p-6 rounded-3xl flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-right">
+              <div className="bg-amber-50/70 border border-amber-200 p-4 md:p-6 rounded-3xl flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-right">
                 <div className="flex flex-col sm:flex-row items-center gap-3">
                   <div className="w-11 h-11 rounded-2xl bg-amber-100 text-[#7a1c24] flex items-center justify-center shrink-0">
                     <Info size={22} />
@@ -1417,7 +1420,7 @@ export default function ParentDashboard({
               <Award size={17} /> العروض والرحلات والمؤتمرات المتاحة ({rewardCampaigns.length})
             </h3>
             {rewardCampaigns.length === 0 ? (
-              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+              <div className="p-4 md:p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
                 لا توجد عروض أو رحلات مضافة حالياً.
               </div>
             ) : (
@@ -1447,7 +1450,7 @@ export default function ParentDashboard({
               <Calendar size={17} /> مواعيد القداسات والاجتماعات بالكنيسة
             </h3>
             {events.length === 0 ? (
-              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+              <div className="p-4 md:p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
                 لا توجد مواعيد مضافة حالياً.
               </div>
             ) : (
@@ -1484,7 +1487,7 @@ export default function ParentDashboard({
               <School size={17} /> الفصول والخدمات المتاحة بالكنيسة
             </h3>
             {services.length === 0 ? (
-              <div className="p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
+              <div className="p-4 md:p-6 text-center text-gray-400 bg-[#fbfaf7] rounded-2xl border border-dashed">
                 لا توجد فصول أو خدمات مسجلة حالياً.
               </div>
             ) : (
