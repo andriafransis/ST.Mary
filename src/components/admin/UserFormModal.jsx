@@ -197,6 +197,15 @@ async function resolveOrCreateStreetId({ streetName, sector }) {
   }
 }
 
+const MARITAL_CHOICES = ['أعزب', 'متزوج', 'مطلق', 'أرمل'];
+const EMPLOYMENT_CHOICES = ['يعمل', 'لا يعمل', 'طالب', 'متقاعد'];
+const normalizeMarital = (v) => {
+  const t = String(v || '').trim();
+  if (!t || t === 'single') return 'أعزب';
+  if (t === 'married' || t === 'متزوجة' || t === 'متزوجه') return 'متزوج';
+  return t;
+};
+
 export default function UserFormModal({
   isEditing = false,
   isVisitorMode = false,
@@ -301,7 +310,7 @@ export default function UserFormModal({
   const isObserverVisitor = Boolean(formData.is_site_observer) || effectiveRole === 'site_visitor';
   const isServantRoleSelected = !isObserverVisitor && SERVANT_ROLES.includes(effectiveRole);
   const isParishRole = effectiveRole === 'parish' || effectiveRole === 'parent' || Boolean(formData.is_parish);
-  const isMarried = (formData.marital_status || 'single') === 'married';
+  const isMarried = normalizeMarital(formData.marital_status) === 'متزوج';
   const isParentWithChildren =
     !isObserverVisitor &&
     (effectiveRole === 'parent' || (isMarried && Boolean(formData.is_parent_guardian)));
@@ -534,7 +543,7 @@ export default function UserFormModal({
       ? 'member'
       : (formData.role === 'parish' ? 'member' : (formData.role || 'member'));
 
-    const marriedFlag = (formData.marital_status || 'single') === 'married';
+    const marriedFlag = normalizeMarital(formData.marital_status) === 'متزوج';
     const guardianActive = !observer && (formData.role === 'parent' || (marriedFlag && Boolean(formData.is_parent_guardian)));
     const resolvedGuardianType = guardianActive
       ? (formData.guardian_type === 'mother' || formData.gender === 'أنثى' ? 'mother' : 'father')
@@ -589,7 +598,12 @@ export default function UserFormModal({
       requested_role: formData.role || resolvedRole,
       status: forVisitor ? 'pending' : (formData.status || 'active'),
       member_status: observer ? 'site_observer' : (formData.member_status || 'active'),
-      marital_status: marriedFlag ? 'married' : 'single',
+      marital_status: normalizeMarital(formData.marital_status),
+      ...(!forVisitor ? {
+        employment_status: formData.employment_status || '',
+        has_dependents: Boolean(formData.has_dependents),
+        dependents_count: formData.has_dependents ? (Number(formData.dependents_count) || 0) : 0
+      } : {}),
       is_parent_guardian: guardianActive,
       is_parish: observer ? false : (formData.role === 'parish' || guardianActive || resolvedEngagement === 'parish_only' || Boolean(formData.is_parish)),
       is_site_observer: observer,
@@ -952,22 +966,22 @@ export default function UserFormModal({
               <label className="block mb-1">الحالة الاجتماعية *</label>
               <select
                 className="w-full p-2.5 border rounded-xl bg-white"
-                value={formData.marital_status || 'single'}
+                value={normalizeMarital(formData.marital_status)}
                 onChange={e => {
                   const nextMarital = e.target.value;
+                  const nextIsMarried = nextMarital === 'متزوج';
                   setFormData({
                     ...formData,
                     marital_status: nextMarital,
-                    is_parent_guardian: nextMarital === 'married' ? Boolean(formData.is_parent_guardian) : false,
+                    is_parent_guardian: nextIsMarried ? Boolean(formData.is_parent_guardian) : false,
                     guardian_type:
-                      nextMarital === 'married' && (formData.role === 'parent' || formData.is_parent_guardian)
+                      nextIsMarried && (formData.role === 'parent' || formData.is_parent_guardian)
                         ? (formData.guardian_type || (formData.gender === 'أنثى' ? 'mother' : 'father'))
                         : (formData.role === 'parent' ? (formData.gender === 'أنثى' ? 'mother' : 'father') : '')
                   });
                 }}
               >
-                <option value="single">أعزب</option>
-                <option value="married">متزوج</option>
+                {MARITAL_CHOICES.map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
           </div>
@@ -1415,6 +1429,30 @@ export default function UserFormModal({
                 onChange={e => setFormData({ ...formData, job_title: e.target.value })}
               />
             </div>
+            {!isVisitorMode && (
+              <>
+                <div>
+                  <label className="block mb-1">حالة العمل</label>
+                  <select
+                    className="w-full p-2.5 border rounded-xl bg-white"
+                    value={formData.employment_status || ''}
+                    onChange={e => setFormData({ ...formData, employment_status: e.target.value })}
+                  >
+                    <option value="">— غير محدد —</option>
+                    {EMPLOYMENT_CHOICES.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+                <div className="flex items-end gap-2">
+                  <label className="flex items-center gap-2 p-2.5 border rounded-xl bg-white cursor-pointer flex-1">
+                    <input type="checkbox" checked={Boolean(formData.has_dependents)} onChange={e => setFormData({ ...formData, has_dependents: e.target.checked })} className="w-4 h-4 accent-[#7a1c24]" />
+                    <span>يعول أسرة</span>
+                  </label>
+                  {formData.has_dependents && (
+                    <input type="number" min="0" className="w-20 p-2.5 border rounded-xl bg-white" placeholder="العدد" value={formData.dependents_count || ''} onChange={e => setFormData({ ...formData, dependents_count: e.target.value })} />
+                  )}
+                </div>
+              </>
+            )}
           </div>
 
           {/* المنطقة والشارع وتفاصيل السكن — بنفس تخطيط الصورة */}
