@@ -7,6 +7,8 @@ import {
   CARDS_UPDATED_EVENT
 } from '../components/NestedCardsBuilder';
 import WhatsAppComposerModal, { FALLBACK_WA_TEMPLATES, formatWaMessage } from '../components/priest/WhatsAppComposerModal';
+import PriestTodayPanel from '../components/priest/PriestTodayPanel';
+import PriestQuickSearch from '../components/priest/PriestQuickSearch';
 import BellNotificationsPanel from '../components/priest/BellNotificationsPanel';
 import ConfessorProfileModal from '../components/priest/ConfessorProfileModal';
 import PriestFamilyVisitation from '../components/priest/PriestFamilyVisitation';
@@ -1820,6 +1822,18 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
         </div>
 
         <div ref={scrollBoxRef} className="space-y-4">
+          <PriestQuickSearch
+            users={localUsers}
+            confessorIds={new Set(myConfessors.map(m => m.id))}
+            onPick={(m) => setSelectedConfessor(m)}
+          />
+          <PriestTodayPanel items={[
+            { key: 'conf', icon: '🙏', value: confessionSlots.filter(sl => sl.slot_date === todayISO).length, label: 'جلسات اعتراف النهاردة', onClick: () => { setSelectedNestedParentKey(null); setActiveCard('confessions'); setConfSubView('menu'); } },
+            { key: 'bday', icon: '🎂', value: weekBirthdays.length, label: 'أعياد ميلاد الأسبوع', onClick: () => setBdayTab('week') },
+            { key: 'inv', icon: '💌', value: pendingInvitesCount, label: 'دعوات بانتظار الرد', alert: pendingInvitesCount > 0, onClick: () => { setSelectedNestedParentKey(null); setActiveCard('personal'); } },
+            { key: 'req', icon: '📩', value: pendingHiddenReqsCount, label: 'طلبات الأسر المستترة', alert: pendingHiddenReqsCount > 0, onClick: () => { setSelectedNestedParentKey(null); setActiveCard('cases'); } },
+            totalJosephAlerts > 0 ? { key: 'jos', icon: '🕊️', value: totalJosephAlerts, label: 'يوسف الرامي بحاجة للمتابعة', alert: true, onClick: () => { setSelectedNestedParentKey(null); setActiveCard('joseph_arimathea'); } } : null
+          ]} />
           <div className="bg-linear-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-3xl p-4 shadow-sm space-y-3">
             <div className="flex flex-wrap justify-between items-center gap-2">
               <div className="flex items-center gap-2">
