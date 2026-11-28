@@ -290,8 +290,96 @@ export const DEFAULT_THEME = {
   show_mary: true,
   show_edu_btn: true,
   show_joseph_btn: true,
-  sticky_header: true
+  sticky_header: true,
+  show_services: true,    // قسم الخدمات الإلكترونية (المركز التعليمي / يوسف الرامي / الدخول)
+  primary: '',            // لون أساسي مخصص (فاضي = الألوان الجاهزة)
+  accent: '',             // لون التمييز للأزرار (فاضي = الذهبي)
+  mary_shape: 'arch',     // arch | circle | rounded
+  mary_caption: '✝ أم النور القديسة مريم'
 };
+
+export const isHexColor = (v) => /^#[0-9a-f]{6}$/i.test(String(v || ''));
+
+export const MARY_SHAPES = [
+  { id: 'arch', label: 'قوس (عقد)', cls: 'rounded-t-[999px] rounded-b-[2rem]', ring: 'rounded-t-[999px] rounded-b-[2.5rem]' },
+  { id: 'circle', label: 'دائرة', cls: 'rounded-full', ring: 'rounded-full' },
+  { id: 'rounded', label: 'مستطيل مستدير', cls: 'rounded-3xl', ring: 'rounded-[2rem]' }
+];
+
+// تدرّج الواجهة من لون أساسي واحد
+export const primaryGradient = (primary) =>
+  `linear-gradient(135deg, color-mix(in srgb, ${primary} 55%, black), ${primary} 55%, color-mix(in srgb, ${primary} 30%, black))`;
+
+const escCls = (c) => c.replace(/([^a-zA-Z0-9_-])/g, '\\$1');
+const mix = (v, pct) => `color-mix(in srgb, ${v} ${pct}%, transparent)`;
+
+// قواعد تغيير اللون الأساسي ولون التمييز داخل الصفحة العامة فقط
+const PRIMARY_RULES = [
+  ['bg-[#7a1c24]', 'background-color', 'var(--pp-p)'],
+  ['bg-[#7a1c24]/10', 'background-color', mix('var(--pp-p)', 10)],
+  ['bg-[#2b0910]', 'background-color', 'var(--pp-pddd)'],
+  ['bg-[#f9ecee]', 'background-color', 'var(--pp-tint)'],
+  ['border-[#7a1c24]/15', 'border-color', mix('var(--pp-p)', 15)],
+  ['border-[#7a1c24]/25', 'border-color', mix('var(--pp-p)', 25)],
+  ['border-[#7a1c24]/30', 'border-color', mix('var(--pp-p)', 30)],
+  ['hover:bg-[#5c1319]', 'background-color', 'var(--pp-pd)'],
+  ['hover:border-[#7a1c24]', 'border-color', 'var(--pp-p)'],
+  ['hover:border-[#7a1c24]/40', 'border-color', mix('var(--pp-p)', 40)],
+  ['text-[#7a1c24]', 'color', 'var(--pp-p)'],
+  ['text-[#5c1319]', 'color', 'var(--pp-pd)'],
+  ['text-[#4a0e13]', 'color', 'var(--pp-pdd)'],
+  ['from-[#7a1c24]', '--tw-gradient-from', 'var(--pp-p)'],
+  ['to-[#32060a]', '--tw-gradient-to', 'var(--pp-pddd)']
+];
+const ACCENT_RULES = [
+  ['bg-amber-400', 'background-color', 'var(--pp-a)'],
+  ['hover:bg-amber-300', 'background-color', 'var(--pp-al)'],
+  ['bg-amber-300/10', 'background-color', mix('var(--pp-al)', 10)],
+  ['bg-amber-200/15', 'background-color', mix('var(--pp-all)', 15)],
+  ['border-amber-300', 'border-color', 'var(--pp-al)'],
+  ['border-amber-300/30', 'border-color', mix('var(--pp-al)', 30)],
+  ['border-amber-300/40', 'border-color', mix('var(--pp-al)', 40)],
+  ['border-amber-300/50', 'border-color', mix('var(--pp-al)', 50)],
+  ['border-amber-300/80', 'border-color', mix('var(--pp-al)', 80)],
+  ['text-amber-200', 'color', 'var(--pp-all)'],
+  ['text-amber-300', 'color', 'var(--pp-al)'],
+  ['text-amber-300/50', 'color', mix('var(--pp-al)', 50)],
+  ['text-amber-400/60', 'color', mix('var(--pp-a)', 60)],
+  ['ring-amber-300', '--tw-ring-color', 'var(--pp-al)']
+];
+
+const ruleToCss = ([cls, prop, val]) => {
+  const isHover = cls.startsWith('hover:');
+  return `.pp-root .${escCls(cls)}${isHover ? ':hover' : ''}{${prop}:${val} !important}`;
+};
+
+// CSS يتحقن في الصفحة العامة بناءً على الألوان المخصصة (فاضي لو مفيش تخصيص)
+export function buildThemeCss(theme = {}) {
+  let css = '';
+  const vars = [];
+  if (isHexColor(theme.primary)) {
+    const p = theme.primary;
+    vars.push(
+      `--pp-p:${p}`,
+      `--pp-pd:color-mix(in srgb, ${p} 78%, black)`,
+      `--pp-pdd:color-mix(in srgb, ${p} 55%, black)`,
+      `--pp-pddd:color-mix(in srgb, ${p} 30%, black)`,
+      `--pp-tint:color-mix(in srgb, ${p} 8%, white)`
+    );
+    css += PRIMARY_RULES.map(ruleToCss).join('\n');
+    css += `\n.pp-root .pp-hdr{background-image:${primaryGradient(p)} !important}`;
+  }
+  if (isHexColor(theme.accent)) {
+    const a = theme.accent;
+    vars.push(
+      `--pp-a:${a}`,
+      `--pp-al:color-mix(in srgb, ${a} 70%, white)`,
+      `--pp-all:color-mix(in srgb, ${a} 45%, white)`
+    );
+    css += '\n' + ACCENT_RULES.map(ruleToCss).join('\n');
+  }
+  return vars.length ? `.pp-root{${vars.join(';')}}\n${css}` : '';
+}
 
 export const HEADER_PRESETS = [
   { id: 'burgundy', label: 'عنابي كلاسيكي', value: 'from-[#5c1319] via-[#7a1c24] to-[#32060a]', swatch: '#7a1c24' },
@@ -328,6 +416,47 @@ export function readSections(items = []) {
       cfgRow: cfg || null
     };
   }).sort((a, b) => a.order - b.order);
+}
+
+// العناوين المنفصلة للقداسات والرحلات (زي الصفحة القديمة)
+export const SUB_SECTION_DEFS = [
+  { key: 'masses', defaultTitle: 'مواعيد القداسات والصلوات', navTitle: 'القداسات', icon: '⛪' },
+  { key: 'trips', defaultTitle: 'مكتب الرحلات والمؤتمرات', navTitle: 'الرحلات', icon: '🚌' }
+];
+
+export function readSubSections(items = []) {
+  const rows = items.filter(i => i.kind === 'section_config');
+  return SUB_SECTION_DEFS.map(def => {
+    const cfg = rows.find(r => r.title === def.key);
+    return {
+      ...def,
+      title: (cfg?.body || '').trim() || def.defaultTitle,
+      hidden: cfg?.location === 'hidden',
+      cfgRow: cfg || null
+    };
+  });
+}
+
+export async function saveSubSections(supabase, subs) {
+  const { data: existing, error: readErr } = await supabase
+    .from(TABLE).select('id,title').eq('kind', 'section_config');
+  if (readErr) return { error: readErr };
+  for (let i = 0; i < subs.length; i += 1) {
+    const s = subs[i];
+    const payload = {
+      kind: 'section_config',
+      title: s.key,
+      body: (s.title || '').trim() || s.defaultTitle,
+      location: s.hidden ? 'hidden' : 'visible',
+      sort_order: 100 + i
+    };
+    const row = (existing || []).find(r => r.title === s.key);
+    const res = row
+      ? await supabase.from(TABLE).update(payload).eq('id', row.id)
+      : await supabase.from(TABLE).insert([payload]);
+    if (res.error) return { error: res.error };
+  }
+  return { error: null };
 }
 
 // حفظ الأقسام كلها دفعة واحدة بدون ما نكرر السجلات (بنقرأ الموجود الأول)
