@@ -4,7 +4,7 @@ import { logActivity } from '../../lib/activityLogger';
 import { canSendChurchInvitations } from '../../lib/permissions';
 import {
   MailPlus, Calendar, MapPin, Clock, Trash2,
-  CheckCircle2, XCircle, Hourglass, X, Lock
+  CheckCircle2, XCircle, Hourglass, X, Lock, Armchair
 } from 'lucide-react';
 
 const INVITATION_EVENT_TYPES = [
@@ -16,6 +16,15 @@ const INVITATION_EVENT_TYPES = [
   'افتقاد / مناولة منزلية 🕊️',
   'صلاة أربعين / ذكرى سنوية 🕯️',
   'مناسبة خاصة أخرى 📅'
+];
+
+const QUICK_SEATS = [
+  'الصف الأول - كرسي 1',
+  'الصف الأول - كرسي 2',
+  'الصف الأول - كرسي 3',
+  'الصف الأول - كرسي 4',
+  'الصف الثاني - كرسي 5',
+  'الصف الثاني - كرسي 6'
 ];
 
 export default function PriestInvitationModal({
@@ -44,6 +53,7 @@ export default function PriestInvitationModal({
     event_date: todayISO,
     event_time: '',
     location: currentUser?.address || '',
+    seat_or_zone: '',
     sender_phone: currentUser?.phone || '',
     notes: ''
   });
@@ -113,6 +123,7 @@ export default function PriestInvitationModal({
         event_date: form.event_date,
         event_time: form.event_time.trim(),
         location: form.location.trim(),
+        seat_or_zone: form.seat_or_zone.trim(),
         notes: form.notes.trim(),
         status: 'قيد الانتظار'
       };
@@ -135,7 +146,9 @@ export default function PriestInvitationModal({
           await supabase.from('church_notifications').insert([{
             type: 'priest_invitation',
             title: `💌 دعوة جديدة لـ (${data.event_type})`,
-            message: `من ${roleBadge}: ${data.sender_name} • ${data.title} • يوم ${data.event_date}`,
+            message: `من ${roleBadge}: ${data.sender_name} • ${data.title}${
+              data.seat_or_zone ? ` • ${data.seat_or_zone}` : ''
+            } • يوم ${data.event_date}`,
             is_read: false
           }]);
         } catch {
@@ -154,6 +167,7 @@ export default function PriestInvitationModal({
           ...prev,
           title: '',
           event_time: '',
+          seat_or_zone: '',
           notes: ''
         }));
         alert('تم إرسال الدعوة للأب الكاهن بنجاح ✅');
@@ -308,6 +322,34 @@ export default function PriestInvitationModal({
             </div>
           </div>
 
+          <div className="bg-[#fbfaf7] border rounded-2xl p-3 space-y-2">
+            <label className="block text-[11px] text-gray-700 font-black">
+              🪑 الكرسي أو مكان الجلوس المفضل:
+            </label>
+            <input
+              placeholder="مثال: الصف الأول - كرسي 1"
+              className="w-full p-2 border rounded-xl bg-white"
+              value={form.seat_or_zone}
+              onChange={e => setForm({ ...form, seat_or_zone: e.target.value })}
+            />
+            <div className="flex flex-wrap gap-1.5">
+              {QUICK_SEATS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setForm({ ...form, seat_or_zone: s })}
+                  className={`px-2.5 py-1 rounded-xl border text-[11px] inline-flex items-center gap-1 cursor-pointer ${
+                    form.seat_or_zone === s
+                      ? 'bg-[#7a1c24] text-white border-[#7a1c24]'
+                      : 'bg-white text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  <Armchair size={12} /> {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <textarea
             rows={2}
             placeholder="أي تفاصيل أو ملاحظات إضافية لأبونا..."
@@ -375,6 +417,11 @@ export default function PriestInvitationModal({
                     <span className="inline-flex items-center gap-1"><Calendar size={12} /> {inv.event_date}</span>
                     {inv.event_time && <span className="inline-flex items-center gap-1"><Clock size={12} /> {inv.event_time}</span>}
                     {inv.location && <span className="inline-flex items-center gap-1"><MapPin size={12} /> {inv.location}</span>}
+                    {inv.seat_or_zone && (
+                      <span className="inline-flex items-center gap-1 text-[#7a1c24] font-bold">
+                        <Armchair size={12} /> {inv.seat_or_zone}
+                      </span>
+                    )}
                   </div>
                   {inv.priest_reply && (
                     <p className="p-2 bg-white border rounded-xl text-[#7a1c24] font-bold">
