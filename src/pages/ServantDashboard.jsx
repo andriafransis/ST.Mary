@@ -1589,13 +1589,18 @@ export default function ServantDashboard({
 
       <BirthdayBanner birthdays={scopeBirthdays} />
 
-      <div className="bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-3">
+      <div className="app-hero bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white p-4 sm:p-5 rounded-3xl shadow-md flex flex-col lg:flex-row justify-between lg:items-center gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base sm:text-xl font-black text-amber-200">لوحة الخادم — {servant?.full_name}</h2>
             <span className="px-2.5 py-0.5 rounded-full bg-white/15 text-amber-100 text-[11px] font-black">
               {selectedScope}
             </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5 mt-2.5">
+            <span className="app-chip">👥 المخدومين <b>{scopeMembers.length}</b></span>
+            <span className="app-chip">📞 يحتاجون افتقاد <b>{Array.isArray(followUpMembers) ? followUpMembers.length : 0}</b></span>
+            <span className="app-chip">⏱ فترة السماح <b>{graceMinutes}</b> د</span>
           </div>
           <p className="text-xs text-white/85 mt-1">
             متابعة الحضور، الانصراف المبكر، فترة السماح ({graceMinutes} د)، الملاحظات، والافتقاد • المخدومين: <strong>{scopeMembers.length}</strong>
@@ -2001,7 +2006,7 @@ export default function ServantDashboard({
         </div>
       </div>
 
-      <div className="bg-white p-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto font-black">
+      <div className="app-tabs bg-white p-2 rounded-2xl border shadow-2xs flex items-center gap-1.5 overflow-x-auto font-black">
         {tabsList.map(tab => (
           <button
             key={tab.id}

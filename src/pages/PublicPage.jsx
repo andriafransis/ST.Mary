@@ -1235,7 +1235,7 @@ export default function PublicPage({
               <div aria-hidden className={`absolute -inset-3 ${maryShape.ring} border border-amber-300/40`} />
               <div className={`relative ${maryShape.id === 'circle' ? 'w-60 h-60 md:w-72 md:h-72' : 'w-56 h-72 md:w-64 md:h-80'} ${maryShape.cls} overflow-hidden border-2 border-amber-300/80 shadow-2xl bg-[#2b0910] flex items-center justify-center`}>
                 {activeMaryUrl ? (
-                  <img src={activeMaryUrl} alt="السيدة العذراء مريم" className="w-full h-full object-cover" />
+                  <img src={activeMaryUrl} alt="السيدة العذراء مريم" className="absolute inset-0 block" style={{ width: '100%', height: '100%', maxWidth: 'none', objectFit: 'cover', objectPosition: 'center top' }} />
                 ) : (
                   <div className="text-center text-amber-100 p-4">
                     <div className="w-20 h-20 mx-auto rounded-full border-2 border-amber-300/80 bg-amber-200/15 flex items-center justify-center text-5xl mb-2">🕊️</div>
@@ -1359,17 +1359,17 @@ export default function PublicPage({
         )}
 
         {(() => {
-          const sectionCards = navItems.map(n => ({
+          const sectionCards = theme.show_section_cards === false ? [] : navItems.map(n => ({
             key: n.anchor, icon: n.icon || '📌', title: n.full || n.label, hint: 'اضغط للانتقال للقسم',
             onClick: () => goTo(n.anchor),
             cls: n.tone === 'gold' ? 'from-amber-500 to-amber-700' : 'from-[#7a1c24] to-[#5c1319]'
           }));
           const services = [
             ...sectionCards,
-            onOpenEdu && theme.show_edu_btn !== false && { key: 'edu', icon: '🎓', title: 'المركز التعليمي', hint: 'الدروس والمراحل والمواد والتسجيل', onClick: onOpenEdu, cls: 'from-indigo-600 to-indigo-800' },
-            onOpenJoseph && theme.show_joseph_btn !== false && { key: 'joseph', icon: '🕊️', title: 'خدمة يوسف الرامي', hint: 'خدمة الراقدين والجنازات', onClick: onOpenJoseph, cls: 'from-slate-700 to-slate-900' },
-            !isLoggedIn && { key: 'register', icon: '📝', title: 'تسجيل جديد', hint: 'سجّل بياناتك كمخدوم أو ولي أمر', onClick: openRegister, cls: 'from-sky-600 to-sky-800' },
-            !isLoggedIn && { key: 'login', icon: '👤', title: 'دخول المنظومة', hint: 'للخدام والمخدومين وأولياء الأمور', onClick: onOpenLogin, cls: 'from-emerald-600 to-emerald-800' },
+            onOpenEdu && theme.show_edu_btn !== false && { key: 'edu', icon: '🎓', title: theme.label_edu || 'المركز التعليمي', hint: 'الدروس والمراحل والمواد والتسجيل', onClick: onOpenEdu, cls: 'from-indigo-600 to-indigo-800' },
+            onOpenJoseph && theme.show_joseph_btn !== false && { key: 'joseph', icon: '🕊️', title: theme.label_joseph || 'خدمة يوسف الرامي', hint: 'خدمة الراقدين والجنازات', onClick: onOpenJoseph, cls: 'from-slate-700 to-slate-900' },
+            !isLoggedIn && theme.show_register_card !== false && { key: 'register', icon: '📝', title: theme.label_register || 'تسجيل جديد', hint: 'سجّل بياناتك كمخدوم أو ولي أمر', onClick: openRegister, cls: 'from-sky-600 to-sky-800' },
+            !isLoggedIn && theme.show_login_card !== false && { key: 'login', icon: '👤', title: theme.label_login || 'دخول المنظومة', hint: 'للخدام والمخدومين وأولياء الأمور', onClick: onOpenLogin, cls: 'from-emerald-600 to-emerald-800' },
             isLoggedIn && onBackToApp && { key: 'app', icon: '🏠', title: 'العودة لحسابي', hint: 'لوحتك الشخصية والخدمات', onClick: onBackToApp, cls: 'from-emerald-600 to-emerald-800' }
           ].filter(Boolean);
           if (theme.show_services === false || services.length === 0) return null;
