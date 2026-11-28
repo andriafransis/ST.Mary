@@ -1571,7 +1571,7 @@ function AppInner() {
           )}
         </header>
 
-        <main className="flex-1 w-full p-3 sm:p-5 md:p-6 max-w-6xl mx-auto">
+        <main className="screen-root flex-1 w-full p-3 sm:p-5 md:p-6 max-w-6xl mx-auto">
           {extraScreen === 'edu_center' && (
             <EducationalCenterManager currentUser={currentUser} todayISO={todayISO} />
           )}

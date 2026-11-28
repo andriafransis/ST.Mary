@@ -100,3 +100,66 @@ body:has(.fixed.inset-0) { overflow: hidden; }
   body:has(.fixed.inset-0) { overflow: visible !important; }
   #boot-splash { display: none; }
 }
+
+
+/* ═════════ تصميم الشاشات الداخلية (خادم / مخدوم / كاهن / ولي أمر / أدمن) ═════════ */
+.app-hero {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  box-shadow: 0 14px 34px -14px rgba(92, 19, 25, .6), inset 0 1px 0 rgba(255, 255, 255, .14);
+}
+.app-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle at 12% -10%, rgba(255, 255, 255, .18), transparent 46%),
+    radial-gradient(circle at 100% 120%, rgba(200, 150, 42, .22), transparent 42%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Cpath d='M32 18v28M23 28h18' stroke='%23ffffff' stroke-opacity='.07' stroke-width='2' stroke-linecap='round' fill='none'/%3E%3C/svg%3E");
+}
+.app-chip {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .3rem .7rem; border-radius: 999px;
+  background: rgba(255, 255, 255, .13); border: 1px solid rgba(255, 255, 255, .2);
+  color: #fde9b0; font-weight: 900; font-size: 11px; backdrop-filter: blur(4px);
+}
+.app-chip b { color: #fff; font-size: 13px; }
+
+.app-tabs {
+  position: sticky; top: 3.6rem; z-index: 20;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none; -ms-overflow-style: none;
+  background: rgba(255, 255, 255, .92) !important;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 18px -12px rgba(20, 20, 30, .35);
+}
+.app-tabs::-webkit-scrollbar { display: none; }
+.app-tabs > button { scroll-snap-align: center; min-height: 40px; }
+
+.screen-root :is(.rounded-2xl, .rounded-3xl).bg-white {
+  box-shadow: 0 1px 2px rgba(20, 20, 30, .04), 0 8px 20px -12px rgba(20, 20, 30, .2);
+  border-color: rgba(20, 20, 30, .07);
+}
+.screen-root :is(input, select, textarea) { transition: border-color .15s, box-shadow .15s, background-color .15s; }
+.screen-root :is(input, select, textarea):focus {
+  outline: none; border-color: #7a1c24;
+  box-shadow: 0 0 0 3px rgba(122, 28, 36, .13);
+}
+.screen-root button { transition: transform .12s ease, background-color .15s ease, box-shadow .15s ease, opacity .15s ease; }
+.screen-root button:not(:disabled):active { transform: scale(.97); }
+@media (hover: hover) {
+  .screen-root :is(.rounded-2xl, .rounded-3xl).bg-white.hover\:shadow-md:hover { transform: translateY(-1px); }
+}
+.screen-root table { border-collapse: separate; border-spacing: 0; }
+.screen-root thead th { position: sticky; top: 0; z-index: 1; background: #fbf6f6; }
+.screen-root tbody tr:nth-child(even) td { background: rgba(250, 247, 242, .6); }
+@media (max-width: 640px) {
+  .app-hero h2 { line-height: 1.35; }
+  .screen-root .text-xs { font-size: 12.5px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .screen-root button { transition: none; }
+}
