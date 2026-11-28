@@ -1377,17 +1377,31 @@ export default function PublicPage({
             <section id="sec-services" aria-label="الخدمات الإلكترونية" className="scroll-mt-32">
               <Reveal>
                 <SectionHeader icon="🧭" title="الخدمات الإلكترونية" count={services.length} />
-                <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 md:gap-4">
-                  {services.map(sv => (
-                    <button key={sv.key} type="button" onClick={sv.onClick} className={`group p-3.5 sm:p-5 rounded-3xl text-white bg-linear-to-br ${sv.cls} shadow-lg hover:shadow-xl hover:-translate-y-1 transition cursor-pointer flex flex-col sm:flex-row items-center sm:items-center gap-2.5 sm:gap-4 text-center sm:text-right`}>
-                      <span className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-white/15 border border-white/25 flex items-center justify-center text-3xl shrink-0 group-hover:scale-110 transition">{sv.icon}</span>
-                      <span className="min-w-0">
-                        <strong className="block text-[13px] sm:text-base font-black leading-snug">{sv.title}</strong>
-                        <span className="hidden sm:block text-xs text-white/80 mt-0.5 leading-5">{sv.hint}</span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
+                {(() => {
+                  const top = services.filter(sv => ['register', 'login', 'app'].includes(sv.key));
+                  const rest = services.filter(sv => !['register', 'login', 'app'].includes(sv.key));
+                  return (
+                    <div className="space-y-2.5">
+                      {top.length > 0 && (
+                        <div className={`grid gap-2 md:gap-3 ${top.length >= 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                          {top.map(sv => (
+                            <button key={sv.key} type="button" onClick={sv.onClick} className={`group px-3 py-3 rounded-2xl text-white bg-linear-to-br ${sv.cls} shadow-md hover:shadow-lg active:scale-[.98] transition cursor-pointer flex items-center justify-center gap-2 font-black text-sm`}>
+                              <span className="text-xl" aria-hidden>{sv.icon}</span>{sv.title}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+                        {rest.map(sv => (
+                          <button key={sv.key} type="button" onClick={sv.onClick} className={`group px-1.5 py-2.5 rounded-2xl text-white bg-linear-to-br ${sv.cls} shadow hover:shadow-md hover:-translate-y-0.5 active:scale-[.97] transition cursor-pointer flex flex-col items-center justify-center gap-1 text-center min-h-[4.5rem]`}>
+                            <span className="text-xl leading-none" aria-hidden>{sv.icon}</span>
+                            <strong className="block text-[10.5px] sm:text-xs font-black leading-tight">{sv.title}</strong>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
               </Reveal>
             </section>
           );

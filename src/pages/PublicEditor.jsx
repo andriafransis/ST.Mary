@@ -758,7 +758,20 @@ export default function PublicEditor({ onViewPublic, focus = null, onFocusConsum
             <Toggle checked={themeDraft.show_services !== false} onChange={v => setThemeDraft({ ...themeDraft, show_services: v })} label="قسم الخدمات الإلكترونية" hint="كروت المركز التعليمي ويوسف الرامي والدخول" />
             <Toggle checked={themeDraft.show_edu_btn !== false} onChange={v => setThemeDraft({ ...themeDraft, show_edu_btn: v })} label="زر المركز التعليمي" />
             <Toggle checked={themeDraft.show_joseph_btn !== false} onChange={v => setThemeDraft({ ...themeDraft, show_joseph_btn: v })} label="زر خدمة يوسف الرامي" />
+            <Toggle checked={themeDraft.show_register_card !== false} onChange={v => setThemeDraft({ ...themeDraft, show_register_card: v })} label="كارت تسجيل جديد" />
+            <Toggle checked={themeDraft.show_login_card !== false} onChange={v => setThemeDraft({ ...themeDraft, show_login_card: v })} label="كارت دخول المنظومة" />
+            <Toggle checked={themeDraft.show_section_cards !== false} onChange={v => setThemeDraft({ ...themeDraft, show_section_cards: v })} label="كروت الأقسام داخل الخدمات" hint="كلمة أبونا، الأخبار، القداسات، الرحلات…" />
+            <Toggle checked={themeDraft.show_nav === true} onChange={v => setThemeDraft({ ...themeDraft, show_nav: v })} label="شريط أزرار الأقسام (ديسكتوب)" />
             <Toggle checked={themeDraft.sticky_header !== false} onChange={v => setThemeDraft({ ...themeDraft, sticky_header: v })} label="تثبيت الشريط العلوي أثناء التمرير" />
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-2.5">
+            {[['label_register', 'تسجيل جديد'], ['label_login', 'دخول المنظومة'], ['label_edu', 'المركز التعليمي'], ['label_joseph', 'خدمة يوسف الرامي']].map(([k, ph]) => (
+              <label key={k} className="space-y-1 block">
+                <span className="text-[11px] font-black text-gray-600">اسم كارت: {ph}</span>
+                <input value={themeDraft[k] ?? ''} placeholder={ph} onChange={e => setThemeDraft({ ...themeDraft, [k]: e.target.value })} maxLength={40} className="w-full p-2.5 border rounded-xl bg-white text-xs font-bold" />
+              </label>
+            ))}
           </div>
 
           <div className="pp-root rounded-2xl overflow-hidden border" style={{ backgroundColor: themeDraft.pageBg || '#f6f4ef' }}>

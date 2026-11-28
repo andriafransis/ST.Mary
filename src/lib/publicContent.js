@@ -291,6 +291,14 @@ export const DEFAULT_THEME = {
   show_edu_btn: true,
   show_joseph_btn: true,
   sticky_header: true,
+  show_register_card: true,
+  show_login_card: true,
+  show_section_cards: true, // كروت الأقسام داخل الخدمات الإلكترونية
+  show_nav: false,          // شريط الأزرار الصغير على الديسكتوب
+  label_edu: '',
+  label_joseph: '',
+  label_register: '',
+  label_login: '',
   show_services: true,    // قسم الخدمات الإلكترونية (المركز التعليمي / يوسف الرامي / الدخول)
   primary: '',            // لون أساسي مخصص (فاضي = الألوان الجاهزة)
   accent: '',             // لون التمييز للأزرار (فاضي = الذهبي)
