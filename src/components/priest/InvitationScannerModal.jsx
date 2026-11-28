@@ -62,24 +62,56 @@ function playFeedbackTone(kind = 'success', enabled = true) {
   if (!enabled) return;
   try {
     if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-      navigator.vibrate(kind === 'success' ? [80] : [120, 60, 120]);
+      navigator.vibrate(kind === 'success' ? [70] : [110, 50, 110]);
     }
+
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtx) return;
+
     const ctx = new AudioCtx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = kind === 'success' ? 'sine' : 'triangle';
-    osc.frequency.value = kind === 'success' ? 880 : 320;
-    gain.gain.setValueAtTime(0.14, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.19);
+    if (ctx.state === 'suspended' && typeof ctx.resume === 'function') {
+      ctx.resume().catch(() => {});
+    }
+
+    const now = ctx.currentTime;
+
+    if (kind === 'success') {
+      // نغمة "تن" واضحة وسريعة لتأكيد التقاط الـ QR وتسجيله
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1180, now);
+      osc.frequency.exponentialRampToValueAtTime(1480, now + 0.04);
+      osc.frequency.exponentialRampToValueAtTime(1040, now + 0.16);
+
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.28, now + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.19);
+    } else {
+      // نغمة تنبيه في حالة تحذير أو عدم تطابق
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(420, now);
+      osc.frequency.setValueAtTime(310, now + 0.11);
+
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.25);
+    }
+
     setTimeout(() => {
       ctx.close().catch(() => {});
-    }, 250);
+    }, 320);
   } catch {
     // تجاهل في حال منع الصوت من المتصفح
   }
@@ -257,7 +289,6 @@ export default function InvitationScannerModal({
     const inst = scannerRef.current;
     scannerRef.current = null;
 
-    // إيقاف أي MediaStream tracks عالقة على عنصر الفيديو فوراً
     try {
       const containerEl = document.getElementById('church-qr-scanner-box');
       const videoEl = containerEl?.querySelector('video');
@@ -373,12 +404,7 @@ export default function InvitationScannerModal({
                 : /front|user|أمامي/i.test(cam.label || '')
             ) || cameras[0];
 
-          await html5QrCode.start(
-            preferred.id,
-            scanConfig,
-            onScanSuccess,
-            () => {}
-          );
+          await html5QrCode.start(preferred.id, scanConfig, onScanSuccess, () => {});
         }
 
         if (!isMountedRef.current) {
@@ -446,7 +472,7 @@ export default function InvitationScannerModal({
       }
     } catch {
       if (!isMountedRef.current) return;
-      playFeedbackTone('error', soundEnabledRef.current);
+      playFeedbackTone('warning', soundEnabledRef.current);
       setScanResult({
         kind: 'unmatched',
         title: 'لم يتم التعرف على QR في الصورة',
