@@ -1,136 +1,132 @@
 import { useState } from 'react';
+import { KeyRound, Eye, EyeOff, CheckCircle2, AlertCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { ChevronDown, ChevronUp, KeyRound, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 export default function ChangePasswordBox({ user }) {
-  const [open, setOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPasswords, setShowPasswords] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState(null); // { type: 'success' | 'error', text: string }
+  const [statusMsg, setStatusMsg] = useState(null);
 
-  if (!user?.id) return null;
+  if (!user) return null;
 
-  const handleSavePassword = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setStatus(null);
+    setStatusMsg(null);
 
-    if (user.password && currentPassword !== user.password) {
-      setStatus({ type: 'error', text: 'كلمة المرور الحالية غير صحيحة.' });
-      return;
-    }
-
-    if (String(newPassword).trim().length < 4) {
-      setStatus({ type: 'error', text: 'كلمة المرور الجديدة يجب أن تكون 4 أحرف أو رموز على الأقل.' });
+    if (!newPassword || newPassword.length < 3) {
+      setStatusMsg({ type: 'error', text: 'كلمة المرور الجديدة يجب أن تكون 3 أحرف على الأقل.' });
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      setStatus({ type: 'error', text: 'تأكيد كلمة المرور غير متطابق مع كلمة المرور الجديدة.' });
+      setStatusMsg({ type: 'error', text: 'كلمة المرور الجديدة وتأكيدها غير متطابقين.' });
+      return;
+    }
+
+    if (user.password && currentPassword && currentPassword !== user.password) {
+      setStatusMsg({ type: 'error', text: 'كلمة المرور الحالية غير صحيحة.' });
       return;
     }
 
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from('church_users')
-        .update({ password: newPassword })
-        .eq('id', user.id);
+      if (supabase && typeof supabase.from === 'function') {
+        const { error } = await supabase
+          .from('church_users')
+          .update({ password: newPassword })
+          .eq('id', user.id);
 
-      if (error) {
-        setStatus({ type: 'error', text: `تعذر تحديث كلمة المرور: ${error.message}` });
-        return;
+        if (error) {
+          setStatusMsg({ type: 'error', text: error.message || 'تعذر تحديث كلمة المرور في قاعدة البيانات.' });
+          setSaving(false);
+          return;
+        }
       }
 
+      user.password = newPassword;
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      setStatus({ type: 'success', text: 'تم تحديث كلمة المرور بنجاح.' });
+      setStatusMsg({ type: 'success', text: 'تم تحديث كلمة المرور بنجاح.' });
+    } catch (err) {
+      setStatusMsg({ type: 'error', text: err?.message || 'حدث خطأ أثناء تغيير كلمة المرور.' });
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-3 text-xs" dir="rtl">
-      <button
-        type="button"
-        onClick={() => setOpen((prev) => !prev)}
-        className="w-full flex items-center justify-between font-black text-slate-800 cursor-pointer"
-      >
-        <span className="inline-flex items-center gap-1.5 text-[#7a1c24]">
-          <KeyRound size={15} />
-          تعديل كلمة المرور
-        </span>
-        {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-      </button>
-
-      {open && (
-        <form onSubmit={handleSavePassword} className="mt-3 pt-3 border-t space-y-2.5">
-          <div>
-            <label className="block mb-1 text-[11px] font-bold text-slate-700">
-              كلمة المرور الحالية
-            </label>
-            <input
-              type="password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              className="w-full p-2 border rounded-xl bg-[#fbfaf7] font-bold"
-              required={Boolean(user.password)}
-            />
-          </div>
-
-          <div>
-            <label className="block mb-1 text-[11px] font-bold text-slate-700">
-              كلمة المرور الجديدة
-            </label>
-            <input
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              className="w-full p-2 border rounded-xl bg-[#fbfaf7] font-bold"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block mb-1 text-[11px] font-bold text-slate-700">
-              تأكيد كلمة المرور الجديدة
-            </label>
-            <input
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              className="w-full p-2 border rounded-xl bg-[#fbfaf7] font-bold"
-              required
-            />
-          </div>
-
-          {status && (
-            <div
-              className={`p-2.5 rounded-xl border font-bold flex items-center gap-1.5 ${
-                status.type === 'success'
-                  ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                  : 'bg-red-50 border-red-300 text-red-800'
-              }`}
-            >
-              {status.type === 'success' ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
-              <span>{status.text}</span>
-            </div>
-          )}
-
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-4 py-2 rounded-xl bg-[#7a1c24] hover:bg-[#5c1319] text-white font-black cursor-pointer disabled:opacity-60"
-            >
-              {saving ? 'جاري الحفظ...' : 'حفظ كلمة المرور'}
-            </button>
-          </div>
-        </form>
+    <form onSubmit={handleSubmit} className="space-y-3 text-xs font-bold" dir="rtl">
+      {statusMsg && (
+        <div
+          className={`p-2.5 rounded-2xl border flex items-center gap-2 ${
+            statusMsg.type === 'success'
+              ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+              : 'bg-red-50 border-red-300 text-red-900'
+          }`}
+        >
+          {statusMsg.type === 'success' ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
+          <span>{statusMsg.text}</span>
+        </div>
       )}
-    </div>
+
+      <div>
+        <label className="block mb-1 text-gray-700">كلمة المرور الحالية</label>
+        <input
+          type={showPasswords ? 'text' : 'password'}
+          value={currentPassword}
+          onChange={(e) => setCurrentPassword(e.target.value)}
+          placeholder="أدخل كلمة المرور الحالية"
+          className="w-full p-2.5 border rounded-xl bg-[#fbfaf7] outline-none focus:border-[#7a1c24]"
+        />
+      </div>
+
+      <div>
+        <label className="block mb-1 text-gray-700">كلمة المرور الجديدة *</label>
+        <input
+          type={showPasswords ? 'text' : 'password'}
+          required
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+          placeholder="أدخل كلمة المرور الجديدة"
+          className="w-full p-2.5 border rounded-xl bg-[#fbfaf7] outline-none focus:border-[#7a1c24]"
+        />
+      </div>
+
+      <div>
+        <label className="block mb-1 text-gray-700">تأكيد كلمة المرور الجديدة *</label>
+        <input
+          type={showPasswords ? 'text' : 'password'}
+          required
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          placeholder="أعد إدخال كلمة المرور الجديدة"
+          className="w-full p-2.5 border rounded-xl bg-[#fbfaf7] outline-none focus:border-[#7a1c24]"
+        />
+      </div>
+
+      <div className="flex items-center justify-between pt-1">
+        <button
+          type="button"
+          onClick={() => setShowPasswords((prev) => !prev)}
+          className="text-gray-600 hover:text-gray-900 flex items-center gap-1 cursor-pointer"
+        >
+          {showPasswords ? <EyeOff size={14} /> : <Eye size={14} />}
+          <span>{showPasswords ? 'إخفاء كلمات المرور' : 'إظهار كلمات المرور'}</span>
+        </button>
+
+        <button
+          type="submit"
+          disabled={saving}
+          className="px-4 py-2 bg-[#7a1c24] hover:bg-[#5c1319] disabled:opacity-60 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
+        >
+          <KeyRound size={14} />
+          <span>{saving ? 'جاري الحفظ...' : 'حفظ كلمة المرور'}</span>
+        </button>
+      </div>
+    </form>
   );
 }
