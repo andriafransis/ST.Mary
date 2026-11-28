@@ -19,8 +19,12 @@ import {
   LogIn,
   LogOut,
   Ticket,
-  ImagePlus
+  ImagePlus,
+  QrCode
 } from 'lucide-react';
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const ROLE_AR_LABELS = {
   admin: 'سوبر أدمن',
@@ -35,6 +39,10 @@ const ROLE_AR_LABELS = {
   parent: 'ولي أمر',
   worker: 'عامل / فراش'
 };
+
+function isValidUuid(val) {
+  return UUID_REGEX.test(String(val || '').trim());
+}
 
 function formatDateTimeAr(isoStr) {
   if (!isoStr) return '—';
@@ -69,67 +77,103 @@ function playFeedbackTone(kind = 'success', enabled = true) {
     gain.connect(ctx.destination);
     osc.start();
     osc.stop(ctx.currentTime + 0.19);
-    setTimeout(() => ctx.close().catch(() => {}), 250);
+    setTimeout(() => {
+      ctx.close().catch(() => {});
+    }, 250);
   } catch {
     // تجاهل في حال منع الصوت من المتصفح
   }
 }
 
+/**
+ * قراءة وتحليل أي محتوى QR (JSON، رابط، أو نص/كود مباشر)
+ * ملاحظة: أي بيانات مضمنة داخل الـ QR تُعرض فقط كقراءة خام عند عدم وجود سجل في قاعدة البيانات،
+ * ولا يتم اختلاق أو إرجاع بيانات من قاعدة البيانات عند عدم العثور على سجل مطابق.
+ */
 export function parseQrContent(rawText = '') {
-  const trimmed = String(rawText || '').trim();
-  if (!trimmed) return { kind: 'empty', token: '', memberInfo: null, embedded: null };
+  const raw = String(rawText ?? '');
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return {
+      kind: 'empty',
+      rawText: raw,
+      token: '',
+      memberInfo: null,
+      embedded: null
+    };
+  }
 
   try {
     const parsed = JSON.parse(trimmed);
-    if (parsed && typeof parsed === 'object') {
-      if (parsed.type === 'church_member_attendance' || parsed.user_id || parsed.username) {
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const hasMemberHint =
+        parsed.type === 'church_member_attendance' ||
+        parsed.kind === 'member' ||
+        Boolean(parsed.user_id || parsed.username || parsed.member_id);
+
+      if (hasMemberHint) {
+        const userId = String(parsed.user_id || parsed.member_id || '').trim();
+        const username = String(parsed.username || '').trim();
         return {
           kind: 'member',
-          token: String(parsed.user_id || parsed.username || '').trim(),
+          rawText: trimmed,
+          token: userId || username || trimmed,
           memberInfo: {
-            user_id: parsed.user_id || '',
-            username: parsed.username || '',
-            full_name: parsed.full_name || '',
-            role: parsed.role || 'member',
-            role_label: parsed.role_label || ''
+            user_id: userId,
+            username,
+            full_name: String(parsed.full_name || '').trim(),
+            role: String(parsed.role || '').trim(),
+            role_label: String(parsed.role_label || '').trim()
           },
           embedded: null
         };
       }
 
-      const token = String(parsed.token || parsed.qr_token || parsed.code || parsed.id || '').trim();
+      const token = String(
+        parsed.token || parsed.qr_token || parsed.code || parsed.invitation_code || parsed.id || ''
+      ).trim();
+
       return {
         kind: 'invitation',
-        token,
+        rawText: trimmed,
+        token: token || trimmed,
         memberInfo: null,
         embedded: {
-          recipient_name: parsed.recipient_name || '',
-          recipient_role: parsed.role_or_title || parsed.recipient_role || '',
-          event_title: parsed.event_title || '',
-          invite_tier: parsed.tier === 'vip' ? 'vip' : 'general',
-          seat_or_zone: parsed.seat_or_zone || '',
-          attendance_mode: parsed.attendance_mode || 'check_in',
-          raw_status: parsed.status || ''
+          recipient_name: String(parsed.recipient_name || '').trim(),
+          recipient_role: String(parsed.role_or_title || parsed.recipient_role || '').trim(),
+          event_title: String(parsed.event_title || '').trim(),
+          invite_tier: parsed.tier === 'vip' || parsed.invite_tier === 'vip' ? 'vip' : 'general',
+          seat_or_zone: String(parsed.seat_or_zone || '').trim(),
+          attendance_mode: String(parsed.attendance_mode || '').trim(),
+          raw_status: String(parsed.status || '').trim()
         }
       };
     }
   } catch {
-    // نص مباشر أو رابط
+    // ليس JSON — نتعامل معه كرابط أو نص/كود مباشر
   }
 
-  const urlMatch = trimmed.match(/[?&](?:token|qr|code|user)=([^&#]+)/i);
+  const urlMatch = trimmed.match(/[?&](?:token|qr|code|user|user_id|username)=([^&#]+)/i);
   if (urlMatch?.[1]) {
-    const extracted = decodeURIComponent(urlMatch[1]).trim();
-    return {
-      kind: 'unknown',
-      token: extracted,
-      memberInfo: { user_id: extracted, username: extracted, full_name: '' },
-      embedded: null
-    };
+    try {
+      const extracted = decodeURIComponent(urlMatch[1]).trim();
+      if (extracted) {
+        return {
+          kind: 'generic',
+          rawText: trimmed,
+          token: extracted,
+          memberInfo: { user_id: extracted, username: extracted, full_name: '' },
+          embedded: null
+        };
+      }
+    } catch {
+      // fallback للنص الأصلي
+    }
   }
 
   return {
-    kind: 'unknown',
+    kind: 'generic',
+    rawText: trimmed,
     token: trimmed,
     memberInfo: { user_id: trimmed, username: trimmed, full_name: '' },
     embedded: null
@@ -142,14 +186,18 @@ export default function InvitationScannerModal({
   initialTab = 'invitations'
 }) {
   const scannerRef = useRef(null);
+  const isMountedRef = useRef(true);
   const isProcessingRef = useRef(false);
   const isStartingRef = useRef(false);
   const lastRawRef = useRef({ text: '', at: 0 });
   const soundEnabledRef = useRef(true);
   const activeTabRef = useRef(initialTab);
   const attendanceModeRef = useRef('auto');
+  const processAnyScanRef = useRef(null);
 
-  const [activeTab, setActiveTab] = useState(initialTab); // 'invitations' | 'attendance'
+  const [activeTab, setActiveTab] = useState(
+    initialTab === 'attendance' ? 'attendance' : 'invitations'
+  );
   const [attendanceMode, setAttendanceMode] = useState('auto'); // 'auto' | 'check_in' | 'check_out'
   const [manualCode, setManualCode] = useState('');
   const [cameraStatus, setCameraStatus] = useState('starting'); // 'starting' | 'active' | 'error'
@@ -188,7 +236,8 @@ export default function InvitationScannerModal({
 
   const applyContinuousFocusIfSupported = async (html5QrCode) => {
     try {
-      const state = html5QrCode.getState?.();
+      if (!isMountedRef.current) return;
+      const state = html5QrCode?.getState?.();
       if (state !== 2) return;
       const videoEl = document.querySelector('#church-qr-scanner-box video');
       const track = videoEl?.srcObject?.getVideoTracks?.()?.[0];
@@ -211,6 +260,7 @@ export default function InvitationScannerModal({
 
   const stopScannerSafe = useCallback(async () => {
     const inst = scannerRef.current;
+    scannerRef.current = null;
     if (!inst) return;
     try {
       if (inst.isScanning) {
@@ -227,14 +277,25 @@ export default function InvitationScannerModal({
   }, []);
 
   const startScanner = useCallback(
-    async (targetFacing = facingMode) => {
-      if (isStartingRef.current) return;
+    async (targetFacing) => {
+      if (!isMountedRef.current || isStartingRef.current) return;
       isStartingRef.current = true;
       setCameraStatus('starting');
       setCameraErrorMsg('');
 
       try {
         await stopScannerSafe();
+        if (!isMountedRef.current) return;
+
+        if (
+          typeof window === 'undefined' ||
+          !navigator?.mediaDevices ||
+          typeof navigator.mediaDevices.getUserMedia !== 'function'
+        ) {
+          throw new Error(
+            'المتصفح أو البيئة الحالية لا تدعم الوصول المباشر للكاميرا. يمكنك استخدام قراءة صورة أو الإدخال اليدوي.'
+          );
+        }
 
         const readerId = 'church-qr-scanner-box';
         const containerEl = document.getElementById(readerId);
@@ -259,28 +320,35 @@ export default function InvitationScannerModal({
             height: { ideal: 720 }
           },
           {
-            fps: 22,
+            fps: 20,
             qrbox: { width: boxSize, height: boxSize },
             disableFlip: false
           },
           (decodedText) => {
+            if (!isMountedRef.current) return;
             const cleaned = String(decodedText || '').trim();
             if (!cleaned) return;
             const now = Date.now();
-            if (lastRawRef.current.text === cleaned && now - lastRawRef.current.at < 1200) {
+            if (lastRawRef.current.text === cleaned && now - lastRawRef.current.at < 1400) {
               return;
             }
             lastRawRef.current = { text: cleaned, at: now };
-            processAnyScan(cleaned);
+            processAnyScanRef.current?.(cleaned);
           },
           () => {}
         );
+
+        if (!isMountedRef.current) {
+          await stopScannerSafe();
+          return;
+        }
 
         setCameraStatus('active');
         setTimeout(() => {
           applyContinuousFocusIfSupported(html5QrCode);
         }, 300);
       } catch (err) {
+        if (!isMountedRef.current) return;
         setCameraStatus('error');
         setCameraErrorMsg(
           err?.message ||
@@ -290,13 +358,14 @@ export default function InvitationScannerModal({
         isStartingRef.current = false;
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [facingMode, stopScannerSafe]
+    [stopScannerSafe]
   );
 
   useEffect(() => {
+    isMountedRef.current = true;
     startScanner(facingMode);
     return () => {
+      isMountedRef.current = false;
       stopScannerSafe();
     };
   }, [facingMode, startScanner, stopScannerSafe]);
@@ -304,73 +373,118 @@ export default function InvitationScannerModal({
   const handleScanImageFile = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file || !scannerRef.current) return;
+    if (!file || !isMountedRef.current) return;
+
+    let tempScanner = scannerRef.current;
+    let createdTemp = false;
 
     try {
-      const decodedText = await scannerRef.current.scanFile(file, true);
-      if (decodedText) {
-        await processAnyScan(decodedText);
+      if (!tempScanner) {
+        const readerId = 'church-qr-scanner-box';
+        if (document.getElementById(readerId)) {
+          tempScanner = new Html5Qrcode(readerId, { verbose: false });
+          createdTemp = true;
+        }
+      }
+      if (!tempScanner) return;
+
+      const decodedText = await tempScanner.scanFile(file, true);
+      if (decodedText && isMountedRef.current) {
+        await processAnyScanRef.current?.(decodedText);
       }
     } catch {
+      if (!isMountedRef.current) return;
       playFeedbackTone('error', soundEnabledRef.current);
       setScanResult({
-        kind: 'error',
-        title: 'تعذر قراءة كود QR من الصورة',
-        message: 'حاول التقاط صورة أوضح للـ QR بدون انعكاس إضاءة قوي على الشاشة.'
+        kind: 'unmatched',
+        title: 'لم يتم التعرف على QR في الصورة',
+        message: 'حاول اختيار صورة أوضح يكون فيها رمز الـ QR ظاهراً بدون انعكاس ضوء قوي.',
+        rawQrText: file.name,
+        scannedAt: new Date().toISOString()
       });
+    } finally {
+      if (createdTemp && tempScanner) {
+        try {
+          await tempScanner.clear();
+        } catch {
+          // تجاهل
+        }
+      }
     }
   };
 
-  const handleInvitationScan = async (token, embedded) => {
-    const { data: invite, error } = await supabase
-      .from('church_invitations')
-      .select('*')
-      .or(`qr_token.eq.${token},id.eq.${token}`)
-      .maybeSingle();
+  /**
+   * فحص الدعوة في قاعدة البيانات بدون إطلاق أخطاء 400 على قيم غير UUID
+   */
+  const handleInvitationScan = async (parsed) => {
+    const token = String(parsed.token || '').trim();
+    const nowIso = new Date().toISOString();
 
-    if (error || !invite) {
-      playFeedbackTone('error', soundEnabledRef.current);
+    if (!token) {
+      playFeedbackTone('warning', soundEnabledRef.current);
       setScanResult({
-        kind: 'error',
-        title: embedded?.recipient_name
-          ? `كود غير مسجل في قاعدة البيانات (${embedded.recipient_name})`
-          : 'دعوة غير موجودة أو كود غير صحيح',
-        message: `لم يتم العثور على دعوة بالكود (${token}) في سجل الدعوات.`,
-        embedded,
-        scannedAt: new Date().toISOString(),
-        scannedBy: scannerDisplayName,
-        scannedByRole: scannerRoleLabel
+        kind: 'unmatched',
+        title: 'رمز QR فارغ',
+        message: 'لم يتم العثور على كود داخل الـ QR.',
+        rawQrText: parsed.rawText || '',
+        scannedAt: nowIso
       });
       return;
     }
 
-    const mergedInvitePreview = {
-      ...invite,
-      recipient_name: invite.recipient_name || embedded?.recipient_name || 'مدعو',
-      recipient_role: invite.recipient_role || embedded?.recipient_role || '',
-      event_title: invite.event_title || embedded?.event_title || '',
-      invite_tier: invite.invite_tier || embedded?.invite_tier || 'general',
-      seat_or_zone: invite.seat_or_zone || embedded?.seat_or_zone || ''
-    };
+    let invite = null;
+    let queryError = null;
+
+    if (isValidUuid(token)) {
+      const res = await supabase
+        .from('church_invitations')
+        .select('*')
+        .or(`qr_token.eq.${token},id.eq.${token}`)
+        .maybeSingle();
+      invite = res.data;
+      queryError = res.error;
+    } else {
+      const res = await supabase
+        .from('church_invitations')
+        .select('*')
+        .eq('qr_token', token)
+        .maybeSingle();
+      invite = res.data;
+      queryError = res.error;
+    }
+
+    if (!isMountedRef.current) return;
+
+    // إذا لم يوجد سجل مطابق في قاعدة البيانات: نعرض محتوى الـ QR الخام فقط ولا نعيد أي بيانات من الداتابيز
+    if (queryError || !invite) {
+      playFeedbackTone('warning', soundEnabledRef.current);
+      setScanResult({
+        kind: 'unmatched',
+        title: 'تمت قراءة الـ QR — غير مسجل في قاعدة البيانات',
+        message:
+          'هذا الكود غير موجود ضمن الدعوات المسجلة لديك، لذا لم يتم عرض أو ربط أي بيانات من قاعدة البيانات.',
+        rawQrText: parsed.rawText || token,
+        scannedAt: nowIso
+      });
+      return;
+    }
 
     if (invite.status === 'checked_in') {
       playFeedbackTone('warning', soundEnabledRef.current);
       setScanResult({
         kind: 'warning',
         title: 'تم مسح هذه الدعوة مسبقاً',
-        message: `تم تسجيل دخول (${mergedInvitePreview.recipient_name}) مسبقاً${
+        message: `تم تسجيل دخول (${invite.recipient_name || 'مدعو'}) مسبقاً${
           invite.checked_in_at ? ` في (${formatDateTimeAr(invite.checked_in_at)})` : ''
         }${invite.checked_in_by ? ` بواسطة (${invite.checked_in_by})` : ''}.`,
-        invite: mergedInvitePreview,
-        embedded,
-        scannedAt: invite.checked_in_at || new Date().toISOString(),
+        invite,
+        scannedAt: invite.checked_in_at || nowIso,
         scannedBy: invite.checked_in_by || scannerDisplayName,
         scannedByRole: invite.checked_in_by_role || scannerRoleLabel
       });
       return;
     }
 
-    const nowIso = new Date().toISOString();
     const baseUpdatePayload = {
       status: 'checked_in',
       checked_in_at: nowIso,
@@ -379,7 +493,7 @@ export default function InvitationScannerModal({
 
     const extendedUpdatePayload = {
       ...baseUpdatePayload,
-      checked_in_by_id: currentUser?.id || null,
+      checked_in_by_id: isValidUuid(currentUser?.id) ? currentUser.id : null,
       checked_in_by_name: scannerDisplayName,
       checked_in_by_role: scannerRoleLabel
     };
@@ -392,7 +506,7 @@ export default function InvitationScannerModal({
       .update(extendedUpdatePayload)
       .eq('id', invite.id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (firstAttempt.error) {
       const secondAttempt = await supabase
@@ -400,12 +514,14 @@ export default function InvitationScannerModal({
         .update(baseUpdatePayload)
         .eq('id', invite.id)
         .select()
-        .single();
+        .maybeSingle();
       updatedRow = secondAttempt.data;
       updErr = secondAttempt.error;
     } else {
       updatedRow = firstAttempt.data;
     }
+
+    if (!isMountedRef.current) return;
 
     if (updErr) {
       playFeedbackTone('error', soundEnabledRef.current);
@@ -413,8 +529,8 @@ export default function InvitationScannerModal({
         kind: 'error',
         title: 'تعذر تحديث حالة الدخول في قاعدة البيانات',
         message: updErr.message,
-        invite: mergedInvitePreview,
-        embedded,
+        invite,
+        rawQrText: parsed.rawText || token,
         scannedAt: nowIso,
         scannedBy: scannerDisplayName,
         scannedByRole: scannerRoleLabel
@@ -423,7 +539,7 @@ export default function InvitationScannerModal({
     }
 
     const finalInvite = {
-      ...mergedInvitePreview,
+      ...invite,
       ...(updatedRow || {}),
       status: 'checked_in',
       checked_in_at: updatedRow?.checked_in_at || nowIso,
@@ -440,7 +556,6 @@ export default function InvitationScannerModal({
         ? `توجيه المدعو إلى: ${finalInvite.seat_or_zone}`
         : 'الدعوة صالحة وتم تسجيل وقت الحضور وبيانات من قام بالمسح.',
       invite: finalInvite,
-      embedded,
       scannedAt: finalInvite.checked_in_at,
       scannedBy: scannerDisplayName,
       scannedByRole: scannerRoleLabel
@@ -449,7 +564,7 @@ export default function InvitationScannerModal({
     setRecentLogs((prev) => [
       {
         id: `inv-${finalInvite.id}-${finalInvite.checked_in_at}`,
-        title: finalInvite.recipient_name,
+        title: finalInvite.recipient_name || 'مدعو',
         subtitle: `${finalInvite.invite_tier === 'vip' ? '👑 VIP' : 'عام'}${
           finalInvite.seat_or_zone ? ` • ${finalInvite.seat_or_zone}` : ''
         } • بواسطة: ${finalInvite.checked_in_by || actorLabel}`,
@@ -460,53 +575,86 @@ export default function InvitationScannerModal({
     ]);
   };
 
-  const handleMemberAttendanceScan = async (memberInfo, token) => {
-    const userId = String(memberInfo?.user_id || '').trim();
-    const username = String(memberInfo?.username || '').trim();
+  /**
+   * فحص وتسجيل حضور/انصراف الخادم أو المخدوم
+   * لو المستخدم غير موجود في church_users: نعرض نص الـ QR فقط ولا نعيد أي بيانات من الداتابيز
+   */
+  const handleMemberAttendanceScan = async (parsed) => {
+    const memberInfo = parsed.memberInfo || {};
+    const userId = String(memberInfo.user_id || '').trim();
+    const username = String(memberInfo.username || '').trim();
+    const token = String(parsed.token || '').trim();
     const lookupKey = userId || username || token;
+    const now = new Date();
+    const nowIso = now.toISOString();
 
     if (!lookupKey) {
-      playFeedbackTone('error', soundEnabledRef.current);
+      playFeedbackTone('warning', soundEnabledRef.current);
       setScanResult({
-        kind: 'error',
-        title: 'كود حضور غير واضح',
-        message: 'لم يتم العثور على بيانات الخادم أو المخدوم داخل الـ QR.'
+        kind: 'unmatched',
+        title: 'رمز QR فارغ',
+        message: 'لم يتم العثور على كود حضور داخل الـ QR.',
+        rawQrText: parsed.rawText || '',
+        scannedAt: nowIso
       });
       return;
     }
 
-    let memberQuery = supabase.from('church_users').select('*');
-    if (userId && username) {
-      memberQuery = memberQuery.or(`id.eq.${userId},username.eq.${username}`);
-    } else if (userId) {
-      memberQuery = memberQuery.or(`id.eq.${userId},username.eq.${userId}`);
-    } else {
-      memberQuery = memberQuery.eq('username', username);
+    let member = null;
+    let memberErr = null;
+
+    if (isValidUuid(userId)) {
+      const res = await supabase
+        .from('church_users')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+      member = res.data;
+      memberErr = res.error;
     }
 
-    const { data: member, error: memberErr } = await memberQuery.maybeSingle();
+    if (!member && username) {
+      const res = await supabase
+        .from('church_users')
+        .select('*')
+        .eq('username', username)
+        .maybeSingle();
+      member = res.data;
+      memberErr = res.error;
+    }
+
+    if (!member && !username && token && !isValidUuid(token)) {
+      const res = await supabase
+        .from('church_users')
+        .select('*')
+        .eq('username', token)
+        .maybeSingle();
+      member = res.data;
+      memberErr = res.error;
+    }
+
+    if (!isMountedRef.current) return;
 
     if (memberErr || !member) {
-      playFeedbackTone('error', soundEnabledRef.current);
+      playFeedbackTone('warning', soundEnabledRef.current);
       setScanResult({
-        kind: 'error',
-        title: 'حساب غير موجود في قاعدة البيانات',
-        message: `لم يتم العثور على خادم أو مخدوم مطابق للكود (${lookupKey}).`
+        kind: 'unmatched',
+        title: 'تمت قراءة الـ QR — غير موجود في قاعدة البيانات',
+        message:
+          'هذا الكود غير مطابق لأي حساب مسجل لديك، لذلك لم يتم عرض أو تسجيل أي بيانات من قاعدة البيانات.',
+        rawQrText: parsed.rawText || lookupKey,
+        scannedAt: nowIso
       });
       return;
     }
 
-    const memberName =
-      member.full_name || member.name || member.username || memberInfo?.full_name || 'عضو';
+    const memberName = member.full_name || member.name || member.username || 'عضو';
     const memberRoleLabel =
       member.permissions?.custom_role_label ||
       ROLE_AR_LABELS[member.role] ||
       member.role ||
-      memberInfo?.role_label ||
       'عضو';
 
-    const now = new Date();
-    const nowIso = now.toISOString();
     const todayStr = nowIso.slice(0, 10);
     const mode = attendanceModeRef.current;
 
@@ -519,6 +667,8 @@ export default function InvitationScannerModal({
       .order('checked_in_at', { ascending: false })
       .limit(1)
       .maybeSingle();
+
+    if (!isMountedRef.current) return;
 
     const doCheckOut = mode === 'check_out' || (mode === 'auto' && Boolean(openLog));
 
@@ -557,7 +707,9 @@ export default function InvitationScannerModal({
         })
         .eq('id', openLog.id)
         .select()
-        .single();
+        .maybeSingle();
+
+      if (!isMountedRef.current) return;
 
       if (outErr) {
         playFeedbackTone('error', soundEnabledRef.current);
@@ -580,7 +732,7 @@ export default function InvitationScannerModal({
 
       setRecentLogs((prev) => [
         {
-          id: `att-out-${updatedLog.id}-${nowIso}`,
+          id: `att-out-${updatedLog?.id || member.id}-${nowIso}`,
           title: `${memberName} (${memberRoleLabel})`,
           subtitle: `انصراف • بواسطة: ${actorLabel}`,
           badge: 'انصراف',
@@ -605,7 +757,9 @@ export default function InvitationScannerModal({
         }
       ])
       .select()
-      .single();
+      .maybeSingle();
+
+    if (!isMountedRef.current) return;
 
     if (inErr) {
       playFeedbackTone('error', soundEnabledRef.current);
@@ -628,7 +782,7 @@ export default function InvitationScannerModal({
 
     setRecentLogs((prev) => [
       {
-        id: `att-in-${createdLog.id}-${nowIso}`,
+        id: `att-in-${createdLog?.id || member.id}-${nowIso}`,
         title: `${memberName} (${memberRoleLabel})`,
         subtitle: `حضور • بواسطة: ${actorLabel}`,
         badge: 'حضور',
@@ -638,32 +792,45 @@ export default function InvitationScannerModal({
     ]);
   };
 
-  const processAnyScan = async (rawValue) => {
+  /**
+   * قراءة أي QR بغض النظر عن مصدره:
+   * - لو نوعه دعوة -> يفحص الدعوات (وإذا لم توجد يعرض النص الخام فقط بدون داتا)
+   * - لو نوعه حضور عضو -> يفحص الأعضاء (وإذا لم يوجد يعرض النص الخام فقط بدون داتا)
+   * - لو كود/نص/رابط عام -> يبحث حسب التبويب النشط، وإذا لم يجد يعرض النص الخام فقط بدون أي بيانات من قاعدة البيانات
+   */
+  const processAnyScan = useCallback(async (rawValue) => {
+    if (!isMountedRef.current || isProcessingRef.current) return;
+
     const parsed = parseQrContent(rawValue);
-    if (!parsed.token || isProcessingRef.current) return;
+    if (!parsed.token) return;
 
     isProcessingRef.current = true;
     try {
       if (parsed.kind === 'member') {
-        await handleMemberAttendanceScan(parsed.memberInfo, parsed.token);
+        await handleMemberAttendanceScan(parsed);
         return;
       }
       if (parsed.kind === 'invitation') {
-        await handleInvitationScan(parsed.token, parsed.embedded);
+        await handleInvitationScan(parsed);
         return;
       }
 
       if (activeTabRef.current === 'attendance') {
-        await handleMemberAttendanceScan(parsed.memberInfo, parsed.token);
+        await handleMemberAttendanceScan(parsed);
       } else {
-        await handleInvitationScan(parsed.token, parsed.embedded);
+        await handleInvitationScan(parsed);
       }
     } finally {
       setTimeout(() => {
         isProcessingRef.current = false;
       }, 900);
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actorLabel, currentUser?.id, scannerDisplayName, scannerRoleLabel]);
+
+  useEffect(() => {
+    processAnyScanRef.current = processAnyScan;
+  }, [processAnyScan]);
 
   const handleManualSubmit = async (e) => {
     e.preventDefault();
@@ -671,14 +838,23 @@ export default function InvitationScannerModal({
     setSubmittingManual(true);
     try {
       await processAnyScan(manualCode.trim());
-      setManualCode('');
+      if (isMountedRef.current) {
+        setManualCode('');
+      }
     } finally {
-      setSubmittingManual(false);
+      if (isMountedRef.current) {
+        setSubmittingManual(false);
+      }
     }
   };
 
   const handleSwitchCamera = () => {
     setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'));
+  };
+
+  const handleCloseModal = async () => {
+    await stopScannerSafe();
+    onClose?.();
   };
 
   return (
@@ -718,7 +894,7 @@ export default function InvitationScannerModal({
             </button>
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleCloseModal}
               className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl font-bold cursor-pointer"
             >
               إغلاق
@@ -873,8 +1049,8 @@ export default function InvitationScannerModal({
             <input
               placeholder={
                 activeTab === 'attendance'
-                  ? 'إدخال اسم المستخدم أو المعرف يدوياً...'
-                  : 'إدخال أو لصق كود الدعوة يدوياً (مثال: INV-...)'
+                  ? 'إدخال اسم المستخدم أو المعرف أو أي QR يدوياً...'
+                  : 'إدخال أو لصق كود الدعوة أو أي QR يدوياً...'
               }
               className="w-full pr-9 pl-3 py-2.5 border rounded-xl text-xs font-bold focus:outline-none focus:border-[#7a1c24]"
               value={manualCode}
@@ -895,61 +1071,72 @@ export default function InvitationScannerModal({
             className={`p-4 rounded-2xl border-2 space-y-2.5 ${
               scanResult.kind === 'success'
                 ? 'bg-emerald-50 border-emerald-300 text-emerald-950'
-                : scanResult.kind === 'warning'
+                : scanResult.kind === 'warning' || scanResult.kind === 'unmatched'
                   ? 'bg-amber-50 border-amber-300 text-amber-950'
                   : 'bg-red-50 border-red-300 text-red-950'
             }`}
           >
             <div className="flex items-center gap-2 font-black text-sm">
               {scanResult.kind === 'success' && (
-                <CheckCircle2 size={18} className="text-emerald-700" />
+                <CheckCircle2 size={18} className="text-emerald-700 shrink-0" />
               )}
-              {scanResult.kind === 'warning' && (
-                <AlertTriangle size={18} className="text-amber-700" />
+              {(scanResult.kind === 'warning' || scanResult.kind === 'unmatched') && (
+                <AlertTriangle size={18} className="text-amber-700 shrink-0" />
               )}
-              {scanResult.kind === 'error' && <XCircle size={18} className="text-red-700" />}
+              {scanResult.kind === 'error' && (
+                <XCircle size={18} className="text-red-700 shrink-0" />
+              )}
               <span>{scanResult.title}</span>
             </div>
 
             <p className="font-bold">{scanResult.message}</p>
 
-            {(scanResult.invite || scanResult.embedded?.recipient_name) && (
+            {/* عند عدم وجود الكود في قاعدة البيانات: نعرض النص الخام للـ QR فقط بدون أي بيانات من قاعدة البيانات */}
+            {scanResult.kind === 'unmatched' && scanResult.rawQrText && (
+              <div className="bg-white/95 rounded-xl p-3 border space-y-1.5">
+                <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-700">
+                  <QrCode size={14} className="text-[#7a1c24]" />
+                  <span>محتوى الـ QR المقروء:</span>
+                </div>
+                <div className="font-mono text-[11px] bg-slate-50 border rounded-lg p-2 break-all text-slate-900 select-all">
+                  {scanResult.rawQrText}
+                </div>
+              </div>
+            )}
+
+            {/* بيانات الدعوة تُعرض فقط عندما يكون هناك سجل حقيقي مطابق في قاعدة البيانات */}
+            {scanResult.invite && scanResult.kind !== 'unmatched' && (
               <div className="bg-white/95 rounded-xl p-3 border space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <strong className="text-gray-900 block text-sm">
-                      {scanResult.invite?.recipient_name || scanResult.embedded?.recipient_name}
+                      {scanResult.invite.recipient_name || 'مدعو'}
                     </strong>
                     <span className="text-gray-600 block">
-                      {scanResult.invite?.recipient_role || scanResult.embedded?.recipient_role
-                        ? `${scanResult.invite?.recipient_role || scanResult.embedded?.recipient_role} • `
+                      {scanResult.invite.recipient_role
+                        ? `${scanResult.invite.recipient_role} • `
                         : ''}
-                      {scanResult.invite?.event_title || scanResult.embedded?.event_title || ''}
+                      {scanResult.invite.event_title || ''}
                     </span>
-                    {(scanResult.invite?.seat_or_zone || scanResult.embedded?.seat_or_zone) && (
+                    {scanResult.invite.seat_or_zone && (
                       <span className="text-[11px] font-bold text-[#7a1c24] block mt-0.5">
-                        المكان / المقعد:{' '}
-                        {scanResult.invite?.seat_or_zone || scanResult.embedded?.seat_or_zone}
+                        المكان / المقعد: {scanResult.invite.seat_or_zone}
                       </span>
                     )}
                   </div>
                   <span
                     className={`px-3 py-1 rounded-xl font-black flex items-center gap-1 ${
-                      (scanResult.invite?.invite_tier || scanResult.embedded?.invite_tier) ===
-                      'vip'
+                      scanResult.invite.invite_tier === 'vip'
                         ? 'bg-amber-400 text-[#4a0e13]'
                         : 'bg-slate-200 text-slate-800'
                     }`}
                   >
-                    {(scanResult.invite?.invite_tier || scanResult.embedded?.invite_tier) ===
-                    'vip' ? (
+                    {scanResult.invite.invite_tier === 'vip' ? (
                       <Crown size={13} />
                     ) : (
                       <Users size={13} />
                     )}
-                    {(scanResult.invite?.invite_tier || scanResult.embedded?.invite_tier) === 'vip'
-                      ? 'VIP'
-                      : 'عام'}
+                    {scanResult.invite.invite_tier === 'vip' ? 'VIP' : 'عام'}
                   </span>
                 </div>
 
@@ -959,7 +1146,7 @@ export default function InvitationScannerModal({
                     <span>
                       الوقت:{' '}
                       <strong className="text-gray-900">
-                        {formatDateTimeAr(scanResult.invite?.checked_in_at || scanResult.scannedAt)}
+                        {formatDateTimeAr(scanResult.invite.checked_in_at || scanResult.scannedAt)}
                       </strong>
                     </span>
                   </div>
@@ -968,7 +1155,7 @@ export default function InvitationScannerModal({
                     <span>
                       تم المسح بواسطة:{' '}
                       <strong className="text-gray-900">
-                        {scanResult.invite?.checked_in_by || scanResult.scannedBy || actorLabel}
+                        {scanResult.invite.checked_in_by || scanResult.scannedBy || actorLabel}
                       </strong>
                     </span>
                   </div>
