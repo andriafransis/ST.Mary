@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import AdminLogsAndWaWidget from '../components/AdminLogsAndWaWidget';
+import AdminDbHealth from '../components/admin/AdminDbHealth';
 import AdminChurchSettingsAndBurial from '../components/AdminChurchSettingsAndBurial';
 import EducationalCenterManager from '../components/EducationalCenterManager';
 import JosephArimatheaManager from '../components/JosephArimatheaManager';
@@ -406,7 +407,8 @@ export default function AdminDashboard({
     { id: 'roles_permissions', icon: '🔐', title: 'الصلاحيات والأدوار', desc: 'إنشاء قوالب صلاحيات وتحديد مين يشوف ومين يعدل لكل شاشة ولكل فرد', count: `${roleTemplatesCount} قالب • موحّد`, color: 'border-emerald-300 bg-emerald-50/30' },
     { id: 'settings', icon: '⚙️', title: 'الإعدادات وهوية الكنيسة', desc: 'تغيير اسم الكنيسة، الشعار، رفع لوجو الكنيسة وصورة السيدة العذراء، وتليفون الطوارئ', count: 'تخصيص كامل', color: 'border-amber-300 bg-amber-50/40' },
     { id: 'nested_cards', icon: '🧩', title: 'إضافة وتعديل كروت', desc: 'كروت جوا كروت + صلاحية مكان الظهور (في شاشة كذا أم جوا كارت كذا) + صلاحية الأدوار', count: `${activeNestedRows.length} كارت مضاف`, color: 'border-rose-300 bg-rose-50/30' },
-    ...(isAdmin ? [{ id: 'logs', icon: '📊', title: 'سجل النشاط واللوجات والواتساب', desc: 'مين دخل ومين مدخلش، الأجهزة، مدة الجلسة، وصلاحيات الواتساب للكهنة', count: 'للأدمن فقط', color: 'border-indigo-300 bg-indigo-50/40' }] : [])
+    ...(isAdmin ? [{ id: 'logs', icon: '📊', title: 'سجل النشاط واللوجات والواتساب', desc: 'مين دخل ومين مدخلش، الأجهزة، مدة الجلسة، وصلاحيات الواتساب للكهنة', count: 'للأدمن فقط', color: 'border-indigo-300 bg-indigo-50/40' }] : []),
+    ...(isAdmin ? [{ id: 'db_health', icon: '🩺', title: 'فحص ربط الداتابيز', desc: 'يجرّب القراءة من كل جداول التطبيق ويوريك الشغال والناقص' }] : [])
   ], [users.length, roleTemplatesCount, activeNestedRows.length, isAdmin]);
 
   const rawAdminCards = useMemo(() => [
@@ -680,7 +682,7 @@ export default function AdminDashboard({
               ? [
                   { title: '👥 الأفراد والصلاحيات', accent: 'border-r-red-500', ids: ['users', 'roles_permissions'] },
                   { title: '⚙️ الهوية والكروت', accent: 'border-r-pink-500', ids: ['settings', 'nested_cards'] },
-                  { title: '📊 المتابعة', accent: 'border-r-indigo-500', ids: ['logs'] }
+                  { title: '📊 المتابعة', accent: 'border-r-indigo-500', ids: ['logs', 'db_health'] }
                 ]
               : [
                   { title: '🛠️ الإدارة والتقارير', accent: 'border-r-rose-500', ids: ['setup_hub', 'master_sheet'] },
@@ -917,6 +919,13 @@ export default function AdminDashboard({
               onAddCustomCard={onAddCustomCard}
               onDeleteCustomCard={onDeleteCustomCard}
             />
+          </div>
+        )}
+
+        {activeCard === 'db_health' && isAdmin && (
+          <div className="space-y-3">
+            {renderTopBack('🩺 فحص ربط الداتابيز')}
+            <AdminDbHealth />
           </div>
         )}
 
