@@ -85,11 +85,6 @@ function playFeedbackTone(kind = 'success', enabled = true) {
   }
 }
 
-/**
- * قراءة وتحليل أي محتوى QR (JSON، رابط، أو نص/كود مباشر)
- * ملاحظة: أي بيانات مضمنة داخل الـ QR تُعرض فقط كقراءة خام عند عدم وجود سجل في قاعدة البيانات،
- * ولا يتم اختلاق أو إرجاع بيانات من قاعدة البيانات عند عدم العثور على سجل مطابق.
- */
 export function parseQrContent(rawText = '') {
   const raw = String(rawText ?? '');
   const trimmed = raw.trim();
@@ -261,6 +256,28 @@ export default function InvitationScannerModal({
   const stopScannerSafe = useCallback(async () => {
     const inst = scannerRef.current;
     scannerRef.current = null;
+
+    // إيقاف أي MediaStream tracks عالقة على عنصر الفيديو فوراً
+    try {
+      const containerEl = document.getElementById('church-qr-scanner-box');
+      const videoEl = containerEl?.querySelector('video');
+      const stream = videoEl?.srcObject;
+      if (stream && typeof stream.getTracks === 'function') {
+        stream.getTracks().forEach((track) => {
+          try {
+            track.stop();
+          } catch {
+            // تجاهل
+          }
+        });
+      }
+      if (videoEl) {
+        videoEl.srcObject = null;
+      }
+    } catch {
+      // تجاهل
+    }
+
     if (!inst) return;
     try {
       if (inst.isScanning) {
@@ -277,8 +294,14 @@ export default function InvitationScannerModal({
   }, []);
 
   const startScanner = useCallback(
-    async (targetFacing) => {
-      if (!isMountedRef.current || isStartingRef.current) return;
+    async (targetFacing = 'environment') => {
+      if (!isMountedRef.current) return;
+
+      if (isStartingRef.current) {
+        await stopScannerSafe();
+        isStartingRef.current = false;
+      }
+
       isStartingRef.current = true;
       setCameraStatus('starting');
       setCameraErrorMsg('');
@@ -293,7 +316,7 @@ export default function InvitationScannerModal({
           typeof navigator.mediaDevices.getUserMedia !== 'function'
         ) {
           throw new Error(
-            'المتصفح أو البيئة الحالية لا تدعم الوصول المباشر للكاميرا. يمكنك استخدام قراءة صورة أو الإدخال اليدوي.'
+            'المتصفح لا يدعم الكاميرا هنا (تأكد من فتح الموقع على HTTPS أو localhost والسماح بالوصول للكاميرا).'
           );
         }
 
@@ -312,31 +335,51 @@ export default function InvitationScannerModal({
 
         const containerW = containerEl.clientWidth || 340;
         const boxSize = Math.min(310, Math.max(220, Math.floor(containerW * 0.82)));
+        const scanConfig = {
+          fps: 18,
+          qrbox: { width: boxSize, height: boxSize },
+          disableFlip: false
+        };
 
-        await html5QrCode.start(
-          {
-            facingMode: { ideal: targetFacing },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
-          {
-            fps: 20,
-            qrbox: { width: boxSize, height: boxSize },
-            disableFlip: false
-          },
-          (decodedText) => {
-            if (!isMountedRef.current) return;
-            const cleaned = String(decodedText || '').trim();
-            if (!cleaned) return;
-            const now = Date.now();
-            if (lastRawRef.current.text === cleaned && now - lastRawRef.current.at < 1400) {
-              return;
-            }
-            lastRawRef.current = { text: cleaned, at: now };
-            processAnyScanRef.current?.(cleaned);
-          },
-          () => {}
-        );
+        const onScanSuccess = (decodedText) => {
+          if (!isMountedRef.current) return;
+          const cleaned = String(decodedText || '').trim();
+          if (!cleaned) return;
+          const now = Date.now();
+          if (lastRawRef.current.text === cleaned && now - lastRawRef.current.at < 1400) {
+            return;
+          }
+          lastRawRef.current = { text: cleaned, at: now };
+          processAnyScanRef.current?.(cleaned);
+        };
+
+        try {
+          await html5QrCode.start(
+            { facingMode: targetFacing },
+            scanConfig,
+            onScanSuccess,
+            () => {}
+          );
+        } catch (firstErr) {
+          const cameras = await Html5Qrcode.getCameras().catch(() => []);
+          if (!Array.isArray(cameras) || cameras.length === 0) {
+            throw firstErr;
+          }
+
+          const preferred =
+            cameras.find((cam) =>
+              targetFacing === 'environment'
+                ? /back|rear|environment|خلفي/i.test(cam.label || '')
+                : /front|user|أمامي/i.test(cam.label || '')
+            ) || cameras[0];
+
+          await html5QrCode.start(
+            preferred.id,
+            scanConfig,
+            onScanSuccess,
+            () => {}
+          );
+        }
 
         if (!isMountedRef.current) {
           await stopScannerSafe();
@@ -349,10 +392,13 @@ export default function InvitationScannerModal({
         }, 300);
       } catch (err) {
         if (!isMountedRef.current) return;
+        const errName = err?.name ? `[${err.name}] ` : '';
         setCameraStatus('error');
         setCameraErrorMsg(
-          err?.message ||
-            'تعذر تشغيل الكاميرا أو لم يتم السماح بالوصول إليها. يمكنك استخدام قراءة صورة أو الإدخال اليدوي.'
+          `${errName}${
+            err?.message ||
+            'تعذر تشغيل الكاميرا. تأكد من صلاحية الكاميرا في المتصفح وعدم استخدامها في مكان آخر.'
+          }`
         );
       } finally {
         isStartingRef.current = false;
@@ -363,8 +409,14 @@ export default function InvitationScannerModal({
 
   useEffect(() => {
     isMountedRef.current = true;
-    startScanner(facingMode);
+    const timer = setTimeout(() => {
+      if (isMountedRef.current) {
+        startScanner(facingMode);
+      }
+    }, 80);
+
     return () => {
+      clearTimeout(timer);
       isMountedRef.current = false;
       stopScannerSafe();
     };
@@ -413,9 +465,6 @@ export default function InvitationScannerModal({
     }
   };
 
-  /**
-   * فحص الدعوة في قاعدة البيانات بدون إطلاق أخطاء 400 على قيم غير UUID
-   */
   const handleInvitationScan = async (parsed) => {
     const token = String(parsed.token || '').trim();
     const nowIso = new Date().toISOString();
@@ -455,7 +504,6 @@ export default function InvitationScannerModal({
 
     if (!isMountedRef.current) return;
 
-    // إذا لم يوجد سجل مطابق في قاعدة البيانات: نعرض محتوى الـ QR الخام فقط ولا نعيد أي بيانات من الداتابيز
     if (queryError || !invite) {
       playFeedbackTone('warning', soundEnabledRef.current);
       setScanResult({
@@ -575,10 +623,6 @@ export default function InvitationScannerModal({
     ]);
   };
 
-  /**
-   * فحص وتسجيل حضور/انصراف الخادم أو المخدوم
-   * لو المستخدم غير موجود في church_users: نعرض نص الـ QR فقط ولا نعيد أي بيانات من الداتابيز
-   */
   const handleMemberAttendanceScan = async (parsed) => {
     const memberInfo = parsed.memberInfo || {};
     const userId = String(memberInfo.user_id || '').trim();
@@ -792,41 +836,38 @@ export default function InvitationScannerModal({
     ]);
   };
 
-  /**
-   * قراءة أي QR بغض النظر عن مصدره:
-   * - لو نوعه دعوة -> يفحص الدعوات (وإذا لم توجد يعرض النص الخام فقط بدون داتا)
-   * - لو نوعه حضور عضو -> يفحص الأعضاء (وإذا لم يوجد يعرض النص الخام فقط بدون داتا)
-   * - لو كود/نص/رابط عام -> يبحث حسب التبويب النشط، وإذا لم يجد يعرض النص الخام فقط بدون أي بيانات من قاعدة البيانات
-   */
-  const processAnyScan = useCallback(async (rawValue) => {
-    if (!isMountedRef.current || isProcessingRef.current) return;
+  const processAnyScan = useCallback(
+    async (rawValue) => {
+      if (!isMountedRef.current || isProcessingRef.current) return;
 
-    const parsed = parseQrContent(rawValue);
-    if (!parsed.token) return;
+      const parsed = parseQrContent(rawValue);
+      if (!parsed.token) return;
 
-    isProcessingRef.current = true;
-    try {
-      if (parsed.kind === 'member') {
-        await handleMemberAttendanceScan(parsed);
-        return;
-      }
-      if (parsed.kind === 'invitation') {
-        await handleInvitationScan(parsed);
-        return;
-      }
+      isProcessingRef.current = true;
+      try {
+        if (parsed.kind === 'member') {
+          await handleMemberAttendanceScan(parsed);
+          return;
+        }
+        if (parsed.kind === 'invitation') {
+          await handleInvitationScan(parsed);
+          return;
+        }
 
-      if (activeTabRef.current === 'attendance') {
-        await handleMemberAttendanceScan(parsed);
-      } else {
-        await handleInvitationScan(parsed);
+        if (activeTabRef.current === 'attendance') {
+          await handleMemberAttendanceScan(parsed);
+        } else {
+          await handleInvitationScan(parsed);
+        }
+      } finally {
+        setTimeout(() => {
+          isProcessingRef.current = false;
+        }, 900);
       }
-    } finally {
-      setTimeout(() => {
-        isProcessingRef.current = false;
-      }, 900);
-    }
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [actorLabel, currentUser?.id, scannerDisplayName, scannerRoleLabel]);
+    [actorLabel, currentUser?.id, scannerDisplayName, scannerRoleLabel]
+  );
 
   useEffect(() => {
     processAnyScanRef.current = processAnyScan;
@@ -1091,7 +1132,6 @@ export default function InvitationScannerModal({
 
             <p className="font-bold">{scanResult.message}</p>
 
-            {/* عند عدم وجود الكود في قاعدة البيانات: نعرض النص الخام للـ QR فقط بدون أي بيانات من قاعدة البيانات */}
             {scanResult.kind === 'unmatched' && scanResult.rawQrText && (
               <div className="bg-white/95 rounded-xl p-3 border space-y-1.5">
                 <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-700">
@@ -1104,7 +1144,6 @@ export default function InvitationScannerModal({
               </div>
             )}
 
-            {/* بيانات الدعوة تُعرض فقط عندما يكون هناك سجل حقيقي مطابق في قاعدة البيانات */}
             {scanResult.invite && scanResult.kind !== 'unmatched' && (
               <div className="bg-white/95 rounded-xl p-3 border space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
