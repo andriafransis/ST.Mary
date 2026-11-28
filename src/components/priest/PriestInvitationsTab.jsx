@@ -15,7 +15,8 @@ import {
   Search,
   Pencil,
   Trash2,
-  X
+  X,
+  Armchair
 } from 'lucide-react';
 
 const normalizePhoneWa = (phone = '') => {
@@ -33,7 +34,16 @@ export default function PriestInvitationsTab({
   services = []
 }) {
   const isPriestOrAdmin = ['admin', 'priest'].includes(currentUser?.role);
-  const canScanQr = ['admin', 'priest', 'servant', 'head_servant', 'vice_head_servant', 'meeting_servant', 'mercy_servant', 'worker'].includes(currentUser?.role);
+  const canScanQr = [
+    'admin',
+    'priest',
+    'servant',
+    'head_servant',
+    'vice_head_servant',
+    'meeting_servant',
+    'mercy_servant',
+    'worker'
+  ].includes(currentUser?.role);
 
   const [invitations, setInvitations] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -98,7 +108,7 @@ export default function PriestInvitationsTab({
       `✝ ${inv.event_type || 'دعوة كنسية'}: *${inv.event_title}*`,
       inv.invite_tier === 'vip' ? '👑 دعوة VIP خاصة' : '👥 دعوة عامة',
       `أهلاً بك يا *${inv.recipient_name}*، يسعدنا حضورك.`,
-      inv.seat_or_zone ? `🪑 المكان: ${inv.seat_or_zone}` : '',
+      inv.seat_or_zone ? `🪑 المكان / الكرسي: ${inv.seat_or_zone}` : '',
       `🎫 كود الدعوة (QR): *${inv.qr_token}*`
     ]
       .filter(Boolean)
@@ -264,7 +274,7 @@ export default function PriestInvitationsTab({
           <div className="relative">
             <Search size={14} className="absolute right-3 top-2.5 text-gray-400" />
             <input
-              placeholder="بحث بالاسم أو المناسبة أو كود QR..."
+              placeholder="بحث بالاسم أو المناسبة أو كود QR أو الكرسي..."
               className="w-full pr-8 pl-3 py-2 border rounded-xl bg-[#fbfaf7] font-bold"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -304,7 +314,7 @@ export default function PriestInvitationsTab({
                   <th className="p-2.5">المدعو</th>
                   <th className="p-2.5">المناسبة</th>
                   <th className="p-2.5">الفئة</th>
-                  <th className="p-2.5">المكان</th>
+                  <th className="p-2.5">المكان / الكرسي</th>
                   <th className="p-2.5">كود QR</th>
                   <th className="p-2.5">الحالة</th>
                   <th className="p-2.5">إجراء</th>
@@ -330,7 +340,15 @@ export default function PriestInvitationsTab({
                           {isVip ? '👑 VIP' : 'عام'}
                         </span>
                       </td>
-                      <td className="p-2.5 text-gray-600">{inv.seat_or_zone || '—'}</td>
+                      <td className="p-2.5 text-[#7a1c24] font-bold">
+                        {inv.seat_or_zone ? (
+                          <span className="inline-flex items-center gap-1">
+                            <Armchair size={12} /> {inv.seat_or_zone}
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                       <td className="p-2.5 font-mono text-[11px] font-bold">{inv.qr_token}</td>
                       <td className="p-2.5">
                         {isChecked ? (
@@ -439,8 +457,9 @@ export default function PriestInvitationsTab({
               </div>
 
               <div>
-                <label className="block mb-1 text-gray-700">المكان / التسكين</label>
+                <label className="block mb-1 text-gray-700">المكان / الكرسي / التسكين</label>
                 <input
+                  placeholder="مثال: الصف الأول - كرسي 1"
                   className="w-full p-2.5 border rounded-xl bg-[#fbfaf7]"
                   value={editingInvite.seat_or_zone || ''}
                   onChange={(e) => setEditingInvite({ ...editingInvite, seat_or_zone: e.target.value })}
