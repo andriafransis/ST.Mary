@@ -9,7 +9,7 @@ import MasterCongregationSheet, { canExtractMasterSheet } from '../components/Ma
 import { DEFAULT_SERVICE_GROUPS, normalizeGroupStages } from '../components/ServiceGroupFeed';
 import NestedCardsBuilder, { loadAdminCardsConfig } from '../components/NestedCardsBuilder';
 import PermissionsPage from './PermissionsPage';
-import ChangePasswordBox from '../components/ChangePasswordBox';
+import PasswordChangeButton from '../components/PasswordChangeButton';
 
 import ChurchIdentitySettings from '../components/admin/ChurchIdentitySettings';
 import AdminEventsSection from '../components/admin/AdminEventsSection';
@@ -644,6 +644,7 @@ export default function AdminDashboard({
               </button>
               <h2 className="text-base font-black text-[#7a1c24]">🛠️ الإعدادات SETUP</h2>
             </div>
+            {effectiveUser && <PasswordChangeButton user={effectiveUser} />}
             {onRefresh && (
               <button type="button" onClick={handleFullRefresh} className="px-3 py-2 bg-white border hover:bg-gray-50 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer">
                 <RefreshCw size={13} /> تحديث
@@ -657,6 +658,7 @@ export default function AdminDashboard({
               <p className="text-xs text-white/85 mt-0.5">اختر الكارت المطلوب للإدارة والتحكم الكامل</p>
             </div>
             <div className="flex flex-wrap gap-2">
+              {effectiveUser && <PasswordChangeButton user={effectiveUser} variant="hero" />}
               {isAdmin && (
                 <button type="button" onClick={() => { setNestedRootId(null); setActiveCard('nested_cards'); }} className="px-3.5 py-2 bg-white/15 hover:bg-white/25 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer">
                   🧩 إدارة وتعديل الكروت
@@ -669,10 +671,6 @@ export default function AdminDashboard({
               )}
             </div>
           </div>
-        )}
-
-        {!isSetup && effectiveUser && (
-          <ChangePasswordBox user={effectiveUser} />
         )}
 
         <div className={isSetup ? 'max-h-[calc(100vh-230px)] overflow-y-auto pr-1' : 'max-h-[calc(100vh-250px)] overflow-y-auto pr-1'}>

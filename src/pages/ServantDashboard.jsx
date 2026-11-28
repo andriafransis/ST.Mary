@@ -16,7 +16,7 @@ import MonthlyAnalyticsAndRewards from '../components/MonthlyAnalyticsAndRewards
 import PriestInvitationModal from '../components/priest/PriestInvitationModal';
 import InvitationScannerModal from '../components/priest/InvitationScannerModal';
 import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
-import ChangePasswordBox from '../components/ChangePasswordBox';
+import PasswordChangeButton from '../components/PasswordChangeButton';
 
 const STAGE_OPTIONS = [
   'حضانة',
@@ -210,7 +210,6 @@ export default function ServantDashboard({
   const canExtractSheet = canExtractMasterSheet(servant);
   const canSendInvites = useMemo(() => canSendChurchInvitations(servant), [servant]);
   const [showMasterSheet, setShowMasterSheet] = useState(false);
-  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
 
   const [localMemberPhotos, setLocalMemberPhotos] = useState({});
   const [uploadingPhotoMemberId, setUploadingPhotoMemberId] = useState(null);
@@ -1528,15 +1527,7 @@ export default function ServantDashboard({
             ← رجوع لشاشة الخدمة
           </button>
           <div className="flex items-center gap-2">
-            {servant && (
-              <button
-                type="button"
-                onClick={() => setPasswordModalOpen(true)}
-                className="px-3.5 py-2 bg-red-50 hover:bg-red-100 text-[#7a1c24] rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer"
-              >
-                <KeyRound size={14} /> تغيير الباسورد
-              </button>
-            )}
+            {servant && <PasswordChangeButton user={servant} />}
             <span className="text-xs font-black text-[#7a1c24]">📋 شيت التسلسل والافتقاد</span>
           </div>
         </div>
@@ -1545,25 +1536,6 @@ export default function ServantDashboard({
           currentUser={servant}
           onRefresh={onRefresh}
         />
-        {servant && passwordModalOpen && (
-          <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-55">
-            <div className="bg-white rounded-3xl w-full max-w-md p-4 sm:p-5 space-y-3 text-xs font-bold shadow-xl" dir="rtl">
-              <div className="flex justify-between items-center border-b pb-2.5">
-                <h3 className="font-extrabold text-sm text-[#7a1c24] flex items-center gap-1.5">
-                  <KeyRound size={16} /> تعديل كلمة المرور — {servant.full_name}
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setPasswordModalOpen(false)}
-                  className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded-xl cursor-pointer"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-              <ChangePasswordBox user={servant} />
-            </div>
-          </div>
-        )}
       </div>
     );
   }
@@ -1655,15 +1627,7 @@ export default function ServantDashboard({
             todayISO={new Date().toLocaleDateString('en-CA')}
             onNavigateCard={(cardId) => setActiveTab(cardId)}
           />
-          {servant && (
-            <button
-              type="button"
-              onClick={() => setPasswordModalOpen(true)}
-              className="px-3.5 py-2 bg-white/15 hover:bg-white/25 text-amber-100 rounded-xl font-black flex items-center gap-1.5 cursor-pointer shadow transition"
-            >
-              <KeyRound size={15} /> تغيير الباسورد
-            </button>
-          )}
+          {servant && <PasswordChangeButton user={servant} variant="hero" />}
           {canScanInvitations && (
             <button
               type="button"
@@ -2578,26 +2542,6 @@ export default function ServantDashboard({
           </>
         )}
       </div>
-
-      {servant && passwordModalOpen && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-55">
-          <div className="bg-white rounded-3xl w-full max-w-md p-4 sm:p-5 space-y-3 text-xs font-bold shadow-xl" dir="rtl">
-            <div className="flex justify-between items-center border-b pb-2.5">
-              <h3 className="font-extrabold text-sm text-[#7a1c24] flex items-center gap-1.5">
-                <KeyRound size={16} /> تعديل كلمة المرور — {servant.full_name}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setPasswordModalOpen(false)}
-                className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded-xl cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <ChangePasswordBox user={servant} />
-          </div>
-        </div>
-      )}
 
       {canScanInvitations && scannerOpen && (
         <InvitationScannerModal

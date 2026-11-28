@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { KeyRound, Eye, EyeOff, CheckCircle2, AlertCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
-export default function ChangePasswordBox({ user }) {
+export default function ChangePasswordBox({ user, onSuccess }) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -26,9 +26,15 @@ export default function ChangePasswordBox({ user }) {
       return;
     }
 
-    if (user.password && currentPassword && currentPassword !== user.password) {
-      setStatusMsg({ type: 'error', text: 'كلمة المرور الحالية غير صحيحة.' });
-      return;
+    if (user.password) {
+      if (!currentPassword) {
+        setStatusMsg({ type: 'error', text: 'اكتب كلمة المرور الحالية أولاً.' });
+        return;
+      }
+      if (currentPassword !== user.password) {
+        setStatusMsg({ type: 'error', text: 'كلمة المرور الحالية غير صحيحة.' });
+        return;
+      }
     }
 
     setSaving(true);
@@ -51,6 +57,7 @@ export default function ChangePasswordBox({ user }) {
       setNewPassword('');
       setConfirmPassword('');
       setStatusMsg({ type: 'success', text: 'تم تحديث كلمة المرور بنجاح.' });
+      if (onSuccess) onSuccess();
     } catch (err) {
       setStatusMsg({ type: 'error', text: err?.message || 'حدث خطأ أثناء تغيير كلمة المرور.' });
     } finally {
@@ -77,6 +84,8 @@ export default function ChangePasswordBox({ user }) {
         <label className="block mb-1 text-gray-700">كلمة المرور الحالية</label>
         <input
           type={showPasswords ? 'text' : 'password'}
+          required={Boolean(user.password)}
+          autoComplete="current-password"
           value={currentPassword}
           onChange={(e) => setCurrentPassword(e.target.value)}
           placeholder="أدخل كلمة المرور الحالية"

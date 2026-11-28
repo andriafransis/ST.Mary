@@ -5,7 +5,7 @@ import { logActivity } from '../lib/activityLogger';
 import PriestInvitationModal from '../components/priest/PriestInvitationModal';
 import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
 import BellNotificationsPanel from '../components/priest/BellNotificationsPanel';
-import ChangePasswordBox from '../components/ChangePasswordBox';
+import PasswordChangeButton from '../components/PasswordChangeButton';
 import {
   Phone,
   AlertCircle,
@@ -929,6 +929,7 @@ export default function MemberDashboard({
               onNavigateCard={(cardId) => setActiveTab(cardId)}
             />
           </div>
+          <PasswordChangeButton user={member} variant="hero" />
           <div className="bg-white/15 border border-white/15 px-3.5 py-2 rounded-2xl text-center">
             <span className="text-[10px] opacity-85 font-bold block">حجوزات الاعتراف</span>
             <strong className="text-sm sm:text-base text-white font-black">
@@ -957,8 +958,6 @@ export default function MemberDashboard({
           </button>
         </div>
       </div>
-
-      {member && <ChangePasswordBox user={member} />}
 
       {!member?.confession_father_id && (
         <form

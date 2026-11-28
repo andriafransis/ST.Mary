@@ -15,7 +15,7 @@ import CertificatesRegistry from '../components/CertificatesRegistry';
 import EducationalCenterManager from '../components/EducationalCenterManager';
 import JosephArimatheaManager from '../components/JosephArimatheaManager';
 import MasterCongregationSheet from '../components/MasterCongregationSheet';
-import ChangePasswordBox from '../components/ChangePasswordBox';
+import PasswordChangeButton from '../components/PasswordChangeButton';
 import {
   BusVisualizerSection,
   PrintBusModal,
@@ -874,6 +874,8 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
         senderName={priest?.full_name}
         canSend
       />
+
+      {priest && <PasswordChangeButton user={priest} />}
 
       {totalJosephAlerts > 0 && (
         <button
@@ -1816,8 +1818,6 @@ export default function PriestDashboard({ priest, users = [], onRefresh }) {
             </button>
           </div>
         </div>
-
-        {priest && <ChangePasswordBox user={priest} />}
 
         <div ref={scrollBoxRef} className="max-h-[calc(100vh-250px)] overflow-y-auto pr-1 space-y-4">
           <div className="bg-linear-to-r from-amber-50 to-orange-50 border-2 border-amber-300 rounded-3xl p-4 shadow-sm space-y-3">

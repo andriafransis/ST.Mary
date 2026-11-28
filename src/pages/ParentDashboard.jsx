@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import ReceivedInvitationsSection from '../components/ReceivedInvitationsSection';
 import BellNotificationsPanel from '../components/priest/BellNotificationsPanel';
-import ChangePasswordBox from '../components/ChangePasswordBox';
+import PasswordChangeButton from '../components/PasswordChangeButton';
 import {
   CalendarCheck,
   MessageSquareHeart,
@@ -758,6 +758,7 @@ export default function ParentDashboard({
               onNavigateCard={(cardId) => setActiveTab(cardId)}
             />
           </div>
+          <PasswordChangeButton user={parent} variant="hero" />
           <div className="bg-white/15 border border-white/15 px-3.5 py-2 rounded-2xl text-center">
             <span className="text-[10px] opacity-85 font-bold block">الأبناء المربوطون</span>
             <strong className="text-sm sm:text-base text-amber-200 font-black">
@@ -788,8 +789,6 @@ export default function ParentDashboard({
           )}
         </div>
       </div>
-
-      {parent && <ChangePasswordBox user={parent} />}
 
       {linkRequests.length > 0 && activeTab !== 'linking' && (
         <div className="bg-emerald-50 border-2 border-emerald-300 px-4 py-2.5 rounded-2xl flex flex-wrap justify-between items-center gap-2">
