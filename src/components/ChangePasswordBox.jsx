@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../lib/supabase';
 import { ChevronDown, ChevronUp, KeyRound, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 export default function ChangePasswordBox({ user }) {
