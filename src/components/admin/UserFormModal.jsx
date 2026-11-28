@@ -733,10 +733,38 @@ export default function UserFormModal({
 
   const isUsernameTaken = usernameCheck.status === 'taken';
 
+  const [showPass, setShowPass] = useState(false);
+  const reqFields = [formData.first_name, formData.second_name, formData.third_name, formData.fourth_name, formData.username, formData.password, formData.phone];
+  const reqDone = reqFields.filter(v => String(v || '').trim().length > 0).length;
+  const reqPct = Math.round((reqDone / reqFields.length) * 100);
+  const vis = isVisitorMode && !isEditing;
+
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50" dir="rtl">
-      <div className="bg-white rounded-3xl w-full max-w-xl p-6 space-y-3 text-xs font-bold max-h-[92dvh] overflow-y-auto text-gray-900">
-        <div className="flex items-center justify-between border-b pb-2.5">
+    <div className={`fixed inset-0 bg-black/55 backdrop-blur-sm flex justify-center z-50 ${vis ? 'items-end sm:items-center p-0 sm:p-4' : 'items-center p-4'}`} dir="rtl">
+      <div className={`bg-white w-full max-w-xl text-xs font-bold overflow-y-auto text-gray-900 ${vis ? 'reg-sheet rounded-t-3xl sm:rounded-3xl max-h-[96dvh] sm:max-h-[92dvh] p-0' : 'rounded-3xl p-6 space-y-3 max-h-[92dvh]'}`}>
+        {vis && (
+          <div className="reg-head app-hero bg-linear-to-l from-[#5c1319] via-[#7a1c24] to-[#91212b] text-white px-5 pt-5 pb-4 sticky top-0 z-10">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-black text-amber-200">📝 تسجيل حساب جديد</h3>
+                <p className="text-[11px] text-white/85 mt-1 font-bold">املأ بياناتك وهيتم مراجعتها من الخدمة. الحقول اللي عليها <span className="text-amber-300">*</span> إجبارية.</p>
+              </div>
+              {typeof onClose === 'function' && (
+                <button type="button" onClick={onClose} aria-label="إغلاق" className="w-9 h-9 shrink-0 rounded-full bg-white/15 hover:bg-white/25 text-white text-lg leading-none cursor-pointer">✕</button>
+              )}
+            </div>
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-[10px] font-black text-amber-100 mb-1">
+                <span>اكتمال البيانات الأساسية</span><span>{reqDone} من {reqFields.length}</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-white/20 overflow-hidden">
+                <div className="h-full rounded-full bg-linear-to-l from-amber-300 to-amber-500 transition-all duration-300" style={{ width: reqPct + '%' }} />
+              </div>
+            </div>
+          </div>
+        )}
+        <div className={vis ? "px-5 pt-4 pb-5 space-y-3" : "contents space-y-3"}>
+        {!vis && (<div className="flex items-center justify-between border-b pb-2.5">
           <h3 className="font-extrabold text-sm text-[#7a1c24]">
             {isEditing
               ? 'مراجعة / تعديل بيانات الفرد بالاسم الرباعي'
@@ -751,7 +779,7 @@ export default function UserFormModal({
               إغلاق
             </button>
           )}
-        </div>
+        </div>)}
 
         {(nameError || (isVisitorMode && visitorStatus.msg)) && (
           <div
@@ -765,7 +793,7 @@ export default function UserFormModal({
           </div>
         )}
 
-        <form onSubmit={isVisitorMode ? handleVisitorSubmit : handleAdminFormSubmit} className="space-y-3">
+        <form onSubmit={isVisitorMode ? handleVisitorSubmit : handleAdminFormSubmit} className={`space-y-3 ${vis ? 'reg-form' : ''}`}>
           {/* الاسم الرباعي الإلزامي بالعربي فقط وبدون مسافات في أي اسم */}
           <div>
             <label className="block mb-1 text-[#7a1c24]">
@@ -855,13 +883,22 @@ export default function UserFormModal({
             </div>
             <div>
               <label className="block mb-1">كلمة المرور *</label>
-              <input
-                required
-                type="text"
-                className="w-full p-2.5 border rounded-xl bg-white"
-                value={formData.password || ''}
-                onChange={e => setFormData({ ...formData, password: e.target.value })}
-              />
+              <div className="relative">
+                <input
+                  required
+                  type={vis && !showPass ? 'password' : 'text'}
+                  autoComplete={vis ? 'new-password' : undefined}
+                  className={`w-full p-2.5 border rounded-xl bg-white ${vis ? 'pl-11' : ''}`}
+                  value={formData.password || ''}
+                  onChange={e => setFormData({ ...formData, password: e.target.value })}
+                />
+                {vis && (
+                  <button type="button" onClick={() => setShowPass(v => !v)} aria-label="إظهار/إخفاء كلمة المرور" className="absolute left-2 top-1/2 -translate-y-1/2 px-2 py-1 rounded-lg text-[10px] font-black bg-gray-100 text-gray-700 cursor-pointer">
+                    {showPass ? 'إخفاء' : 'إظهار'}
+                  </button>
+                )}
+              </div>
+              {vis && <p className="mt-1 text-[10px] text-gray-500 font-bold">اختر كلمة مرور تتذكرها — هتدخل بيها بعد الموافقة.</p>}
             </div>
           </div>
 
@@ -1479,14 +1516,14 @@ export default function UserFormModal({
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className={`flex justify-end gap-2 pt-2 ${vis ? 'reg-foot sticky bottom-0 -mx-5 px-5 py-3 bg-white/95 backdrop-blur border-t' : ''}`}>
             <button type="button" onClick={onClose} className="px-4 py-2 border rounded-xl cursor-pointer">
               إلغاء
             </button>
             <button
               type="submit"
               disabled={submittingVisitor || usernameCheck.status === 'checking'}
-              className="px-5 py-2 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl shadow cursor-pointer disabled:opacity-60"
+              className={`px-5 py-2 bg-[#7a1c24] hover:bg-[#5c1319] text-white rounded-xl shadow cursor-pointer disabled:opacity-60 ${vis ? 'flex-1 sm:flex-none py-3 font-black text-sm' : ''}`}
             >
               {submittingVisitor
                 ? 'جاري الإرسال...'
@@ -1498,6 +1535,7 @@ export default function UserFormModal({
             </button>
           </div>
         </form>
+        </div>
       </div>
     </div>
   );
